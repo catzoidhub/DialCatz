@@ -1,0 +1,180 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      Runs request scripts (pre-request, tests). Loaded in an <iframe sandbox="allow-scripts">: an opaque origin with
+      no access to the app, its storage or window.dialcatz, and no network (connect-src 'none'). A script only gets
+      the request / response it is given and returns test results, variable changes and log lines.
+      Each script runs in its own Worker, terminated after TIMEOUT: an endless loop cannot hang this page.
+      Scripts run as async functions (top-level await works) and async tests are awaited before the results go back.
+      A runner iteration's data row is in dc.data / pm.iterationData.
+    -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; worker-src blob:" />
+  </head>
+  <body>
+    <!-- The worker's code (runs one script; plain text here, started from a blob). -->
+    <script id="worker" type="text/plain">
+      'use strict';
+      const deepEqual = (a, b) => {
+        if (Object.is(a, b)) return true;
+        if (typeof a !== 'object' || typeof b !== 'object' || !a || !b) return false;
+        if (Array.isArray(a) !== Array.isArray(b)) return false;
+        const ka = Object.keys(a);
+        const kb = Object.keys(b);
+        return ka.length === kb.length && ka.every((k) => deepEqual(a[k], b[k]));
+      };
+      const show = (v) => {
+        try {
+          return typeof v === 'string' ? JSON.stringify(v) : JSON.stringify(v) ?? String(v);
+        } catch {
+          return String(v);
+        }
+      };
+      const getPath = (obj, path) => String(path).split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
+      const hasPath = (obj, path) => {
+        const keys = String(path).split('.');
+        let o = obj;
+        for (const k of keys) {
+          if (o == null || !Object.prototype.hasOwnProperty.call(Object(o), k)) return false;
+          o = o[k];
+        }
+        return true;
+      };
+
+      /** expect(value).toBe(…) — Jest-like, with .not, and a Postman/chai-like `.to` for pm scripts. */
+      function expect(actual) {
+        const make = (negate) => {
+          const check = (ok, msg) => {
+            if (negate ? ok : !ok) throw new Error((negate ? 'Expected not: ' : 'Expected: ') + msg);
+          };
+          const m = {
+            toBe: (x) => check(Object.is(actual, x), `${show(actual)} to be ${show(x)}`),
+            toEqual: (x) => check(deepEqual(actual, x), `${show(actual)} to equal ${show(x)}`),
+            toBeTruthy: () => check(!!actual, `${show(actual)} to be truthy`),
+            toBeFalsy: () => check(!actual, `${show(actual)} to be falsy`),
+            toBeDefined: () => check(actual !== undefined, `${show(actual)} to be defined`),
+            toBeNull: () => check(actual === null, `${show(actual)} to be null`),
+            toContain: (x) => check(actual != null && actual.includes && actual.includes(x), `${show(actual)} to contain ${show(x)}`),
+            toMatch: (re) => check(new RegExp(re).test(String(actual)), `${show(actual)} to match ${re}`),
+            toBeGreaterThan: (x) => check(actual > x, `${show(actual)} > ${show(x)}`),
+            toBeLessThan: (x) => check(actual < x, `${show(actual)} < ${show(x)}`),
+            toHaveProperty: (p, ...value) => check(hasPath(actual, p) && (!value.length || deepEqual(getPath(actual, p), value[0])), `${show(actual)} to have property ${p}${value.length ? ` = ${show(value[0])}` : ''}`),
+            toHaveLength: (n) => check(actual != null && actual.length === n, `${show(actual)} to have length ${n}`),
+          };
+          return m;
+        };
+        const api = make(false);
+        api.not = make(true);
+        // chai-ish, for scripts written for Postman: pm.expect(x).to.equal(y) …
+        const to = (neg) => {
+          const m = make(neg);
+          const t = {
+            equal: m.toBe, eql: m.toEqual, include: m.toContain, match: m.toMatch, above: m.toBeGreaterThan, below: m.toBeLessThan,
+            property: m.toHaveProperty, lengthOf: m.toHaveLength,
+            get ok() { m.toBeTruthy(); return t; },
+            get true() { m.toBe(true); return t; },
+            get false() { m.toBe(false); return t; },
+            get null() { m.toBeNull(); return t; },
+          };
+          t.be = t;
+          t.have = t;
+          return t;
+        };
+        Object.defineProperty(api, 'to', { get: () => Object.assign(to(false), { not: to(true) }) });
+        return api;
+      }
+
+      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+      self.onmessage = async (ev) => {
+        const { id, code, ctx } = ev.data || {};
+        const tests = [];
+        const pending = [];
+        const data = { ...(ctx.data || {}) };
+        const logs = [];
+        const vars = { ...(ctx.vars || {}) };
+        const changes = {};
+        const res = ctx.response;
+        const dc = {
+          request: ctx.request,
+          response: res && {
+            ...res,
+            json() {
+              return JSON.parse(res.body);
+            },
+            text: () => res.body,
+            header: (name) => res.headers[String(name).toLowerCase()],
+          },
+          env: {
+            get: (k) => vars[k],
+            set: (k, v) => ((vars[k] = String(v)), (changes[k] = String(v))),
+            unset: (k) => (delete vars[k], (changes[k] = null)),
+          },
+          test(name, fn) {
+            // A test that returns a promise (async fn) is awaited before the results go back; results keep their order.
+            const slot = { name: String(name), pass: true };
+            tests.push(slot);
+            const fail = (e) => Object.assign(slot, { pass: false, error: String(e && e.message ? e.message : e) });
+            try {
+              const r = fn();
+              if (r && typeof r.then === 'function') pending.push(Promise.resolve(r).then(() => {}, fail));
+            } catch (e) {
+              fail(e);
+            }
+          },
+          data,
+          expect,
+          log: (...a) => logs.push(a.map((x) => (typeof x === 'string' ? x : show(x))).join(' ')),
+        };
+        // A small Postman-compatible surface, so common pm scripts run unchanged.
+        const pm = {
+          test: dc.test,
+          expect,
+          environment: dc.env,
+          globals: dc.env,
+          variables: dc.env,
+          request: ctx.request,
+          iterationData: { get: (k) => data[k], has: (k) => Object.prototype.hasOwnProperty.call(data, k), toObject: () => ({ ...data }) },
+          response: res && {
+            code: res.status,
+            status: res.statusText,
+            responseTime: res.time,
+            json: dc.response.json,
+            text: dc.response.text,
+            headers: { get: dc.response.header },
+            to: { have: { status: (c) => expect(res.status).toBe(c) } },
+          },
+        };
+        const console = { log: dc.log, info: dc.log, warn: dc.log, error: dc.log };
+        let error = null;
+        try {
+          await new AsyncFunction('dc', 'pm', 'console', '"use strict";\n' + code)(dc, pm, console);
+        } catch (e) {
+          error = String(e && e.message ? e.message : e);
+        }
+        await Promise.all(pending);
+        self.postMessage({ id, tests, logs, changes, error });
+      };
+    </script>
+    <script>
+      'use strict';
+      const TIMEOUT = 10000;
+      const workerUrl = URL.createObjectURL(new Blob([document.getElementById('worker').textContent], { type: 'text/javascript' }));
+      window.addEventListener('message', (ev) => {
+        const { id } = ev.data || {};
+        if (!id) return;
+        const w = new Worker(workerUrl);
+        const finish = (msg) => {
+          clearTimeout(timer);
+          w.terminate();
+          parent.postMessage(msg, '*');
+        };
+        const timer = setTimeout(() => finish({ id, tests: [], logs: [], changes: {}, error: `The script ran longer than ${TIMEOUT / 1000} s and was stopped` }), TIMEOUT);
+        w.onmessage = (m) => finish(m.data);
+        w.onerror = (e) => finish({ id, tests: [], logs: [], changes: {}, error: e.message || 'The script failed' });
+        w.postMessage(ev.data);
+      });
+      parent.postMessage({ ready: true }, '*');
+    </script>
+  </body>
+</html>

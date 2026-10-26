@@ -1,0 +1,47 @@
+appId: com.mrcatz.dialcatz
+productName: DialCatz
+copyright: Copyright © 2026 Mahryan Rakhmatullah
+directories:
+  buildResources: resources
+  output: dist
+files:
+  - out/**
+  - package.json
+# the licences of the open-source packages inside (Catzoid #66), opened from About → Third-party licences
+extraResources:
+  - from: resources/third-party-licenses.txt
+    to: third-party-licenses.txt
+protocols:
+  - name: DialCatz
+    schemes: [dialcatz]
+mac:
+  category: public.app-category.developer-tools
+  icon: resources/icon.png
+  # Apple silicon only until the team agrees to release (then Intel, then Windows — Catzoid rule).
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: resources/entitlements.mac.plist
+  entitlementsInherit: resources/entitlements.mac.plist
+  # Notarized with the keychain profile mrcatz-notary (scripts/package.mjs): the app here, the DMG after.
+  notarize: true
+  minimumSystemVersion: '13.0'
+dmg:
+  # Signed too, then notarized and stapled by scripts/package.mjs (Apple's recommended order).
+  sign: true
+  title: DialCatz ${version}
+  artifactName: DialCatz-${version}-${arch}.${ext}
+  contents:
+    - { x: 150, y: 190, type: file }
+    - { x: 450, y: 190, type: link, path: /Applications }
+  window: { width: 600, height: 400 }
+npmRebuild: false
+# In-app updates (Catzoid #54): writes app-update.yml into the app. The feed address is set at run time from the
+# shared Catzoid site address (src/main/updates.ts), so this URL is only the default; builds never upload anything.
+publish:
+  provider: generic
+  url: https://catzoid.com/updates/dialcatz/

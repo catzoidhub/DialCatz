@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!--
+    DialCatz app icon — the family look, turned to the API client ("dial any endpoint, the cat picks up").
+    · the same rounded tile and MrCatz (eyes are the code brackets "< >"), so it reads as DevCatz's and DBCatz's sibling;
+      like its siblings the cat sits on the thing the app is about
+    · the tile is teal: the third colour of DevCatz's stack (indigo = DevCatz, amber = DBCatz, teal = DialCatz)
+    · the cat sits on a REQUEST card (teal method pill, a white path) with the RESPONSE card behind it (an amber status
+      dot): the exchange an API client is about; amber waves ring out from its ear — the call going out
+    Palette: teal #1FAE98 → #4FE0CA tile · indigo #3B33A8 / #6D5DF6 ink · white fur · amber #FFC14D ring.
+  -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1A9C88"/>
+      <stop offset="1" stop-color="#4FE0CA"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.38" r="0.65">
+      <stop offset="0" stop-color="#B6FFF2" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#B6FFF2" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.18"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="fur" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F1EEFF"/>
+    </linearGradient>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6D5DF6"/>
+      <stop offset="1" stop-color="#3B33A8"/>
+    </linearGradient>
+    <radialGradient id="bowl" cx="0.5" cy="0.45" r="0.6">
+      <stop offset="0" stop-color="#241F6E"/>
+      <stop offset="0.7" stop-color="#3B33A8"/>
+      <stop offset="1" stop-color="#5A4FD8"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3B33A8"/>
+      <stop offset="1" stop-color="#2A2480"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#064038" flood-opacity="0.35"/>
+    </filter>
+    <filter id="soft" x="-15%" y="-15%" width="130%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#053A32" flood-opacity="0.35"/>
+    </filter>
+    <filter id="eyeglow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+  </defs>
+
+  <!-- tile -->
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#tile)" filter="url(#shadow)"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#glow)"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#sheen)"/>
+
+  <!-- the seat: a request card and, behind it, the response card — an indigo slab like DevCatz's stack, but with the
+       lines of an HTTP exchange on its face: a teal method pill + path, and an amber status dot on the one behind -->
+  <g filter="url(#soft)">
+    <!-- the response card, behind and a little up -->
+    <rect x="236" y="586" width="552" height="150" rx="40" fill="url(#rim)"/>
+    <circle cx="316" cy="632" r="18" fill="#FFC14D"/>
+    <rect x="352" y="618" width="150" height="28" rx="14" fill="#FFFFFF" opacity="0.35"/>
+    <rect x="520" y="618" width="110" height="28" rx="14" fill="#FFFFFF" opacity="0.2"/>
+    <!-- the request card, in front -->
+    <rect x="196" y="660" width="632" height="200" rx="48" fill="url(#plate)"/>
+    <rect x="252" y="744" width="118" height="48" rx="24" fill="#2FD3BC"/>
+    <rect x="394" y="750" width="300" height="36" rx="18" fill="#FFFFFF" opacity="0.85"/>
+    <rect x="722" y="750" width="56" height="36" rx="18" fill="#FFFFFF" opacity="0.35"/>
+  </g>
+  <!-- MrCatz on the cards, eyes as < > (the same cat as DevCatz's, same seat) -->
+  <g transform="translate(512 26) scale(0.72) translate(-512 0)">
+    <!-- robot neck ring: a metal joint under the chin (drawn first, the chin covers its back half) -->
+    <ellipse cx="512" cy="782" rx="184" ry="40" fill="none" stroke="#2A2480" stroke-width="30"/>
+    <ellipse cx="512" cy="782" rx="184" ry="40" fill="none" stroke="#6D5DF6" stroke-width="16"/>
+    <!-- robot antenna with a glowing teal tip: the "-oid" -->
+    <g filter="url(#soft)">
+      <path d="M560 336 L582 196" fill="none" stroke="#3B33A8" stroke-width="22" stroke-linecap="round"/>
+      <circle cx="584" cy="176" r="40" fill="#2FD3BC" opacity="0.35" filter="url(#eyeglow)"/>
+      <circle cx="584" cy="176" r="28" fill="#2FD3BC" stroke="#FFFFFF" stroke-width="8"/>
+    </g>
+    <g filter="url(#soft)">
+      <path fill="url(#fur)" stroke="url(#fur)" stroke-width="36" stroke-linejoin="round"
+        d="M268 418 L246 222 L446 334
+           C 487 318, 537 318, 578 334
+           L778 222 L756 418
+           C 792 470, 808 528, 808 586
+           C 808 712, 676 790, 512 790
+           C 348 790, 216 712, 216 586
+           C 216 528, 232 470, 268 418 Z"/>
+      <path fill="#1FAE98" opacity="0.28" d="M300 404 L286 282 L420 356 Z"/>
+      <path fill="#1FAE98" opacity="0.28" d="M724 404 L738 282 L604 356 Z"/>
+    </g>
+    <g fill="none" stroke="#3B33A8" stroke-width="48" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="446,548 392,596 446,644"/>
+      <polyline points="578,548 632,596 578,644"/>
+    </g>
+    <path fill="#3B33A8" stroke="#3B33A8" stroke-width="16" stroke-linejoin="round" d="M486 662 L538 662 L512 694 Z"/>
+    <path fill="none" stroke="#3B33A8" stroke-width="18" stroke-linecap="round" d="M470 724 C 490 744, 504 744, 512 728 C 520 744, 534 744, 554 724"/>
+  </g>
+
+  <!-- the call going out: amber waves ringing out from the right ear -->
+  <g fill="none" stroke="#FFC14D" stroke-width="30" stroke-linecap="round" filter="url(#soft)">
+    <path d="M776 300 A70 70 0 0 1 776 390"/>
+    <path d="M814 268 A120 120 0 0 1 814 422"/>
+  </g>
+
+</svg>

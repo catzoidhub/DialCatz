@@ -1,0 +1,48 @@
+{
+  "name": "dialcatz",
+  "productName": "DialCatz",
+  "version": "1.0.0",
+  "license": "GPL-3.0-only",
+  "private": true,
+  "description": "DialCatz — an open-source API client: collections, environments, history and team sync through a self-hosted DialCatz Den.",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "predev": "node scripts/dev-bundle-name.mjs",
+    "dev": "electron-vite dev",
+    "build": "node scripts/licenses.mjs && electron-vite build",
+    "licenses": "node scripts/licenses.mjs",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json",
+    "gen:den": "openapi-typescript ../DialCatz-Den/openapi.yaml -o src/main/den-api.ts && node scripts/den-api-header.mjs",
+    "package:dir": "electron-vite build && electron-builder --mac dir",
+    "quick": "node scripts/quick.mjs",
+    "package": "node scripts/package.mjs",
+    "postinstall": "node node_modules/electron/install.js || bun node_modules/electron/install.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.1.0",
+    "electron-updater": "6.8.10",
+    "yaml": "2"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^22",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "daisyui": "^5.7.50",
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^6.0.0",
+    "openapi-typescript": "7",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.4",
+    "vue": "^3.5.44",
+    "vue-tsc": "^3.3.13"
+  },
+  "trustedDependencies": [
+    "electron"
+  ],
+  "author": {
+    "name": "Mahryan Rakhmatullah"
+  }
+}
