@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { words } from '@shared/platform';
 import { AI_PROVIDERS, type UninstallPlan } from '@shared/types';
 import { deleteToken } from './secrets';
 import { servers } from './servers';
@@ -58,7 +59,7 @@ export function plan(): UninstallPlan {
   return {
     items: [
       { label: 'Collections, environments, history and settings', detail: home(app.getPath('userData')) },
-      ...(tokens ? [{ label: `${tokens} DialCatz Den token${tokens === 1 ? '' : 's'}`, detail: 'Keychain items “DialCatz Den”' }] : []),
+      ...(tokens ? [{ label: `${tokens} DialCatz Den token${tokens === 1 ? '' : 's'}`, detail: `${words.secretStore} items “DialCatz Den”` }] : []),
       { label: 'Caches, logs and saved window state', detail: '~/Library/Caches, Logs, Saved Application State, Preferences' },
       ...(b ? [{ label: 'The app', detail: `${home(b)} → Trash` }] : []),
     ],

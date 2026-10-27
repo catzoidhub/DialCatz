@@ -1,26 +1,12 @@
 /**
- * Platform-aware words and shortcut labels (Catzoid rule: never write ⌘, Keychain, Finder … unconditionally).
- * Later a shared @catzoid/* package.
+ * Platform-aware words and shortcut labels live in @shared/platform (Catzoid rule: never write ⌘, Keychain, Finder … unconditionally).
+ * This file re-exports them for the window and adds the window-only bits.
  */
+import { currentOS } from '@shared/platform';
 
-export const isMac = navigator.userAgent.includes('Mac OS X');
+export { keyLabel, words } from '@shared/platform';
 
-/** 'mod+Enter' → ⌘↩ on macOS, Ctrl+Enter elsewhere. */
-export function keyLabel(combo: string): string {
-  const parts = combo.split('+');
-  if (isMac) {
-    const map: Record<string, string> = { mod: '⌘', shift: '⇧', alt: '⌥', ctrl: '⌃', enter: '↩' };
-    return parts.map((p) => map[p.toLowerCase()] ?? p.toUpperCase()).join('');
-  }
-  const map: Record<string, string> = { mod: 'Ctrl', shift: 'Shift', alt: 'Alt', ctrl: 'Ctrl', enter: 'Enter' };
-  return parts.map((p) => map[p.toLowerCase()] ?? p.toUpperCase()).join('+');
-}
-
-export const words = {
-  secretStore: isMac ? 'Keychain' : 'the system’s secret store',
-  fileManager: isMac ? 'Finder' : 'File Explorer',
-  os: isMac ? 'macOS' : navigator.userAgent.includes('Windows') ? 'Windows' : 'Linux',
-};
+export const isMac = currentOS === 'mac';
 
 /** Is the event's main modifier down (⌘ on macOS, Ctrl elsewhere). */
 export const modKey = (e: KeyboardEvent | MouseEvent) => (isMac ? e.metaKey : e.ctrlKey);

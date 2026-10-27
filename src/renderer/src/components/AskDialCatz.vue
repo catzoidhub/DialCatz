@@ -333,7 +333,7 @@ async function apply(xi: number, i: number, a: AskAction) {
             <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 3.5 4.6 8.9l1.1 1.1 3.5-3.5V16.5h1.6V6.5l3.5 3.5 1.1-1.1L10 3.5Z" /></svg>
           </button>
         </div>
-        <p class="mt-2 px-1 text-[11px] opacity-45">⏎ send · ⇧⏎ new line · Esc close · {{ keyLabel('mod+K') }} opens this · names and URLs only: no variable values, no auth</p>
+        <p class="mt-2 px-1 text-[11px] opacity-45">⏎ send · {{ keyLabel('shift+enter').replace('↩', '⏎') }} new line · Esc close · {{ keyLabel('mod+K') }} opens this · names and URLs only: no variable values, no auth</p>
       </footer>
     </div>
     <div class="modal-backdrop" @click="emit('close')" />

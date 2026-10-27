@@ -5,6 +5,8 @@
  * this computer; team workspaces come from a DialCatz Den and sync through it (revision numbers, see sync.ts).
  */
 
+import { keyLabel } from './platform';
+
 export type Theme = 'system' | 'light' | 'dark';
 
 export const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const;
@@ -338,7 +340,7 @@ export const aiProvider = (id: AiProvider) => AI_PROVIDERS.find((p) => p.id === 
 export type AiFeature = 'ask' | 'explain' | 'tests' | 'body';
 /** DialCatz's AI features: each can be switched off in Settings → AI; `sends` says what leaves the computer. */
 export const AI_FEATURES: { id: AiFeature; label: string; hint: string; sends: string }[] = [
-  { id: 'ask', label: 'Ask DialCatz (⌘K)', hint: 'The ✦ button: say what you need in plain words; DialCatz proposes requests and variables you add with a click.', sends: 'collection, folder and request names, methods and URLs, variable names (never their values), the open request without its secrets' },
+  { id: 'ask', label: `Ask DialCatz (${keyLabel('mod+K')})`, hint: 'The ✦ button: say what you need in plain words; DialCatz proposes requests and variables you add with a click.', sends: 'collection, folder and request names, methods and URLs, variable names (never their values), the open request without its secrets' },
   { id: 'explain', label: 'Explain a response', hint: 'Why a request failed or what a response means, with what to try next.', sends: 'the request (method, URL, header names; auth and cookies masked) and the response status, headers and the first 12 KB of the body' },
   { id: 'tests', label: 'Write tests', hint: 'A tests script for the request, from its last response.', sends: 'the request and the shape of its last response (first 12 KB)' },
   { id: 'body', label: 'Generate a body', hint: 'A request body (JSON, form fields) from a sentence, e.g. “a new user with an address”.', sends: 'the request (method, URL, current body) and what you asked for' },

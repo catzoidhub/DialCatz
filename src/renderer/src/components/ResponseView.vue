@@ -351,7 +351,7 @@ function closeDecoded() {
             <Icon name="search" class="size-3.5 opacity-50" />
             <input ref="searchInput" v-model="search" placeholder="Search the response" @keydown.enter.exact="step(1)" @keydown.shift.enter="step(-1)" @keydown.esc="((searchOpen = false), (search = ''))" />
             <span class="font-mono text-[11px] opacity-60">{{ search ? `${matchCount ? activeIndex + 1 : 0}/${matchCount}` : '' }}</span>
-            <button class="btn btn-ghost btn-xs btn-square" title="Previous (⇧↩)" :disabled="!matchCount" @click="step(-1)">↑</button>
+            <button class="btn btn-ghost btn-xs btn-square" :title="`Previous (${keyLabel('shift+enter')})`" :disabled="!matchCount" @click="step(-1)">↑</button>
             <button class="btn btn-ghost btn-xs btn-square" title="Next (↩)" :disabled="!matchCount" @click="step(1)">↓</button>
             <button class="btn btn-ghost btn-xs btn-square" title="Close" @click="((searchOpen = false), (search = ''))">×</button>
           </div>

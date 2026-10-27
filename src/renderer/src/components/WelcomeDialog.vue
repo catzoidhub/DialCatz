@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { words } from '../platform';
 import { goSection, history, importRequest, newTab, servers } from '../state';
 import CatMood from './CatMood.vue';
 
@@ -54,7 +55,7 @@ const privacy = () => site.value && api.openUrl(`${site.value}/docs/privacy-and-
           <div>
             <h3 class="text-lg font-semibold tracking-tight">Welcome to DialCatz</h3>
             <p class="text-sm opacity-70">
-              Dial an endpoint, hear it purr: requests, collections, environments and tests on your Mac — and your team’s own server when you
+              Dial an endpoint, hear it purr: requests, collections, environments and tests on your {{ words.computer }} — and your team’s own server when you
               want to share them.
             </p>
           </div>
@@ -96,7 +97,7 @@ const privacy = () => site.value && api.openUrl(`${site.value}/docs/privacy-and-
               <div class="min-w-0">
                 <p class="font-medium">3 · Work as a team <span class="badge badge-ghost badge-sm ml-1">optional</span></p>
                 <p class="mt-1 text-sm opacity-70">
-                  Your team runs its own DialCatz Den; an admin sends you an invite link. Collections sync live, environment values stay on your Mac.
+                  Your team runs its own DialCatz Den; an admin sends you an invite link. Collections sync live, environment values stay on your {{ words.computer }}.
                 </p>
               </div>
               <button class="btn btn-outline btn-sm shrink-0" @click="team">Connect…</button>

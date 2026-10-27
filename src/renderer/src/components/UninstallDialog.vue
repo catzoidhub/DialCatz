@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import type { UninstallPlan } from '@shared/types';
+import { words } from '../platform';
 import { notify } from '../state';
 import CatMood from './CatMood.vue';
 import Icon from './Icon.vue';
@@ -55,7 +56,7 @@ async function go() {
         <label class="opt-row cursor-pointer">
           <span class="flex flex-col">
             <span class="label-caps">Also remove the shared Catzoid settings</span>
-            <span class="text-xs opacity-50">{{ plan.otherApps.length ? `Theme, AI connection and AI key are shared with ${plan.otherApps.join(', ')}: keep them for those apps.` : 'Theme, AI connection and the AI key in Keychain. No other Catzoid app is installed.' }}</span>
+            <span class="text-xs opacity-50">{{ plan.otherApps.length ? `Theme, AI connection and AI key are shared with ${plan.otherApps.join(', ')}: keep them for those apps.` : `Theme, AI connection and the AI key in ${words.secretStore}. No other Catzoid app is installed.` }}</span>
           </span>
           <input v-model="removeShared" type="checkbox" class="toggle toggle-sm toggle-warning" />
         </label>
