@@ -538,7 +538,8 @@ export type UpdateState =
   | { kind: 'downloading'; version: string; percent: number; transferred: number; total: number; bytesPerSecond: number }
   | { kind: 'verifying'; version: string }
   | { kind: 'downloaded'; version: string; onQuit: boolean }
-  | { kind: 'error'; message: string; manual: boolean; download: string };
+  /** download: the site's page for this computer's build; none when there is no build for it. */
+  | { kind: 'error'; message: string; manual: boolean; download?: string };
 
 /** What Uninstall DialCatz removes (shown before anything goes). */
 export interface UninstallPlan {

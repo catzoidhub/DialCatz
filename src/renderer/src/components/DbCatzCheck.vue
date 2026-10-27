@@ -4,6 +4,7 @@ import type { DbCatzConnection } from '@shared/types';
 import type { Tab } from '../state';
 import { collectionOf, notify, workspace } from '../state';
 import { guessTable } from '../dbguess';
+import { openDownload } from '../download';
 import CatMood from './CatMood.vue';
 import Icon from './Icon.vue';
 import dbcatzLogo from '../assets/logos/dbcatz.png';
@@ -22,8 +23,6 @@ const open = ref(false);
 const busy = ref(false);
 const error = ref('');
 const form = ref({ conn: '', db: '', table: '', col: 'id', val: '', row: true });
-const download = ref('https://catzoid.com/download/dbcatz/mac-arm64');
-const platformSlug = (platform: string, arch: string) => (platform === 'win32' ? 'win-x64' : arch === 'x64' ? 'mac-x64' : 'mac-arm64');
 
 const collection = computed(() => collectionOf(props.tab.itemId));
 const request = computed(() => workspace.value?.items.find((i) => i.id === props.tab.itemId && i.kind === 'request') ?? null);
@@ -38,7 +37,6 @@ const label = computed(() => (collection.value?.database && table.value ? `Check
 
 async function load() {
   info.value = await api.dbcatzInfo();
-  void api.appInfo().then((i) => (download.value = `${i.site}/download/dbcatz/${platformSlug(i.platform, i.arch)}`)).catch(() => {});
 }
 
 /** The dialog, filled with what is remembered and guessed. */
@@ -116,7 +114,7 @@ async function submit() {
       <div v-if="!info?.installed" class="alert alert-info alert-soft text-sm">
         <CatMood mood="info" class="size-7 shrink-0 -my-0.5" />
         <span class="flex-1">DBCatz is not installed on this computer. With it, DialCatz opens the table a call just changed.</span>
-        <button class="btn btn-primary btn-sm shrink-0 gap-1.5" @click="api.openUrl(download)"><img :src="dbcatzLogo" alt="" class="size-4" />Get DBCatz</button>
+        <button class="btn btn-primary btn-sm shrink-0 gap-1.5" @click="openDownload('dbcatz', 'DBCatz')"><img :src="dbcatzLogo" alt="" class="size-4" />Get DBCatz</button>
       </div>
       <template v-else>
         <div v-if="!info.bridge" class="alert alert-warning alert-soft text-sm">

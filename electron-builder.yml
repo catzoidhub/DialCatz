@@ -39,6 +39,21 @@ dmg:
     - { x: 150, y: 190, type: file }
     - { x: 450, y: 190, type: link, path: /Applications }
   window: { width: 600, height: 400 }
+win:
+  icon: resources/icon.png # ≥ 256 × 256; electron-builder makes the .ico
+  target:
+    - target: nsis
+      arch: [x64]
+  # Sets the .exe's icon and version info; with no certificate configured nothing is signed here.
+  signAndEditExecutable: true
+nsis:
+  oneClick: false
+  # Per user: no administrator prompt, and in-app updates work without UAC.
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  # What the Catzoid site's catalog matches (catalog.go winX64), like the other Catzoid apps (Catzoid #78).
+  artifactName: ${productName}-Setup-${version}.${ext}
+  uninstallDisplayName: ${productName}
 npmRebuild: false
 # In-app updates (Catzoid #54): writes app-update.yml into the app. The feed address is set at run time from the
 # shared Catzoid site address (src/main/updates.ts), so this URL is only the default; builds never upload anything.

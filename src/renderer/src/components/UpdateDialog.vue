@@ -148,7 +148,8 @@ async function installOnQuit() {
           </div>
         </div>
         <div class="modal-action mt-0">
-          <button class="btn btn-ghost btn-sm mr-auto" @click="api.openUrl(st.download)">Download from the site</button>
+          <button v-if="st.download" class="btn btn-ghost btn-sm mr-auto" @click="api.openUrl(st.download)">Download from the site</button>
+          <span v-else class="mr-auto" />
           <button class="btn btn-ghost btn-sm" @click="close">Close</button>
           <button class="btn btn-primary btn-sm" @click="api.updateCheck()">Retry</button>
         </div>

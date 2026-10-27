@@ -3,6 +3,7 @@ import updaterPkg, { CancellationToken, type ProgressInfo, type UpdateInfo } fro
 import type { ReleaseNote, UpdatePrefs, UpdateState } from '@shared/types';
 import { installId } from './reports';
 import { siteBase } from './shared';
+import { downloadLink } from '@shared/platform';
 import { store } from './store';
 
 /**
@@ -56,9 +57,8 @@ export function setPrefs(patch: Partial<Pick<UpdatePrefs, 'auto' | 'channel' | '
 }
 
 const feed = () => process.env.DIALCATZ_UPDATE_FEED || `${siteBase()}/updates/dialcatz/`;
-const platform = () => (process.platform === 'win32' ? 'win-x64' : process.arch === 'x64' ? 'mac-x64' : 'mac-arm64');
-/** The site's download link, for when an update fails ("Download from the site"). */
-const downloadPage = () => `${siteBase()}/download/dialcatz/${platform()}`;
+/** The site's download link for this computer's build, for when an update fails ("Download from the site"). */
+const downloadPage = () => downloadLink(siteBase(), 'dialcatz', process.platform, process.arch) ?? undefined;
 
 function set(next: UpdateState) {
   state = next;

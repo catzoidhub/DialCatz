@@ -37,3 +37,20 @@ export function keyLabel(combo: string, os: OS = currentOS): string {
   const map: Record<string, string> = { mod: 'Ctrl', shift: 'Shift', alt: 'Alt', ctrl: 'Ctrl', enter: 'Enter' };
   return parts.map((p) => map[p.toLowerCase()] ?? key(p)).join('+');
 }
+
+/**
+ * Which build of a Catzoid app fits this computer, as the site's download links name it (Catzoid #78): Windows →
+ * win-x64 (the NSIS installer; Windows on ARM runs it too), Mac → mac-arm64 or mac-x64 by the processor. Null when
+ * there is no build for it: say so plainly, never offer another platform's file.
+ */
+export type DownloadPlatform = 'win-x64' | 'mac-arm64' | 'mac-x64';
+export function downloadPlatform(platform: string, arch: string): DownloadPlatform | null {
+  if (platform === 'win32') return arch === 'x64' || arch === 'arm64' ? 'win-x64' : null;
+  if (platform === 'darwin') return arch === 'arm64' ? 'mac-arm64' : arch === 'x64' ? 'mac-x64' : null;
+  return null;
+}
+/** `<site>/download/<app>/<platform>` for this computer, or null when there is no build for it. */
+export function downloadLink(site: string, app: string, platform: string, arch: string): string | null {
+  const p = downloadPlatform(platform, arch);
+  return p ? `${site.replace(/\/+$/, '')}/download/${app}/${p}` : null;
+}

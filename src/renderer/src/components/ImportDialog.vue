@@ -5,6 +5,7 @@ import { notify, syncTabsWithWorkspace, workspace } from '../state';
 import CatMood from './CatMood.vue';
 import Icon from './Icon.vue';
 import devcatzLogo from '../assets/logos/devcatz.svg';
+import { openDownload } from '../download';
 
 /**
  * Bringing requests in: a file or pasted text (Postman collection, OpenAPI / Swagger in JSON or YAML, DialCatz
@@ -188,16 +189,9 @@ const base = computed(() => (app.value?.url ?? site.value?.url ?? '').replace(/\
 const specs = computed(() => (site.value?.openapi ?? []).filter((o) => !app.value || o.app === app.value.dir));
 const isLaravel = computed(() => (app.value ? app.value.framework === 'laravel' : site.value?.framework === 'laravel'));
 const fileName = (p: string) => p.split(/[\\/]/).pop() ?? p;
-/**
- * "Get DevCatz" when it is not installed: the Catzoid site's download link for this computer,
- * `<shared site address>/download/devcatz/<platform>` (mac-arm64 / mac-x64 / win-x64; the site redirects to the
- * newest installer).
- */
-const devcatzPage = ref('https://catzoid.com/download/devcatz/mac-arm64');
-const platformSlug = (platform: string, arch: string) => (platform === 'win32' ? 'win-x64' : arch === 'x64' ? 'mac-x64' : 'mac-arm64');
+// "Get DevCatz" when it is not installed: the site's download for this computer (download.ts).
 const notInstalled = computed(() => devcatz.value !== null && !devcatz.value.installed);
 onMounted(async () => {
-  void api.appInfo().then((i) => (devcatzPage.value = `${i.site}/download/devcatz/${platformSlug(i.platform, i.arch)}`)).catch(() => {});
   devcatz.value = await api.devcatzSites();
   if (!siteId.value) siteId.value = devcatz.value.sites[0]?.id ?? '';
 });
@@ -368,7 +362,7 @@ async function importSite() {
         <div v-if="notInstalled" class="alert alert-info alert-soft text-sm">
           <CatMood mood="info" class="size-7 shrink-0 -my-0.5" />
           <span class="flex-1">DevCatz is not installed on this computer. With it, your local sites show up here with their environments and routes.</span>
-          <button class="btn btn-primary btn-sm shrink-0 gap-1.5" @click="api.openUrl(devcatzPage)"><img :src="devcatzLogo" alt="" class="size-4" />Get DevCatz</button>
+          <button class="btn btn-primary btn-sm shrink-0 gap-1.5" @click="openDownload('devcatz', 'DevCatz')"><img :src="devcatzLogo" alt="" class="size-4" />Get DevCatz</button>
         </div>
         <div v-else-if="devcatz && !devcatz.sites.length" class="text-sm opacity-60">DevCatz has no sites yet.</div>
         <template v-else-if="devcatz">

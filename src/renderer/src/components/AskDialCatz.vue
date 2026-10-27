@@ -4,6 +4,7 @@ import { aiProvider, emptyEnvLayout, newRequest, uid, type AskAction, type AskAn
 import { splitUrl } from '@shared/request';
 import { activeEnvironment, activeTab, attempt, collectionOf as collectionOfItem, newTab, notify, openItem, plain, setVarValue, setWorkspace, settings, workspace } from '../state';
 import { guessTable } from '../dbguess';
+import { openDownload } from '../download';
 import { keyLabel } from '../platform';
 import CatMood from './CatMood.vue';
 import askMark from '../assets/logos/ask-catzoid.svg';
@@ -184,8 +185,6 @@ async function ensureEnvironment(ex: Exchange, name: string): Promise<string | n
   if (i >= 0) ex.done[i] = 'Environment created — fill in its values in Variables';
   return id;
 }
-const download = ref('https://catzoid.com/download/dbcatz/mac-arm64');
-onMounted(() => void api.appInfo().then((i) => (download.value = `${i.site}/download/dbcatz/${i.platform === 'win32' ? 'win-x64' : i.arch === 'x64' ? 'mac-x64' : 'mac-arm64'}`)).catch(() => {}));
 
 async function apply(xi: number, i: number, a: AskAction) {
   const ex = thread.value[xi];
@@ -240,8 +239,7 @@ async function apply(xi: number, i: number, a: AskAction) {
   }
   if (a.type === 'openInDbcatz') {
     if (!a.conn) {
-      await api.openUrl(download.value);
-      ex.done[i] = 'Opened the DBCatz download';
+      if (await openDownload('dbcatz', 'DBCatz')) ex.done[i] = 'Opened the DBCatz download';
       return;
     }
     const ok = await attempt(async () => (await api.dbcatzOpen({ conn: a.conn, db: a.db, table: a.table || undefined, ...(a.col && a.val ? { col: a.col, val: a.val } : {}) }), true));
