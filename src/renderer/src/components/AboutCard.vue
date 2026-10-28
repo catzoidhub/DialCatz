@@ -84,6 +84,9 @@ function copyDetails() {
         Free and open source under the
         <a class="link" @click="api.openUrl(LICENCE.url)">{{ LICENCE.name }}</a> licence.
       </p>
+      <p class="text-xs opacity-55">
+        ★ If DialCatz helps you, <a class="link" @click="api.openUrl(REPO)">star it on GitHub</a> and tell a friend — that is how other developers find it.
+      </p>
     </div>
   </div>
 
