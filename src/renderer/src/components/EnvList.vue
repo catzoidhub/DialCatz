@@ -12,7 +12,7 @@ import Icon from './Icon.vue';
  * delete) rows tick instead of opening.
  */
 const props = defineProps<{ selected: string; picking: Set<string> | null }>();
-const emit = defineEmits<{ pick: [id: string]; tick: [id: string]; remove: [env: Environment] }>();
+const emit = defineEmits<{ pick: [id: string]; tick: [id: string]; remove: [env: Environment]; duplicate: [env: Environment]; export: [env: Environment] }>();
 const api = window.dialcatz;
 
 const filter = ref('');
@@ -71,7 +71,11 @@ const menu = ref<{ env: Environment; x: number; y: number } | null>(null);
 const groupMenu = ref<{ group: { id: string; name: string }; x: number; y: number } | null>(null);
 function showMenu(env: Environment, e: MouseEvent) {
   groupMenu.value = null;
-  menu.value = { env, x: Math.min(e.clientX, window.innerWidth - 230), y: Math.min(e.clientY, window.innerHeight - 300) };
+  // From the ⋯ button: under it; from a right-click: at the pointer.
+  const btn = (e.target as HTMLElement | null)?.closest?.('.tree-more')?.getBoundingClientRect();
+  const x = btn ? btn.right - 224 : e.clientX;
+  const y = btn ? btn.bottom + 4 : e.clientY;
+  menu.value = { env, x: Math.max(8, Math.min(x, window.innerWidth - 230)), y: Math.min(y, window.innerHeight - 300) };
 }
 function showGroupMenu(group: { id: string; name: string }, e: MouseEvent) {
   menu.value = null;
@@ -151,8 +155,9 @@ const active = (e: Environment) => e.id === workspace.value?.activeEnvironmentId
           <button class="env-row" :class="{ 'is-active': selected === e.id && !picking, 'is-ticked': picking?.has(e.id) }" @click="picking ? emit('tick', e.id) : emit('pick', e.id)" @contextmenu.prevent="showMenu(e, $event)">
             <input v-if="picking" type="checkbox" class="checkbox checkbox-xs checkbox-primary" :checked="picking.has(e.id)" tabindex="-1" :aria-label="`Select ${e.name}`" @click.stop="emit('tick', e.id)" />
             <span v-else class="status status-xs" :class="active(e) ? 'status-success' : 'opacity-30'" :title="active(e) ? 'Default' : undefined" />
-            <span class="flex-1 truncate text-left">{{ e.name }}</span>
+            <span class="min-w-0 truncate text-left">{{ e.name }}</span>
             <span class="tree-star-btn is-on" title="Remove from favourites" @click.stop="toggleFav(e)"><Icon name="star" class="size-3.5" /></span>
+            <span v-if="!picking" class="tree-more" role="button" title="More" aria-label="More" @click.stop="showMenu(e, $event)"><Icon name="dots" class="size-4" /></span>
           </button>
         </template>
         <div class="tree-section">Environments</div>
@@ -190,9 +195,10 @@ const active = (e: Environment) => e.id === workspace.value?.activeEnvironmentId
               >
                 <input v-if="picking" type="checkbox" class="checkbox checkbox-xs checkbox-primary" :checked="picking.has(e.id)" tabindex="-1" :aria-label="`Select ${e.name}`" @click.stop="emit('tick', e.id)" />
                 <span v-else class="status status-xs" :class="active(e) ? 'status-success' : 'opacity-30'" :title="active(e) ? 'Default' : undefined" />
-                <span class="flex-1 truncate text-left">{{ e.name }}</span>
+                <span class="min-w-0 truncate text-left">{{ e.name }}</span>
                 <span class="tree-star-btn" :class="{ 'is-on': lay.favorites.includes(e.id) }" :title="lay.favorites.includes(e.id) ? 'Remove from favourites' : 'Add to favourites'" @click.stop="toggleFav(e)"><Icon name="star" class="size-3.5" /></span>
                 <span v-if="e.dirty" class="tree-dirty" title="Not synced yet" />
+                <span v-if="!picking" class="tree-more" role="button" title="More" aria-label="More" @click.stop="showMenu(e, $event)"><Icon name="dots" class="size-4" /></span>
               </button>
             </template>
           </template>
@@ -221,9 +227,10 @@ const active = (e: Environment) => e.id === workspace.value?.activeEnvironmentId
         >
           <input v-if="picking" type="checkbox" class="checkbox checkbox-xs checkbox-primary" :checked="picking.has(e.id)" tabindex="-1" :aria-label="`Select ${e.name}`" @click.stop="emit('tick', e.id)" />
           <span v-else class="status status-xs" :class="active(e) ? 'status-success' : 'opacity-30'" :title="active(e) ? 'Default' : undefined" />
-          <span class="flex-1 truncate text-left">{{ e.name }}</span>
+          <span class="min-w-0 truncate text-left">{{ e.name }}</span>
           <span class="tree-star-btn" :class="{ 'is-on': lay.favorites.includes(e.id) }" :title="lay.favorites.includes(e.id) ? 'Remove from favourites' : 'Add to favourites'" @click.stop="toggleFav(e)"><Icon name="star" class="size-3.5" /></span>
           <span v-if="e.dirty" class="tree-dirty" title="Not synced yet" />
+          <span v-if="!picking" class="tree-more" role="button" title="More" aria-label="More" @click.stop="showMenu(e, $event)"><Icon name="dots" class="size-4" /></span>
         </button>
       </template>
       <p v-if="nothing" class="px-3 py-4 text-sm opacity-60">Nothing matches “{{ filter.trim() }}”.</p>
@@ -243,6 +250,8 @@ const active = (e: Environment) => e.id === workspace.value?.activeEnvironmentId
           </ul>
         </details>
       </li>
+      <li><button :disabled="readOnly" @click="run((e) => emit('duplicate', e))">Duplicate</button></li>
+      <li><button @click="run((e) => emit('export', e))">Export…</button></li>
       <li><button class="text-error" :disabled="readOnly" @click="run((e) => emit('remove', e))">Delete…</button></li>
     </ul>
     <ul v-if="groupMenu" class="menu fixed z-50 w-52 rounded-box border border-base-300/60 bg-base-100 p-1 shadow-xl" :style="{ left: `${groupMenu.x}px`, top: `${groupMenu.y}px` }" @click.stop>

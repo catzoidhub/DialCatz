@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import CodeEditor from './CodeEditor.vue';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import { emptyLayout, uid, type RequestAuth, type SidebarLayout, type TreeItem } from '@shared/types';
+import { emptyLayout, uid, type ExportFormat, type RequestAuth, type SidebarLayout, type TreeItem } from '@shared/types';
 import { attempt, closeTab, defaultEnvironment, freshRequest, importRequest, newTab, notify, openItem, plain, presenceByItem, readOnly, section, syncTabsWithWorkspace, tabs, workspace } from '../state';
 import TreeNode, { type DropTarget } from './TreeNode.vue';
 import PromptDialog from './PromptDialog.vue';
@@ -244,8 +244,15 @@ function remove(item: TreeItem) {
   };
 }
 
-async function exportIt(item: TreeItem) {
-  if (await attempt(() => api.exportCollection(workspace.value!.id, item.id))) notify('success', 'Collection exported');
+// Export: DialCatz's own file, or a Postman v2.1 collection for people who open it in Postman.
+const exporting = ref<{ item: TreeItem; format: ExportFormat } | null>(null);
+function exportIt(item: TreeItem) {
+  exporting.value = { item, format: 'dialcatz' };
+}
+async function doExport() {
+  const x = exporting.value!;
+  exporting.value = null;
+  if (await attempt(() => api.exportCollection(workspace.value!.id, x.item.id, x.format))) notify('success', `“${x.item.name}” exported`);
 }
 
 function editAuth(item: TreeItem) {
@@ -591,6 +598,23 @@ const SORTS: { id: SidebarLayout['sortBy']; label: string }[] = [
       <div class="modal-backdrop" @click="authFor = null" />
     </dialog>
 
+    <dialog v-if="exporting" open class="modal modal-open" @keydown.esc="exporting = null">
+      <div class="modal-box w-[30rem] max-w-[95vw] space-y-4">
+        <h3 class="text-lg font-semibold tracking-tight">Export “{{ exporting.item.name }}”</h3>
+        <div class="seg seg-choice w-full" role="radiogroup" aria-label="Format">
+          <button type="button" role="radio" class="seg-item flex-1 normal-case" :class="{ 'is-active': exporting.format === 'dialcatz' }" :aria-checked="exporting.format === 'dialcatz'" @click="exporting.format = 'dialcatz'">DialCatz format</button>
+          <button type="button" role="radio" class="seg-item flex-1 normal-case" :class="{ 'is-active': exporting.format === 'postman' }" :aria-checked="exporting.format === 'postman'" @click="exporting.format = 'postman'">Postman format</button>
+        </div>
+        <p v-if="exporting.format === 'dialcatz'" class="text-sm opacity-70"><span class="font-mono text-xs">{{ exporting.item.name }}.dialcatz_collection.json</span> — everything DialCatz keeps (settings, scripts, descriptions), for DialCatz's Import.</p>
+        <p v-else class="text-sm opacity-70"><span class="font-mono text-xs">{{ exporting.item.name }}.postman_collection.json</span> — a Postman Collection v2.1 with folders, requests, bodies, auth, scripts and descriptions. Postman and DialCatz both import it.</p>
+        <p class="text-xs opacity-50">Auth values in the collection go into the file as they are. Files picked for multipart or binary bodies stay out.</p>
+        <div class="modal-action">
+          <button class="btn btn-ghost btn-sm" @click="exporting = null">Cancel</button>
+          <button class="btn btn-primary btn-sm gap-1.5" @click="doExport"><Icon name="upload" class="size-4" />Export…</button>
+        </div>
+      </div>
+      <div class="modal-backdrop" @click="exporting = null" />
+    </dialog>
     <CopyCollectionDialog v-if="copying" :collection="copying" @close="copying = null" />
     <RunnerDialog v-if="running" :root="running" @close="running = null" />
     <ImportDialog v-if="importing" :tab="importTab.tab" :site-id="importTab.siteId" @done="imported" @cancel="((importing = false), (importTab = { tab: 'choose' }))" />

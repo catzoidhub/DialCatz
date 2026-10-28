@@ -20,6 +20,8 @@ const mode = ref(props.tab);
 function pickMode(m: 'choose' | 'file' | 'postman' | 'devcatz') {
   mode.value = m;
   error.value = '';
+  bundle.value = false;
+  if (m === 'choose') pmChoice.value = null;
 }
 const text = ref('');
 const busy = ref(false);
@@ -51,7 +53,15 @@ async function finish(r: { workspace: Workspace; collectionId: string; count: nu
   notify('success', `Imported ${r.count} request${r.count === 1 ? '' : 's'}`);
   emit('done', r.collectionId);
 }
-const fromFile = () => guard(async () => finish(await api.importFile(workspace.value!.id)));
+/** One collection file goes straight in; an export zip, several files or an environment open the pick list. */
+async function fromFile() {
+  const r = await guard(() => api.importFile(workspace.value!.id));
+  if (!r) return;
+  if (r.kind === 'collection') return finish(r);
+  bundle.value = true;
+  mode.value = 'postman';
+  choose(r.choice);
+}
 const fromText = () => guard(async () => finish(await api.importText(workspace.value!.id, text.value)));
 
 // ---------------------------------------------------------------- Postman
@@ -62,6 +72,9 @@ async function migrate(how: 'files' | 'folder') {
   if (r) choose(r);
 }
 const TITLES = { choose: 'Import', file: 'Import a file or text', postman: 'Move from Postman', devcatz: 'Import from DevCatz' } as const;
+/** Files picked under "File or paste" that hold more than one collection: the same pick-what-comes-in list. */
+const bundle = ref(false);
+const title = computed(() => (bundle.value && mode.value === 'postman' ? 'Import — choose what comes in' : TITLES[mode.value]));
 /** Postman's mark (Simple Icons, CC0), drawn in the text colour: a pointer, not a coloured logo. */
 const POSTMAN_MARK = 'M13.527.099C6.955-.744.942 3.9.099 10.473c-.843 6.572 3.8 12.584 10.373 13.428 6.573.843 12.587-3.801 13.428-10.374C24.744 6.955 20.101.943 13.527.099zm2.471 7.485a.855.855 0 0 0-.593.25l-4.453 4.453-.307-.307-.643-.643c4.389-4.376 5.18-4.418 5.996-3.753zm-4.863 4.861l4.44-4.44a.62.62 0 1 1 .847.903l-4.699 4.125-.588-.588zm.33.694l-1.1.238a.06.06 0 0 1-.067-.032.06.06 0 0 1 .01-.073l.645-.645.512.512zm-2.803-.459l1.172-1.172.879.878-1.979.426a.074.074 0 0 1-.085-.039.072.072 0 0 1 .013-.093zm-3.646 6.058a.076.076 0 0 1-.069-.083.077.077 0 0 1 .022-.046h.002l.946-.946 1.222 1.222-2.123-.147zm2.425-1.256a.228.228 0 0 0-.117.256l.203.865a.125.125 0 0 1-.211.117h-.003l-.934-.934-.294-.295 3.762-3.758 1.82-.393.874.874c-1.255 1.102-2.971 2.201-5.1 3.268zm5.279-3.428h-.002l-.839-.839 4.699-4.125a.952.952 0 0 0 .119-.127c-.148 1.345-2.029 3.245-3.977 5.091zm3.657-6.46l-.003-.002a1.822 1.822 0 0 1 2.459-2.684l-1.61 1.613a.119.119 0 0 0 0 .169l1.247 1.247a1.817 1.817 0 0 1-2.093-.343zm2.578 0a1.714 1.714 0 0 1-.271.218h-.001l-1.207-1.207 1.533-1.533c.661.72.637 1.832-.054 2.522zM18.855 6.05a.143.143 0 0 0-.053.157.416.416 0 0 1-.053.45.14.14 0 0 0 .023.197.141.141 0 0 0 .084.03.14.14 0 0 0 .106-.05.691.691 0 0 0 .087-.751.138.138 0 0 0-.194-.033z';
 /** Moving from Postman: its export file, or the user's own Postman API key (nothing to wait for). */
@@ -150,6 +163,11 @@ const allShownOn = computed(() => shownKeys.value.length > 0 && shownKeys.value.
 function pmBack() {
   pmChoice.value = null;
   error.value = '';
+  // A workspace export goes back to the first choice (it has no Postman steps behind it).
+  if (bundle.value) {
+    bundle.value = false;
+    mode.value = 'choose';
+  }
 }
 async function pmImport() {
   const pick: PostmanPick = { collections: [...pmPick.value.collections], environments: [...pmPick.value.environments], globals: pmPick.value.globals };
@@ -210,7 +228,7 @@ async function importSite() {
     <div class="modal-box w-[46rem] max-w-[95vw] space-y-4">
       <div class="flex items-center gap-2">
         <button v-if="mode !== 'choose' && !summary" class="btn btn-ghost btn-sm btn-square -ml-2" title="Other ways to import" aria-label="Other ways to import" :disabled="busy" @click="pickMode('choose')"><Icon name="chevron" class="size-4 rotate-180" /></button>
-        <h3 class="flex-1 text-lg font-semibold tracking-tight">{{ TITLES[mode] }}<span class="font-normal opacity-50"> · {{ workspace?.name }}</span></h3>
+        <h3 class="flex-1 text-lg font-semibold tracking-tight">{{ title }}<span class="font-normal opacity-50"> · {{ workspace?.name }}</span></h3>
       </div>
 
       <!-- The choice -->
@@ -219,7 +237,7 @@ async function importSite() {
           <button class="import-choice" @click="pickMode('file')">
             <span class="import-choice-icon"><Icon name="file" class="size-7" /></span>
             <span class="font-semibold">File or paste</span>
-            <span class="text-xs opacity-60">Postman collection, OpenAPI / Swagger, a DialCatz export or a cURL command</span>
+            <span class="text-xs opacity-60">Collection, environment or export zip (DialCatz or Postman), OpenAPI / Swagger, cURL</span>
           </button>
           <button class="import-choice" @click="pickMode('devcatz')">
             <img :src="devcatzLogo" alt="" class="size-12" draggable="false" />
@@ -238,7 +256,7 @@ async function importSite() {
 
       <!-- File or paste -->
       <template v-else-if="mode === 'file'">
-        <p class="text-sm opacity-70">Postman collections (v2 / v2.1), OpenAPI 3 or Swagger 2 (JSON or YAML), DialCatz exports, or a single cURL command. It becomes a new collection.</p>
+        <p class="text-sm opacity-70">Postman collections (v2 / v2.1), OpenAPI 3 or Swagger 2 (JSON or YAML), DialCatz exports, or a single cURL command. One collection goes straight in; an export zip (DialCatz or Postman), several files or environment files let you choose what comes in.</p>
         <button class="btn btn-sm gap-2" :disabled="busy" @click="fromFile"><Icon name="file" class="size-4" />Choose a file…</button>
         <div class="divider my-0 text-xs opacity-50">or paste</div>
         <textarea v-model="text" class="textarea selectable h-44 w-full font-mono text-xs" placeholder="{ &quot;info&quot;: …, &quot;item&quot;: [ … ] }   openapi: 3.0.0 …   curl https://api.example.com/users" spellcheck="false" />
@@ -348,7 +366,7 @@ async function importSite() {
           <p class="text-xs opacity-50">Postman “secret” values stay marked secret. Variable values stay on this computer{{ workspace?.serverId ? ' (team environments share only the names)' : '' }}.</p>
         </template>
         <template v-else>
-          <div class="alert alert-success alert-soft text-sm"><CatMood mood="success" class="size-7 shrink-0 -my-0.5" /><span>Moved {{ plural(summary.collections.length, 'collection') }} with {{ plural(totalRequests, 'request') }}<template v-if="summary.environments.length">, {{ plural(summary.environments.length, 'environment') }}</template><template v-if="summary.globals"> and {{ plural(summary.globals, 'global') }}</template>.</span></div>
+          <div class="alert alert-success alert-soft text-sm"><CatMood mood="success" class="size-7 shrink-0 -my-0.5" /><span>{{ bundle ? 'Imported' : 'Moved' }} {{ plural(summary.collections.length, 'collection') }} with {{ plural(totalRequests, 'request') }}<template v-if="summary.environments.length">, {{ plural(summary.environments.length, 'environment') }}</template><template v-if="summary.globals"> and {{ plural(summary.globals, 'global') }}</template>.</span></div>
           <div class="max-h-60 space-y-1 overflow-auto text-sm">
             <p v-for="c in summary.collections" :key="c.name"><Icon name="collection" class="inline size-4 opacity-60" /> {{ c.name }} <span class="opacity-50">· {{ plural(c.requests, 'request') }}</span></p>
             <p v-for="e in summary.environments" :key="e"><Icon name="environments" class="inline size-4 opacity-60" /> {{ e }}</p>

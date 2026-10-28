@@ -2164,3 +2164,6 @@ body.is-resizing * {
 .json-cell-btn:hover {
   background: oklch(from var(--color-primary) l c h / 0.28);
 }
+.env-row:hover .tree-more {
+  opacity: 0.6;
+}

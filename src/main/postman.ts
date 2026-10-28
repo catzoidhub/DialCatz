@@ -21,6 +21,13 @@ export interface PostmanFound {
 
 const MAX_FILES = 2000;
 
+/** Packs a folder into a zip with the system's tar (bsdtar writes zip by the name, -a, on macOS and Windows 10+). */
+export function zipFolder(dir: string, zip: string): Promise<void> {
+  return new Promise((resolve, reject) =>
+    execFile(process.platform === 'win32' ? 'tar.exe' : '/usr/bin/tar', ['-a', '-cf', zip, '-C', dir, '.'], { timeout: 120_000 }, (err) => (err ? reject(new Error(`Could not write ${zip}: ${err.message}`)) : resolve())),
+  );
+}
+
 /** Unpacks a zip with the system's tar (bsdtar reads zip on macOS and Windows 10+). */
 function unzip(zip: string): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), 'dialcatz-postman-'));
@@ -57,6 +64,27 @@ function classify(file: string, found: PostmanFound): void {
   }
   // Postman's dump has an archive.json index: nothing to import from it.
   if (/archive\.json$/i.test(file)) return;
+  // DialCatz's own collection file (Export → DialCatz format) and globals (in an Export all zip)
+  if (doc.dialcatz === 1 && doc.collection && Array.isArray(doc.items)) {
+    try {
+      found.collections.push(importText(text));
+    } catch (e) {
+      found.skipped.push(`${file} (${(e as Error).message})`);
+    }
+    return;
+  }
+  if (doc.dialcatz === 1 && doc.kind === 'globals' && Array.isArray(doc.variables)) {
+    const list = (doc.variables as { key?: unknown; value?: unknown; enabled?: unknown; secret?: unknown }[]).filter((v) => v && typeof v.key === 'string' && v.key);
+    found.globals.push(...list.map((v) => ({ key: String(v.key), value: v.value == null ? '' : String(v.value), enabled: v.enabled !== false, secret: v.secret === true })));
+    return;
+  }
+  // DialCatz's own environment file (Variables → Export)
+  const own = doc.environment as { name?: unknown; variables?: unknown } | undefined;
+  if (doc.dialcatz === 1 && doc.kind === 'environment' && own && Array.isArray(own.variables)) {
+    const list = (own.variables as { key?: unknown; value?: unknown; enabled?: unknown; secret?: unknown }[]).filter((v) => v && typeof v.key === 'string' && v.key);
+    found.environments.push({ id: uid('e_'), name: String(own.name || 'Environment'), variables: list.map((v) => ({ key: String(v.key), value: v.value == null ? '' : String(v.value), enabled: v.enabled !== false, secret: v.secret === true })) });
+    return;
+  }
   const scope = doc._postman_variable_scope;
   if (Array.isArray(doc.values) && (scope === 'environment' || (typeof doc.name === 'string' && scope !== 'globals'))) {
     found.environments.push({ id: uid('e_'), name: String(doc.name || 'Environment'), variables: vars(doc.values as PmVar[]) });
@@ -76,7 +104,7 @@ function classify(file: string, found: PostmanFound): void {
     }
     return;
   }
-  found.skipped.push(`${file} (not a Postman collection or environment)`);
+  found.skipped.push(`${file} (not a Postman collection or a DialCatz / Postman environment)`);
 }
 
 /** Reads everything Postman-shaped in the given files, folders or zips. */

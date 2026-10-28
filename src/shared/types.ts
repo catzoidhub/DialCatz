@@ -470,6 +470,9 @@ export interface PostmanPick {
   globals: boolean;
 }
 
+/** Export files: DialCatz's own format, or Postman's (for people who open them in Postman). */
+export type ExportFormat = 'dialcatz' | 'postman';
+
 /** A connection DBCatz shares in its bridge.json (no passwords): a saved one, or a DevCatz service (svc:<id>). */
 export interface DbCatzConnection {
   id: string;
@@ -601,7 +604,11 @@ export interface DialCatzApi {
   /** Imports a Postman v2 collection, an OpenAPI 3 document or a DialCatz export (JSON / YAML text) as a collection. */
   importText(workspaceId: string, text: string): Promise<{ workspace: Workspace; collectionId: string; count: number }>;
   /** Picks a file and imports it like importText (null: cancelled). */
-  importFile(workspaceId: string): Promise<{ workspace: Workspace; collectionId: string; count: number } | null>;
+  /**
+   * Picks files: one collection file goes straight in (`collection`); an export zip, several files or an environment
+   * file come back as a list to pick from (`choice`, then migratePostman with its token). Null when cancelled.
+   */
+  importFile(workspaceId: string): Promise<{ kind: 'collection'; workspace: Workspace; collectionId: string; count: number } | { kind: 'choice'; choice: PostmanChoice } | null>;
   /** Copies a collection into another workspace: a new copy (named), or replacing / merging into one of the same name. */
   copyCollection(fromWorkspaceId: string, collectionId: string, toWorkspaceId: string, mode: 'new' | 'replace' | 'merge', name: string): Promise<{ workspace: Workspace; collectionId: string }>;
   /** DevCatz: its local sites; an environment and / or a collection of routes for one of them. */
@@ -617,8 +624,8 @@ export interface DialCatzApi {
   postmanContents(key: string, postmanWorkspaceIds: string[]): Promise<PostmanChoice>;
   /** Moves the picked collections, environments (and globals) of those workspaces here (progress on onPostmanProgress). */
   migratePostmanApi(workspaceId: string, key: string, postmanWorkspaceIds: string[], pick: PostmanPick): Promise<{ workspace: Workspace; summary: PostmanSummary }>;
-  /** Saves a collection as a DialCatz JSON file (false: cancelled). */
-  exportCollection(workspaceId: string, collectionId: string): Promise<boolean>;
+  /** Saves a collection as a DialCatz file (`.dialcatz_collection.json`) or a Postman v2.1 collection (false: cancelled). */
+  exportCollection(workspaceId: string, collectionId: string, format?: ExportFormat): Promise<boolean>;
 
   /** Sends a request in its wire form (variables, auth and body already resolved by the window: shared/request.ts). */
   send(wire: WireRequest, token: string, options?: SendOptions): Promise<SendResult>;
@@ -668,6 +675,15 @@ export interface DialCatzApi {
   resolveConflict(workspaceId: string, itemId: string, keep: 'mine' | 'theirs'): Promise<Workspace>;
 
   openUrl(url: string): Promise<void>;
+  /** Saves an environment as a DialCatz (or Postman) environment file; false when cancelled. */
+  exportEnvironment(workspaceId: string, envId: string, options: { values: boolean; secrets: boolean; format: ExportFormat }): Promise<boolean>;
+  /**
+   * Export all: every collection, environment and the globals of a workspace in one zip, in DialCatz's or Postman's
+   * format (Postman's data-export layout). Variable values optional, secret values only when asked; false: cancelled.
+   */
+  exportWorkspace(workspaceId: string, options: { values: boolean; secrets: boolean; format: ExportFormat }): Promise<{ collections: number; environments: number } | false>;
+  /** Picks Postman / DialCatz environment files (or a Postman export zip) and adds their environments; null when cancelled. */
+  importEnvironments(workspaceId: string): Promise<{ workspace: Workspace; names: string[]; skipped: string[] } | null>;
   /** DBCatz on this computer, and the connections it shares (with a DBCatz that writes bridge.json). */
   dbcatzInfo(): Promise<{ installed: boolean; bridge: boolean; connections: DbCatzConnection[] }>;
   /** Opens a table in DBCatz (dbcatz://open…). */
@@ -703,7 +719,7 @@ export const API_METHODS = [
   'aiModels', 'aiTest', 'aiAsk', 'aiExplain', 'aiTests', 'aiBody', 'aiCancel',
   'send', 'pickFile', 'pickDataFile', 'saveText', 'cancel', 'wsConnect', 'wsSend', 'wsClose', 'saveResponse', 'history', 'addHistory', 'clearHistory',
   'servers', 'probeServer', 'connectWithToken', 'connectWithCode', 'refreshServer', 'disconnectServer', 'subscribeWorkspace', 'setPresence', 'presence', 'syncWorkspace', 'resolveConflict',
-  'openUrl', 'dbcatzInfo', 'dbcatzOpen', 'saveDbTarget', 'copyText', 'hostName',
+  'openUrl', 'exportWorkspace', 'exportEnvironment', 'importEnvironments', 'dbcatzInfo', 'dbcatzOpen', 'saveDbTarget', 'copyText', 'hostName',
   'updateState', 'updateCheck', 'updateDownload', 'updateCancel', 'updateInstall', 'updateSkip', 'updatePrefs', 'setUpdatePrefs',
   'uninstallPlan', 'uninstall', 'reportPreview', 'reportSend', 'captureWindow', 'reportError', 'reportPrefs', 'setReportPrefs',
 ] as const satisfies readonly (keyof DialCatzApi)[];

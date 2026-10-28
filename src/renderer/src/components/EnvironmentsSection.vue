@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
-import { uid, type Environment, type EnvVariable } from '@shared/types';
+import { uid, type Environment, type EnvVariable, type ExportFormat } from '@shared/types';
 import { attempt, envDirty, envFocus, notify, pendingSection, plain, readOnly, section, servers, setWorkspace, workspace } from '../state';
 import { keyLabel } from '../platform';
 import WorkspaceBar from './WorkspaceBar.vue';
@@ -213,6 +213,37 @@ async function confirmBulkDelete() {
   notify('success', `Deleted ${list.length} environments`);
 }
 
+// ---------------------------------------------------------------- duplicate, export, import
+
+/** A copy with the same variables and values, named "<name> copy" (or "copy 2" …), opened at once. */
+async function duplicate(e: Environment) {
+  const w = workspace.value;
+  if (!w) return;
+  const names = new Set(w.environments.map((x) => x.name.toLowerCase()));
+  let name = `${e.name} copy`;
+  for (let n = 2; names.has(name.toLowerCase()); n++) name = `${e.name} copy ${n}`;
+  const id = uid('e_');
+  const saved = await attempt(() => api.saveEnvironment(w.id, plain({ id, name, variables: e.variables })), `“${name}” made`);
+  if (!saved) return;
+  setWorkspace(saved);
+  pick(id);
+}
+/** Export: values are optional, secret values off unless chosen (the file can travel). */
+const exporting = ref<{ env: Environment; values: boolean; secrets: boolean; format: ExportFormat } | null>(null);
+async function doExport() {
+  const x = exporting.value!;
+  exporting.value = null;
+  if (await attempt(() => api.exportEnvironment(workspace.value!.id, x.env.id, { values: x.values, secrets: x.values && x.secrets, format: x.format }))) notify('success', `“${x.env.name}” exported`);
+}
+async function importEnvs() {
+  const r = await attempt(() => api.importEnvironments(workspace.value!.id));
+  if (!r) return;
+  setWorkspace(r.workspace);
+  const last = r.workspace.environments.find((e) => e.name === r.names[r.names.length - 1]);
+  if (last) pick(last.id);
+  notify('success', r.names.length === 1 ? `“${r.names[0]}” imported` : `${r.names.length} environments imported`);
+}
+
 // ---------------------------------------------------------------- sharing values with the team (opt-in)
 
 const me = computed(() => servers.value.find((x) => x.id === workspace.value?.serverId)?.identity?.member ?? null);
@@ -301,10 +332,11 @@ async function activate() {
           <ul tabindex="0" class="dropdown-content menu z-30 mt-1 w-48 rounded-box border border-base-300/60 bg-base-100 p-1 shadow-lg">
             <li><button :disabled="readOnly" @click="((prompt = { mode: 'new' }), ($event.currentTarget as HTMLElement).blur())">New environment</button></li>
             <li><button @click="(envList?.newGroup(), ($event.currentTarget as HTMLElement).blur())">New group</button></li>
+            <li><button :disabled="readOnly" @click="(importEnvs(), ($event.currentTarget as HTMLElement).blur())">Import environment…</button></li>
           </ul>
         </div>
       </div>
-      <EnvList ref="envList" :selected="selected" :picking="envPicking" @pick="pick" @tick="pickEnv" @remove="(e) => (deleting = e)" />
+      <EnvList ref="envList" :selected="selected" :picking="envPicking" @pick="pick" @tick="pickEnv" @remove="(e) => (deleting = e)" @duplicate="duplicate" @export="(e) => (exporting = { env: e, values: true, secrets: false, format: 'dialcatz' })" />
     </aside>
 
     <section class="flex min-w-0 flex-1 flex-col">
@@ -318,6 +350,8 @@ async function activate() {
           <button v-if="env.id !== workspace?.activeEnvironmentId" class="btn btn-sm" title="The environment for scratch tabs and collections that do not pick their own" @click="activate">Make default</button>
           <span v-else class="badge badge-soft badge-success" title="The environment for scratch tabs and collections that do not pick their own">Default</span>
           <button v-if="team && !readOnly" class="btn btn-ghost btn-sm" title="Store a copy of the values on the server for your team" @click="startSharing">Share values…</button>
+          <button class="btn btn-ghost btn-sm btn-square" title="Duplicate" aria-label="Duplicate" :disabled="readOnly" @click="duplicate(env)"><Icon name="copy" class="size-4" /></button>
+          <button class="btn btn-ghost btn-sm btn-square" title="Export…" aria-label="Export" @click="exporting = { env, values: true, secrets: false, format: 'dialcatz' }"><Icon name="upload" class="size-4" /></button>
           <button class="btn btn-ghost btn-sm btn-square" title="Rename" :disabled="readOnly" @click="prompt = { mode: 'rename' }"><Icon name="pencil" class="size-4" /></button>
           <button class="btn btn-ghost btn-sm btn-square text-error" title="Delete" :disabled="readOnly" @click="deleting = env"><Icon name="trash" class="size-4" /></button>
         </template>
@@ -433,6 +467,33 @@ async function activate() {
     </dialog>
 
     <PromptDialog v-if="prompt" :title="prompt.mode === 'new' ? 'New environment' : 'Rename environment'" :value="prompt.mode === 'new' ? 'Local' : (env?.name ?? '')" :confirm="prompt.mode === 'new' ? 'Create' : 'Rename'" @ok="named" @cancel="prompt = null" />
+    <dialog v-if="exporting" open class="modal modal-open" @keydown.esc="exporting = null">
+      <div class="modal-box w-[30rem] max-w-[95vw] space-y-4">
+        <h3 class="text-lg font-semibold tracking-tight">Export “{{ exporting.env.name }}”</h3>
+        <div class="seg seg-choice w-full" role="radiogroup" aria-label="Format">
+          <button type="button" role="radio" class="seg-item flex-1 normal-case" :class="{ 'is-active': exporting.format === 'dialcatz' }" :aria-checked="exporting.format === 'dialcatz'" @click="exporting.format = 'dialcatz'">DialCatz format</button>
+          <button type="button" role="radio" class="seg-item flex-1 normal-case" :class="{ 'is-active': exporting.format === 'postman' }" :aria-checked="exporting.format === 'postman'" @click="exporting.format = 'postman'">Postman format</button>
+        </div>
+        <p class="text-sm opacity-70">
+          <template v-if="exporting.format === 'dialcatz'"><span class="font-mono text-xs">{{ exporting.env.name }}.dialcatz_environment.json</span> — for DialCatz (Variables → + → Import environment).</template>
+          <template v-else><span class="font-mono text-xs">{{ exporting.env.name }}.postman_environment.json</span> — for Postman; DialCatz imports it too.</template>
+          {{ exporting.env.variables.length }} variable{{ exporting.env.variables.length === 1 ? '' : 's' }}.
+        </p>
+        <div class="opt-row">
+          <span class="flex flex-col"><span class="label-caps">Include values</span><span class="text-xs opacity-50">Off: names only, each person fills in their own</span></span>
+          <input v-model="exporting.values" type="checkbox" class="toggle toggle-sm toggle-primary" />
+        </div>
+        <div class="opt-row">
+          <span class="flex flex-col"><span class="label-caps">Include secret values</span><span class="text-xs opacity-50">Tokens, keys, passwords — the file is plain text</span></span>
+          <input v-model="exporting.secrets" type="checkbox" class="toggle toggle-sm toggle-warning" :disabled="!exporting.values" />
+        </div>
+        <div class="modal-action">
+          <button class="btn btn-ghost btn-sm" @click="exporting = null">Cancel</button>
+          <button class="btn btn-primary btn-sm gap-1.5" @click="doExport"><Icon name="upload" class="size-4" />Export…</button>
+        </div>
+      </div>
+      <div class="modal-backdrop" @click="exporting = null" />
+    </dialog>
     <ConfirmDialog
       v-if="deleting"
       :title="`Delete “${deleting.name}”?`"

@@ -1,9 +1,9 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from 'electron';
 import { execFile } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
-import { hostname } from 'node:os';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { API_METHODS, uid, type ConnectRequest, type DialCatzApi, type HistoryEntry, type TreeItem, type WireRequest } from '@shared/types';
+import { API_METHODS, uid, type ConnectRequest, type PostmanChoice, type DialCatzApi, type HistoryEntry, type TreeItem, type WireRequest } from '@shared/types';
 import { dataDir, store } from './store';
 import { applySettings, setAiKey, setSettings, settings } from './settings';
 import * as http from './http';
@@ -16,6 +16,7 @@ import * as devcatz from './devcatz';
 import * as dbcatz from './dbcatz';
 import * as postman from './postman';
 import * as postmanApi from './postman-api';
+import { toPostman } from './postman-export';
 import * as datafile from './datafile';
 import * as ai from './ai-features';
 import { siteBase } from './shared';
@@ -152,9 +153,20 @@ function api(): DialCatzApi {
     saveLayout: async (id, layout) => ws.saveLayout(id, layout),
     importText: async (id, text) => doImport(id, text),
     importFile: async (id) => {
-      const r = await dialog.showOpenDialog(win!, { title: 'Import a collection', properties: ['openFile'], filters: [{ name: 'Collections (JSON, YAML)', extensions: ['json', 'yaml', 'yml'] }] });
-      if (r.canceled || !r.filePaths[0]) return null;
-      return doImport(id, readFileSync(r.filePaths[0], 'utf8'));
+      const r = await dialog.showOpenDialog(win!, {
+        title: 'Import a collection, environment or export',
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: 'Collections, environments, exports (JSON, YAML, zip)', extensions: ['json', 'yaml', 'yml', 'zip'] }],
+      });
+      if (r.canceled || !r.filePaths.length) return null;
+      // One collection file goes straight in; an export (zip), several files or an environment go through the pick list.
+      if (r.filePaths.length === 1 && !/\.zip$/i.test(r.filePaths[0])) {
+        const text = readFileSync(r.filePaths[0], 'utf8');
+        if (!isVariablesFile(text)) return { kind: 'collection' as const, ...doImport(id, text) };
+      }
+      const found = await postman.read(r.filePaths);
+      if (!found.collections.length && !found.environments.length && !found.globals.length) throw new Error(`No collections or environments in there${found.skipped.length ? ` (${found.skipped.length} file(s) skipped)` : ''}`);
+      return { kind: 'choice' as const, choice: keepExport(found) };
     },
     copyCollection: async (fromId, collectionId, toId, mode, name) => {
       if (fromId === toId && mode !== 'new') throw new Error('Pick another workspace');
@@ -206,21 +218,14 @@ function api(): DialCatzApi {
     },
     postmanReadExport: async (how) => {
       const r = await dialog.showOpenDialog(win!, {
-        title: how === 'folder' ? 'Choose the folder of your Postman export' : 'Choose your Postman export (zip) or exported JSON files',
+        title: how === 'folder' ? 'Choose the folder of an export' : 'Choose a Postman or DialCatz export (zip) or exported JSON files',
         properties: how === 'folder' ? ['openDirectory'] : ['openFile', 'multiSelections'],
         filters: how === 'folder' ? undefined : [{ name: 'Postman export', extensions: ['zip', 'json'] }],
       });
       if (r.canceled || !r.filePaths.length) return null;
       const found = await postman.read(r.filePaths);
       if (!found.collections.length && !found.environments.length && !found.globals.length) throw new Error(`No Postman collections or environments in there${found.skipped.length ? ` (${found.skipped.length} file(s) skipped)` : ''}`);
-      // kept until the user has picked (only the last export read)
-      postmanExport = { token: uid('px_'), found };
-      return {
-        token: postmanExport.token,
-        groups: [{ name: 'Export', collections: found.collections.map((c, i) => ({ id: String(i), name: c.root.name, requests: c.items.filter((x) => x.kind === 'request').length })), environments: found.environments.map((e, i) => ({ id: String(i), name: e.name })) }],
-        globals: found.globals.length > 0,
-        skipped: found.skipped.map(shortSkip),
-      };
+      return keepExport(found);
     },
     migratePostman: async (id, token, pick) => {
       if (!postmanExport || postmanExport.token !== token) throw new Error('Choose the Postman export again');
@@ -243,10 +248,101 @@ function api(): DialCatzApi {
       if (!found.collections.length && !found.environments.length && !found.globals.length) throw new Error(`Nothing could be read from Postman${found.skipped.length ? ` (${found.skipped.length} could not be read)` : ''}`);
       return applyPostman(id, found);
     },
-    exportCollection: async (id, collectionId) => {
+    exportWorkspace: async (id, options) => {
       const w = ws.load(id);
-      const data = exportCollection(w.items, collectionId);
-      const r = await dialog.showSaveDialog(win!, { defaultPath: join(app.getPath('downloads'), `${data.collection.name.replace(/[^\w.-]+/g, '-')}.dialcatz.json`), filters: [{ name: 'DialCatz collection', extensions: ['json'] }] });
+      const postmanFormat = options?.format === 'postman';
+      const values = options?.values === true;
+      const secrets = values && options?.secrets === true;
+      const value = (v: { value: string; secret: boolean }) => (values && (!v.secret || secrets) ? v.value : '');
+      const fmt = postmanFormat ? 'postman' : 'dialcatz';
+      const stamp = new Date().toISOString().slice(0, 10);
+      const safe = (n: string) => n.replace(/[^\w.-]+/g, '-').slice(0, 80) || 'untitled';
+      const r = await dialog.showSaveDialog(win!, { defaultPath: join(app.getPath('downloads'), `${safe(w.name)}-${stamp}.${fmt}_export.zip`), filters: [{ name: 'Workspace export', extensions: ['zip'] }] });
+      if (r.canceled || !r.filePath) return false;
+      const dir = mkdtempSync(join(tmpdir(), 'dialcatz-export-'));
+      try {
+        // Postman's data-export layout: collections/, environments/, and the globals beside them.
+        mkdirSync(join(dir, 'collections'));
+        mkdirSync(join(dir, 'environments'));
+        const used = new Set<string>();
+        const unique = (folder: string, name: string, ext: string) => {
+          let f = `${safe(name)}.${ext}`;
+          for (let n = 2; used.has(`${folder}/${f}`); n++) f = `${safe(name)}-${n}.${ext}`;
+          used.add(`${folder}/${f}`);
+          return join(dir, folder, f);
+        };
+        const cols = w.items.filter((i) => i.kind === 'collection');
+        for (const c of cols) writeFileSync(unique('collections', c.name, `${fmt}_collection.json`), JSON.stringify(postmanFormat ? toPostman(w.items, c.id) : exportCollection(w.items, c.id), null, 2));
+        for (const e of w.environments) {
+          const data = postmanFormat
+            ? { id: e.id, name: e.name, values: e.variables.map((v) => ({ key: v.key, value: value(v), type: v.secret ? 'secret' : 'default', enabled: v.enabled })), _postman_variable_scope: 'environment', _postman_exported_at: new Date().toISOString(), _postman_exported_using: `DialCatz/${app.getVersion()}` }
+            : { dialcatz: 1, kind: 'environment', exportedBy: `DialCatz ${app.getVersion()}`, environment: { name: e.name, variables: e.variables.map((v) => ({ key: v.key, value: value(v), enabled: v.enabled, secret: v.secret })) } };
+          writeFileSync(unique('environments', e.name, `${fmt}_environment.json`), JSON.stringify(data, null, 2));
+        }
+        if (w.globals.length) {
+          const g = postmanFormat
+            ? { name: 'Globals', values: w.globals.map((v) => ({ key: v.key, value: value(v), type: v.secret ? 'secret' : 'default', enabled: v.enabled })), _postman_variable_scope: 'globals' }
+            : { dialcatz: 1, kind: 'globals', exportedBy: `DialCatz ${app.getVersion()}`, variables: w.globals.map((v) => ({ key: v.key, value: value(v), enabled: v.enabled, secret: v.secret })) };
+          writeFileSync(join(dir, `globals.${fmt}_globals.json`), JSON.stringify(g, null, 2));
+        }
+        rmSync(r.filePath, { force: true });
+        await postman.zipFolder(dir, r.filePath);
+        chmodSync(r.filePath, 0o600);
+        return { collections: cols.length, environments: w.environments.length };
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    exportEnvironment: async (id, envId, options) => {
+      const w = ws.load(id);
+      const env = w.environments.find((e) => e.id === envId);
+      if (!env) throw new Error('That environment does not exist any more');
+      const values = options?.values === true;
+      const secrets = values && options?.secrets === true;
+      const value = (v: { value: string; secret: boolean }) => (values && (!v.secret || secrets) ? v.value : '');
+      // Secrets keep their kind, without a value unless asked. DialCatz's own format by default; Postman's on request.
+      const postmanFormat = options?.format === 'postman';
+      const data = postmanFormat
+        ? {
+            id: env.id,
+            name: env.name,
+            values: env.variables.map((v) => ({ key: v.key, value: value(v), type: v.secret ? 'secret' : 'default', enabled: v.enabled })),
+            _postman_variable_scope: 'environment',
+            _postman_exported_at: new Date().toISOString(),
+            _postman_exported_using: `DialCatz/${app.getVersion()}`,
+          }
+        : { dialcatz: 1, kind: 'environment', exportedBy: `DialCatz ${app.getVersion()}`, environment: { name: env.name, variables: env.variables.map((v) => ({ key: v.key, value: value(v), enabled: v.enabled, secret: v.secret })) } };
+      const file = `${env.name.replace(/[^\w.-]+/g, '-')}.${postmanFormat ? 'postman' : 'dialcatz'}_environment.json`;
+      const r = await dialog.showSaveDialog(win!, { defaultPath: join(app.getPath('downloads'), file), filters: [{ name: 'Environment', extensions: ['json'] }] });
+      if (r.canceled || !r.filePath) return false;
+      writeFileSync(r.filePath, JSON.stringify(data, null, 2), { mode: 0o600 });
+      return true;
+    },
+    importEnvironments: async (id) => {
+      const r = await dialog.showOpenDialog(win!, { title: 'Choose environment files (Postman or DialCatz), or a Postman export', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Environment', extensions: ['json', 'zip'] }] });
+      if (r.canceled || !r.filePaths.length) return null;
+      const found = await postman.read(r.filePaths);
+      if (!found.environments.length) throw new Error(`No environments in there${found.collections.length ? ' (collections are imported with Import…)' : ''}`);
+      let w = ws.load(id);
+      const taken = new Set(w.environments.map((e) => e.name.toLowerCase()));
+      const names: string[] = [];
+      for (const e of found.environments) {
+        // Same name as one here: "Staging 2", "Staging 3" …
+        let name = e.name;
+        for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${e.name} ${n}`;
+        taken.add(name.toLowerCase());
+        w = ws.saveEnvironment(id, { ...e, name });
+        names.push(name);
+      }
+      if (w.serverId) void srv.sync(id).then(() => send('app:workspaces', null));
+      return { workspace: w, names, skipped: found.skipped.map(shortSkip) };
+    },
+    exportCollection: async (id, collectionId, format) => {
+      const w = ws.load(id);
+      const postmanFormat = format === 'postman';
+      const data = postmanFormat ? toPostman(w.items, collectionId) : exportCollection(w.items, collectionId);
+      const name = (w.items.find((i) => i.id === collectionId)?.name ?? 'collection').replace(/[^\w.-]+/g, '-');
+      const r = await dialog.showSaveDialog(win!, { defaultPath: join(app.getPath('downloads'), `${name}.${postmanFormat ? 'postman' : 'dialcatz'}_collection.json`), filters: [{ name: postmanFormat ? 'Postman collection' : 'DialCatz collection', extensions: ['json'] }] });
       if (r.canceled || !r.filePath) return false;
       writeFileSync(r.filePath, JSON.stringify(data, null, 2));
       return true;
@@ -367,6 +463,26 @@ function api(): DialCatzApi {
 
 /** The Postman export read last, until the user has picked what to bring over. */
 let postmanExport: { token: string; found: postman.PostmanFound } | null = null;
+/** Keeps what an export held until the user has picked (only the last one read), and lists it to pick from. */
+function keepExport(found: postman.PostmanFound): PostmanChoice {
+  postmanExport = { token: uid('px_'), found };
+  return {
+    token: postmanExport.token,
+    groups: [{ name: 'Export', collections: found.collections.map((c, i) => ({ id: String(i), name: c.root.name, requests: c.items.filter((x) => x.kind === 'request').length })), environments: found.environments.map((e, i) => ({ id: String(i), name: e.name })) }],
+    globals: found.globals.length > 0,
+    skipped: found.skipped.map(shortSkip),
+  };
+}
+/** An environment or globals file (DialCatz's or Postman's), not a collection. */
+function isVariablesFile(text: string): boolean {
+  try {
+    const d = JSON.parse(text) as Record<string, unknown>;
+    return (d.dialcatz === 1 && (d.kind === 'environment' || d.kind === 'globals')) || (Array.isArray(d.values) && typeof d._postman_variable_scope === 'string');
+  } catch {
+    return false;
+  }
+}
+
 /** A skipped file without the temporary unzip folder in front. */
 const shortSkip = (f: string) => f.replace(/^.*dialcatz-postman-[^/]+\//, '');
 

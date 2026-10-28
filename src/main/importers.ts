@@ -95,20 +95,35 @@ function pmRequest(r: Record<string, unknown> | string): RequestSpec {
   return spec;
 }
 
+/** Postman's `event` list: the pre-request and test scripts (`exec` is text or a list of lines). */
+function pmScripts(ev: unknown): { preRequest?: string; tests?: string } {
+  const out: { preRequest?: string; tests?: string } = {};
+  if (!Array.isArray(ev)) return out;
+  for (const e of ev as { listen?: string; script?: { exec?: unknown } }[]) {
+    const x = e?.script?.exec;
+    const text = Array.isArray(x) ? x.map(String).join('\n') : typeof x === 'string' ? x : '';
+    if (!text.trim()) continue;
+    if (e.listen === 'prerequest') out.preRequest = text;
+    else if (e.listen === 'test') out.tests = text;
+  }
+  return out;
+}
+
 function fromPostman(doc: Record<string, unknown>): { root: TreeItem; items: TreeItem[] } {
   const info = doc.info as { name?: string; description?: string } | undefined;
-  const root: TreeItem = { id: uid('c_'), kind: 'collection', parentId: null, name: info?.name || 'Imported collection', sort: 0, auth: pmAuth(doc.auth as PmAuth), description: typeof info?.description === 'string' ? info.description : undefined };
+  const root: TreeItem = { id: uid('c_'), kind: 'collection', parentId: null, name: info?.name || 'Imported collection', sort: 0, auth: pmAuth(doc.auth as PmAuth), description: describe(info?.description), ...pmScripts(doc.event) };
   if (root.auth?.mode === 'inherit') root.auth = { mode: 'none' };
   const items: TreeItem[] = [];
   const walk = (list: unknown, parentId: string) => {
     if (!Array.isArray(list)) return;
     list.forEach((it: Record<string, unknown>, n) => {
       if (Array.isArray(it.item)) {
-        const f: TreeItem = { id: uid('f_'), kind: 'folder', parentId, name: String(it.name ?? 'Folder'), sort: n, auth: pmAuth(it.auth as PmAuth) };
+        const f: TreeItem = { id: uid('f_'), kind: 'folder', parentId, name: String(it.name ?? 'Folder'), sort: n, auth: pmAuth(it.auth as PmAuth), description: describe(it.description), ...pmScripts(it.event) };
         items.push(f);
         walk(it.item, f.id);
       } else if (it.request) {
-        items.push({ id: uid('r_'), kind: 'request', parentId, name: String(it.name ?? 'Request'), sort: n, request: pmRequest(it.request as Record<string, unknown>) });
+        const req = it.request as Record<string, unknown>;
+        items.push({ id: uid('r_'), kind: 'request', parentId, name: String(it.name ?? 'Request'), sort: n, request: { ...pmRequest(req), ...pmScripts(it.event) }, description: describe(typeof req === 'object' ? req.description : undefined) });
       }
     });
   };
