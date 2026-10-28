@@ -80,6 +80,41 @@ const json = computed<unknown>(() => {
   }
 });
 const table = computed(() => (r.value && !r.value.binary ? tableOf(r.value.body, r.value.contentType, json.value) : null));
+/** Table cells that hold JSON (objects, arrays, or text that is JSON): "row:col" → the JSON pretty-printed. */
+const jsonCells = computed(() => {
+  const out = new Map<string, string>();
+  table.value?.rows.forEach((row, i) =>
+    row.forEach((cell, j) => {
+      if (cell.length < 2 || cell.length > 2_000_000 || !/^\s*[[{]/.test(cell)) return;
+      const pretty = prettyJson(cell);
+      if (pretty) out.set(`${i}:${j}`, pretty);
+    }),
+  );
+  return out;
+});
+/** A JSON cell opened as pretty, coloured JSON (like the Pretty view). */
+const cellView = ref<{ title: string; text: string } | null>(null);
+// Search inside it (Enter / Shift+Enter step through the matches, like the response search).
+const cellSearch = ref('');
+const cellMatches = ref(0);
+const cellIndex = ref(0);
+const cellSearchInput = ref<HTMLInputElement | null>(null);
+watch(cellSearch, () => (cellIndex.value = 0));
+function cellStep(d: number) {
+  if (cellMatches.value) cellIndex.value = (cellIndex.value + d + cellMatches.value) % cellMatches.value;
+}
+function openCell(i: number, j: number) {
+  const pretty = jsonCells.value.get(`${i}:${j}`);
+  if (!pretty) return;
+  cellView.value = { title: `Row ${i + 1} · ${table.value!.columns[j]}`, text: pretty };
+  cellSearch.value = '';
+  cellMatches.value = 0;
+  nextTick(() => cellSearchInput.value?.focus());
+}
+async function copyCell() {
+  await window.dialcatz.copyText(cellView.value?.text ?? '');
+  notify('success', 'JSON copied');
+}
 const b64 = computed(() => (r.value && !r.value.binary && r.value.body.length < 20_000_000 ? decodeBase64(r.value.body) : null));
 const b64Text = computed(() => (b64.value ? bytesAsText(b64.value.bytes) : null));
 const b64Mime = computed(() => (b64.value ? b64.value.mime || sniff(b64.value.bytes) : null));
@@ -376,7 +411,13 @@ function closeDecoded() {
             <tbody>
               <tr v-for="(row, i) in table.rows" :key="i">
                 <td class="opacity-40">{{ i + 1 }}</td>
-                <td v-for="(cell, j) in row" :key="j" class="max-w-80 truncate font-mono" :title="cell">{{ cell }}</td>
+                <td v-for="(cell, j) in row" :key="j" class="max-w-80 font-mono" :class="{ 'json-cell': jsonCells.has(`${i}:${j}`) }" :title="jsonCells.has(`${i}:${j}`) ? 'Click to read it as pretty JSON' : cell" @click="openCell(i, j)">
+                  <div v-if="jsonCells.has(`${i}:${j}`)" class="flex min-w-0 items-center gap-1.5">
+                    <button class="json-cell-btn" aria-label="Show as pretty JSON" @click.stop="openCell(i, j)">{ }</button>
+                    <span class="truncate">{{ cell }}</span>
+                  </div>
+                  <span v-else class="block truncate">{{ cell }}</span>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -460,6 +501,24 @@ function closeDecoded() {
         </div>
       </div>
       <div class="modal-backdrop" @click="closeDecoded" />
+    </dialog>
+    <dialog v-if="cellView" open class="modal modal-open" @keydown.esc="cellView = null">
+      <div class="modal-box flex max-h-[85vh] w-[46rem] max-w-[95vw] flex-col gap-3">
+        <div class="flex items-center gap-2">
+          <h3 class="min-w-0 flex-1 truncate font-mono text-sm font-semibold">{{ cellView.title }}</h3>
+          <div class="resp-search">
+            <Icon name="search" class="size-3.5 opacity-50" />
+            <input ref="cellSearchInput" v-model="cellSearch" placeholder="Search the JSON" spellcheck="false" @keydown.enter.exact.prevent="cellStep(1)" @keydown.shift.enter.prevent="cellStep(-1)" @keydown.esc.stop="cellSearch ? (cellSearch = '') : (cellView = null)" />
+            <span class="font-mono text-[11px] opacity-60">{{ cellSearch ? `${cellMatches ? cellIndex + 1 : 0}/${cellMatches}` : '' }}</span>
+            <button class="btn btn-ghost btn-xs btn-square" title="Previous (⇧↩)" :disabled="!cellMatches" @click="cellStep(-1)">↑</button>
+            <button class="btn btn-ghost btn-xs btn-square" title="Next (↩)" :disabled="!cellMatches" @click="cellStep(1)">↓</button>
+          </div>
+          <button class="btn btn-ghost btn-xs gap-1" @click="copyCell"><Icon name="copy" class="size-3.5" />Copy</button>
+          <button class="btn btn-ghost btn-xs btn-square" title="Close (Esc)" aria-label="Close" @click="cellView = null">✕</button>
+        </div>
+        <CodeEditor :model-value="cellView.text" language="json" readonly :search="cellSearch" :active-index="cellIndex" class="min-h-40 flex-1 rounded-xl border border-base-300/70" :style="{ height: `${Math.min(70, 4 + cellView.text.split('\n').length * 1.6)}vh` }" @matches="(n) => (cellMatches = n)" />
+      </div>
+      <div class="modal-backdrop" @click="cellView = null" />
     </dialog>
   </div>
 </template>
