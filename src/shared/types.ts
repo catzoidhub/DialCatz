@@ -142,6 +142,8 @@ export interface WorkspaceSummary {
   remoteId?: string;
   /** The member's role on a team workspace. */
   role?: Role;
+  /** Folder workspaces (git sharing): the folder its collections and environment names live in, as files. */
+  folder?: string;
 }
 
 /** How this computer shows a workspace's sidebar: personal, never synced to a Den. */
@@ -184,6 +186,8 @@ export interface Workspace extends WorkspaceSummary {
   syncError?: string;
   /** Team workspaces: my changes to a folder, collection or environment that a teammate's change won over (TODO #41). */
   conflicts?: SyncConflict[];
+  /** Folder workspaces: why the folder could not be read or written (it moved, a file has a mistake …). */
+  folderError?: string;
 }
 
 /**
@@ -443,6 +447,8 @@ export interface DevCatzSite {
   name: string;
   domain: string;
   path: string;
+  /** The site's repository already holds a DialCatz workspace (`<path>/dialcatz/dialcatz.yml`, git sharing). */
+  workspace?: boolean;
   url: string;
   framework: 'laravel' | 'nestjs' | 'node' | 'web' | 'go' | 'python' | 'other';
   hasEnv: boolean;
@@ -468,6 +474,220 @@ export interface PostmanPick {
   collections: string[];
   environments: string[];
   globals: boolean;
+}
+
+// ------------------------------------------------------------------ Git section (ported from DevCatz)
+
+export type GitHostKind = 'github' | 'gitlab' | 'gitea' | 'bitbucket';
+
+/** A connected hosting account, shared with the Catzoid apps (its token is in the Keychain item "Catzoid Git"). */
+export interface GitAccount {
+  id: string;
+  kind: GitHostKind;
+  /** Web URL: https://github.com, https://gitlab.example.com … */
+  baseUrl: string;
+  username: string;
+  name: string | null;
+  avatarUrl: string | null;
+  addedAt: string;
+}
+
+export interface GitRepo {
+  fullName: string;
+  name: string;
+  description: string | null;
+  private: boolean;
+  fork: boolean;
+  defaultBranch: string | null;
+  cloneHttps: string;
+  cloneSsh: string | null;
+  webUrl: string;
+  updatedAt: string | null;
+}
+
+export interface GitSummary {
+  branch: string | null;
+  detached: boolean;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  /** Changed, added, deleted and untracked files. */
+  changed: number;
+  conflicts: number;
+  /** A merge / rebase / cherry-pick / revert waiting to be finished. */
+  operation: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | null;
+}
+
+export interface GitFile {
+  path: string;
+  /** Renamed / copied from. */
+  from: string | null;
+  /** Porcelain codes: index (staged) and worktree letters (M A D R C U ? .). */
+  index: string;
+  worktree: string;
+  staged: boolean;
+  unstaged: boolean;
+  untracked: boolean;
+  conflict: boolean;
+}
+
+export interface GitRemote {
+  name: string;
+  url: string;
+  /** Parsed host / owner / repo and the matching connected account, if any. */
+  host: string | null;
+  owner: string | null;
+  repo: string | null;
+  webUrl: string | null;
+  accountId: string | null;
+  kind: GitHostKind | null;
+}
+
+export interface GitStatus extends GitSummary {
+  root: string;
+  head: string | null;
+  files: GitFile[];
+  remotes: GitRemote[];
+  stashes: number;
+  /** Commit author identity (git config user.name / user.email). */
+  identity: { name: string | null; email: string | null };
+  last: GitCommit | null;
+}
+
+export interface GitCommit {
+  sha: string;
+  short: string;
+  parents: string[];
+  author: string;
+  email: string;
+  date: string;
+  subject: string;
+  refs: string[];
+}
+
+export interface GitBranch {
+  name: string;
+  remote: boolean;
+  current: boolean;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  sha: string;
+  subject: string;
+  date: string;
+}
+
+export interface GitStash {
+  ref: string;
+  message: string;
+  date: string;
+}
+
+export interface GitTag {
+  name: string;
+  sha: string;
+  date: string;
+  subject: string;
+}
+
+/** An open pull / merge request of the site's repository. */
+export interface GitPull {
+  number: number;
+  title: string;
+  author: string;
+  draft: boolean;
+  head: string;
+  base: string;
+  url: string;
+  updatedAt: string;
+  /** CI result of the head commit (GitHub check runs, GitLab pipeline …), null = none / unknown. */
+  checks: 'success' | 'failure' | 'pending' | null;
+  /** Review / merge state as the host words it (approved, changes requested, mergeable …). */
+  review: string | null;
+}
+
+export interface GitSshKey {
+  path: string;
+  type: string;
+  comment: string;
+  fingerprint: string;
+  publicKey: string;
+}
+
+/** A clone in progress (Git → Clone). */
+export interface GitCloneTask {
+  url: string;
+  dest: string;
+  /** Last output lines (progress lines replace each other). */
+  lines: string[];
+  done: boolean;
+  error: string | null;
+}
+
+/** A repository in the Git section: a folder workspace's, one the user added, or one cloned here. */
+export interface GitRepoEntry {
+  id: string;
+  name: string;
+  path: string;
+  /** Added by the user (or cloned here); a folder workspace's repository is listed without that. */
+  added: boolean;
+  /** Folder workspaces inside it. */
+  workspaces: { id: string; name: string }[];
+  /** A DialCatz workspace folder in it (its root, or dialcatz/), opened or not. */
+  workspaceFolder: string | null;
+  /** null: not a Git repository (yet). */
+  summary: GitSummary | null;
+  /** A long operation running (fetch, pull, push …). */
+  busy: string | null;
+}
+
+export interface GitWorktree {
+  path: string;
+  branch: string | null;
+  head: string | null;
+  main: boolean;
+  locked: boolean;
+  prunable: boolean;
+  /** Commits that would be lost with it. */
+  unpushed: number;
+}
+
+export interface GitState {
+  /** `git --version`, null when git is missing (Xcode Command Line Tools not installed). */
+  version: string | null;
+  accounts: GitAccount[];
+  clone: GitCloneTask | null;
+  /** Default folder new clones go into (the folder most repositories live in). */
+  cloneDir: string;
+  repos: GitRepoEntry[];
+}
+
+export type GitSyncAction = 'fetch' | 'pull' | 'pull-rebase' | 'push' | 'push-force';
+
+
+/** A changed file in a folder workspace (its path inside the folder, and the item it is). */
+export interface FolderGitChange {
+  path: string;
+  kind: 'added' | 'modified' | 'deleted' | 'renamed' | 'conflict';
+  label: string;
+}
+/** Git state of a folder workspace's folder. */
+export interface FolderGitStatus {
+  repo: boolean;
+  gitMissing?: boolean;
+  root?: string;
+  branch?: string;
+  upstream?: string | null;
+  hasRemote?: boolean;
+  /** origin's URL. */
+  remoteUrl?: string;
+  ahead: number;
+  behind: number;
+  changes: FolderGitChange[];
+  conflicts: string[];
+  merging: boolean;
+  /** The last fetch's trouble, said plainly. */
+  error?: string;
 }
 
 /** Export files: DialCatz's own format, or Postman's (for people who open them in Postman). */
@@ -591,6 +811,108 @@ export interface DialCatzApi {
   createWorkspace(name: string): Promise<Workspace>;
   renameWorkspace(id: string, name: string): Promise<Workspace>;
   deleteWorkspace(id: string): Promise<void>;
+  /** Folder workspaces (git sharing): picks a folder and opens it as a workspace (a new one when it is empty). Null: cancelled. */
+  openFolderWorkspace(): Promise<Workspace | null>;
+  /** Moves a personal workspace into a folder the user picks: its collections and environment names are written there. */
+  useFolder(workspaceId: string): Promise<Workspace | null>;
+  /** Stops writing to the folder; its files stay. */
+  stopUsingFolder(workspaceId: string): Promise<Workspace>;
+  /** Shows the workspace's folder in Finder / Explorer. */
+  revealFolder(workspaceId: string): Promise<void>;
+  /** Git for a folder workspace (phase 2): its folder's status (fetch: ask the remote first). */
+  folderGitStatus(workspaceId: string, fetch?: boolean): Promise<FolderGitStatus>;
+  folderGitDiff(workspaceId: string, path: string): Promise<string>;
+  /** Commits this workspace's files only (never the rest of the repository). */
+  folderGitCommit(workspaceId: string, message: string): Promise<FolderGitStatus>;
+  folderGitPull(workspaceId: string): Promise<{ status: FolderGitStatus; merged: boolean; conflicts: boolean }>;
+  folderGitPush(workspaceId: string): Promise<FolderGitStatus>;
+  folderGitInit(workspaceId: string): Promise<FolderGitStatus>;
+  folderGitAbortMerge(workspaceId: string): Promise<FolderGitStatus>;
+  // ---- Git section (ported from DevCatz; accounts shared with the Catzoid apps). `id` is a repository's id (GitRepoEntry).
+  gitState(): Promise<GitState>;
+  /** The Git section is on screen (summaries every 20 s) or not. */
+  gitWatch(on: boolean): Promise<GitState>;
+  /** Adds a folder the user picks (a repository, or one to start Git in); its id, or null when cancelled. */
+  gitRepoAdd(): Promise<string | null>;
+  /** Takes a repository off the list (its files stay). */
+  gitRepoRemove(id: string): Promise<void>;
+  /** Output of the repository's fetch / pull / push (newest last). */
+  gitRepoLog(id: string): Promise<string[]>;
+  gitRevealRepo(id: string): Promise<void>;
+  /** Opens (or starts) the DialCatz workspace in the repository: its root or dialcatz/ folder. Returns the workspace id. */
+  gitOpenWorkspace(id: string): Promise<string>;
+  /** A folder picker for clones (null = cancelled). */
+  gitPickFolder(start: string): Promise<string | null>;
+  gitStatus(id: string): Promise<GitStatus | null>;
+  gitInit(id: string): Promise<void>;
+  gitDiff(id: string, file: string, staged: boolean): Promise<string>;
+  gitStage(id: string, files: string[]): Promise<void>;
+  gitUnstage(id: string, files: string[]): Promise<void>;
+  /** Throws away worktree changes of these files after asking (untracked files are deleted). */
+  gitDiscard(id: string, files: string[]): Promise<void>;
+  gitCommit(id: string, message: string, amend: boolean): Promise<void>;
+  /** fetch / pull / push (output in the repository's log, cancellable). */
+  gitSync(id: string, action: GitSyncAction): Promise<void>;
+  gitCancel(id: string): Promise<void>;
+  /** History of the current branch, or of `ref` (another branch, for cherry-picking). */
+  gitLog(id: string, search: string, skip: number, ref?: string): Promise<GitCommit[]>;
+  gitShow(id: string, sha: string): Promise<string>;
+  gitBranches(id: string): Promise<GitBranch[]>;
+  gitBranch(id: string, action: 'create' | 'switch' | 'delete' | 'force-delete' | 'merge', name: string, from?: string): Promise<void>;
+  gitStashes(id: string): Promise<GitStash[]>;
+  gitStash(id: string, action: 'save' | 'apply' | 'pop' | 'drop', arg: string): Promise<void>;
+  gitTags(id: string): Promise<GitTag[]>;
+  gitTag(id: string, action: 'create' | 'delete' | 'push', name: string, message?: string): Promise<void>;
+  /** Rebase onto a branch, or continue / skip / abort the merge, rebase or cherry-pick in progress. */
+  gitOperation(id: string, action: 'rebase' | 'continue' | 'skip' | 'abort', onto?: string): Promise<void>;
+  /** Squashes the branch's commits since it left `onto` into one. */
+  gitSquash(id: string, onto: string, message: string): Promise<void>;
+  gitCherryPick(id: string, sha: string): Promise<void>;
+  gitRevert(id: string, sha: string): Promise<void>;
+  gitReset(id: string, mode: 'soft' | 'mixed' | 'hard', sha: string): Promise<void>;
+  /** Puts one file back to how it was in a commit (staged). */
+  gitRestoreFile(id: string, file: string, sha: string): Promise<void>;
+  gitOpenFile(id: string, file: string): Promise<void>;
+  gitIgnoreSuggestions(id: string): Promise<string[]>;
+  gitIgnoreAdd(id: string, lines: string[]): Promise<void>;
+  gitignoreRead(id: string): Promise<{ exists: boolean; content: string; suggested: string }>;
+  gitignoreSave(id: string, content: string): Promise<void>;
+  gitSetIdentity(id: string, name: string, email: string, global: boolean): Promise<void>;
+  gitAddRemote(id: string, name: string, url: string): Promise<void>;
+  gitWorktrees(id: string): Promise<GitWorktree[]>;
+  /** Adds a worktree in a folder the user picks: a new branch (from `from`) or an existing one. Returns its folder, or null when cancelled. */
+  gitWorktreeAdd(id: string, branch: string, create: boolean, from?: string): Promise<string | null>;
+  gitWorktreeRemove(id: string, path: string, force: boolean): Promise<void>;
+  gitWorktreePrune(id: string): Promise<void>;
+  gitPulls(id: string): Promise<GitPull[]>;
+  gitCreatePull(id: string, title: string, body: string, base: string, draft: boolean): Promise<GitPull>;
+  gitCheckoutPull(id: string, pull: GitPull): Promise<void>;
+  gitAddAccount(kind: GitHostKind, baseUrl: string, token: string, username: string): Promise<GitAccount>;
+  gitRemoveAccount(accountId: string): Promise<void>;
+  gitRepos(accountId: string, search: string): Promise<GitRepo[]>;
+  gitSshKeys(): Promise<GitSshKey[]>;
+  gitSshGenerate(email: string): Promise<GitSshKey>;
+  gitSshAddToAccount(accountId: string, keyPath: string, title: string): Promise<void>;
+  /** Clones into `parent/name` and adds it to the list; resolves with the folder. */
+  gitClone(url: string, parent: string, name: string, branch: string, shallow: boolean): Promise<string>;
+  gitCancelClone(): Promise<void>;
+  gitDismissClone(): Promise<void>;
+  /** The connected (shared) accounts, without polling repositories. */
+  gitAccounts(): Promise<GitAccount[]>;
+  /** A new empty repository on the account. */
+  gitCreateRemoteRepo(accountId: string, name: string, priv: boolean, description: string): Promise<GitRepo>;
+  /** Accounts connected in DevCatz that are not shared yet (no tokens). */
+  gitDevCatzAccounts(): Promise<GitAccount[]>;
+  /** Brings them over (macOS asks to let DialCatz read DevCatz's key); how many came. */
+  gitImportDevCatz(): Promise<number>;
+  /** Connects a folder workspace's repository to a remote (origin) and fetches it. */
+  folderGitConnect(workspaceId: string, url: string): Promise<{ status: FolderGitStatus; merged: boolean; conflicts: boolean }>;
+  /** A new workspace kept in a folder (`parent/folderName`); the folder is made when missing. */
+  createFolderWorkspace(name: string, parent: string, folderName: string): Promise<Workspace>;
+  /** A team workspace's DialCatz Den admin panel (Workspaces page): deleting one happens there. */
+  teamAdminUrl(workspaceId: string): Promise<string>;
+  /** A folder picker (null = cancelled). */
+  pickFolder(title: string, start: string): Promise<string | null>;
   /** Adds or replaces items (by id). */
   saveItems(workspaceId: string, items: TreeItem[]): Promise<Workspace>;
   /** Removes items and everything under them. */
@@ -613,6 +935,11 @@ export interface DialCatzApi {
   copyCollection(fromWorkspaceId: string, collectionId: string, toWorkspaceId: string, mode: 'new' | 'replace' | 'merge', name: string): Promise<{ workspace: Workspace; collectionId: string }>;
   /** DevCatz: its local sites; an environment and / or a collection of routes for one of them. */
   devcatzSites(): Promise<{ installed: boolean; sites: DevCatzSite[] }>;
+  /**
+   * The DialCatz workspace kept in a DevCatz site's repository (`<site folder>/dialcatz`, a folder workspace for Git):
+   * opened, or made when `create` (named after the site). Null when there is none and `create` is false.
+   */
+  devcatzWorkspace(siteId: string, create: boolean): Promise<Workspace | null>;
   devcatzImport(workspaceId: string, siteId: string, what: { environment: boolean; envVars: boolean; routes: boolean; app?: string }): Promise<{ workspace: Workspace; collectionId: string | null; requests: number; source: string | null }>;
   /** Postman: pick its data export (zip), a folder or JSON files and read what is in it (null when cancelled). */
   postmanReadExport(how: 'files' | 'folder'): Promise<PostmanChoice | null>;
@@ -714,8 +1041,10 @@ export interface DialCatzApi {
 
 export const API_METHODS = [
   'appInfo', 'settings', 'setSettings', 'setAiKey',
-  'workspaces', 'workspace', 'createWorkspace', 'renameWorkspace', 'deleteWorkspace', 'saveItems', 'deleteItems',
-  'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'copyCollection', 'devcatzSites', 'devcatzImport', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection',
+  'workspaces', 'workspace', 'createWorkspace', 'renameWorkspace', 'deleteWorkspace', 'openFolderWorkspace', 'useFolder', 'stopUsingFolder', 'revealFolder', 'folderGitStatus', 'folderGitDiff', 'folderGitCommit', 'folderGitPull', 'folderGitPush', 'folderGitInit', 'folderGitAbortMerge',
+  'gitState', 'gitWatch', 'gitRepoAdd', 'gitRepoRemove', 'gitRepoLog', 'gitRevealRepo', 'gitOpenWorkspace', 'gitPickFolder', 'gitStatus', 'gitInit', 'gitDiff', 'gitStage', 'gitUnstage', 'gitDiscard', 'gitCommit', 'gitSync', 'gitCancel', 'gitLog', 'gitShow', 'gitBranches', 'gitBranch', 'gitStashes', 'gitStash', 'gitTags', 'gitTag', 'gitOperation', 'gitSquash', 'gitCherryPick', 'gitRevert', 'gitReset', 'gitRestoreFile', 'gitOpenFile', 'gitIgnoreSuggestions', 'gitIgnoreAdd', 'gitignoreRead', 'gitignoreSave', 'gitSetIdentity', 'gitAddRemote', 'gitWorktrees', 'gitWorktreeAdd', 'gitWorktreeRemove', 'gitWorktreePrune', 'gitPulls', 'gitCreatePull', 'gitCheckoutPull', 'gitAddAccount', 'gitRemoveAccount', 'gitRepos', 'gitSshKeys', 'gitSshGenerate', 'gitSshAddToAccount', 'gitClone', 'gitCancelClone', 'gitDismissClone', 'gitAccounts', 'gitCreateRemoteRepo', 'gitDevCatzAccounts', 'gitImportDevCatz', 'folderGitConnect', 'createFolderWorkspace', 'pickFolder', 'teamAdminUrl',
+  'saveItems', 'deleteItems',
+  'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection',
   'aiModels', 'aiTest', 'aiAsk', 'aiExplain', 'aiTests', 'aiBody', 'aiCancel',
   'send', 'pickFile', 'pickDataFile', 'saveText', 'cancel', 'wsConnect', 'wsSend', 'wsClose', 'saveResponse', 'history', 'addHistory', 'clearHistory',
   'servers', 'probeServer', 'connectWithToken', 'connectWithCode', 'refreshServer', 'disconnectServer', 'subscribeWorkspace', 'setPresence', 'presence', 'syncWorkspace', 'resolveConflict',

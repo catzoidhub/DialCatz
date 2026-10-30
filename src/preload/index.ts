@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { API_METHODS, type ConnectRequest, type DialCatzApi, type DialCatzSettings, type PresenceEntry, type UpdateState, type WsEvent } from '@shared/types';
+import { API_METHODS, type ConnectRequest, type DialCatzApi, type DialCatzSettings, type GitState, type PresenceEntry, type UpdateState, type WsEvent } from '@shared/types';
 
 const api = Object.fromEntries(API_METHODS.map((m) => [m, (...args: unknown[]) => ipcRenderer.invoke(`dialcatz:${m}`, ...args)])) as unknown as DialCatzApi;
 
@@ -37,6 +37,8 @@ const bridge = {
   onPresence: (cb: (p: { workspaceId: string; presence: PresenceEntry[] }) => void) => on('app:presence', cb),
   /** The update check / download moved on (Catzoid #54). */
   onUpdate: (cb: (s: UpdateState) => void) => on('app:update', cb),
+  /** The Git section's repositories, accounts or clone moved on. */
+  onGit: (cb: (s: GitState) => void) => on('app:git', cb),
   /** Moving from Postman with an API key: which step it is on. */
   onPostmanProgress: (cb: (p: { done: number; total: number; label: string }) => void) => on('app:postman', cb),
 };

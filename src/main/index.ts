@@ -1,8 +1,8 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from 'electron';
 import { execFile } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { API_METHODS, uid, type ConnectRequest, type PostmanChoice, type DialCatzApi, type HistoryEntry, type TreeItem, type WireRequest } from '@shared/types';
 import { dataDir, store } from './store';
 import { applySettings, setAiKey, setSettings, settings } from './settings';
@@ -14,6 +14,10 @@ import * as live from './live';
 import { copyPlan, exportCollection, importText } from './importers';
 import * as devcatz from './devcatz';
 import * as dbcatz from './dbcatz';
+import * as git from './foldergit';
+import * as gitHosts from './githosts';
+import { GitRepos, workspaceIn } from './gitrepos';
+import { onSharedChange } from './shared';
 import * as postman from './postman';
 import * as postmanApi from './postman-api';
 import { toPostman } from './postman-export';
@@ -136,13 +140,196 @@ function api(): DialCatzApi {
     createWorkspace: async (name) => ws.create(name),
     renameWorkspace: async (id, name) => {
       const w = ws.load(id);
-      if (w.serverId) throw new Error('Team workspaces are renamed by the server admin');
-      return ws.save({ ...w, name: name.trim().slice(0, 120) || w.name });
+      const n = String(name ?? '').trim().slice(0, 120);
+      if (!n) throw new Error('Give the workspace a name');
+      if (w.serverId) {
+        if (w.role !== 'owner') throw new Error('Only the workspace’s owner (or the server admin) can rename a team workspace');
+        const r = await srv.renameRemote(id, n);
+        send('app:workspaces', null);
+        return r;
+      }
+      return ws.save({ ...w, name: n });
+    },
+    openFolderWorkspace: async () => {
+      const r = await dialog.showOpenDialog(win!, { title: 'Open a folder as a workspace (an empty one starts a new workspace)', buttonLabel: 'Open', properties: ['openDirectory', 'createDirectory'] });
+      if (r.canceled || !r.filePaths[0]) return null;
+      return ws.openFolder(r.filePaths[0]);
+    },
+    useFolder: async (id) => {
+      const r = await dialog.showOpenDialog(win!, { title: 'Choose the folder for this workspace (inside a Git repository to share it)', buttonLabel: 'Use this folder', properties: ['openDirectory', 'createDirectory'] });
+      if (r.canceled || !r.filePaths[0]) return null;
+      return ws.useFolder(id, r.filePaths[0]);
+    },
+    stopUsingFolder: async (id) => ws.stopUsingFolder(id),
+    folderGitStatus: async (id, fetch) => git.status(folderOf(id), fetch === true),
+    folderGitDiff: async (id, path) => git.diff(folderOf(id), String(path ?? '')),
+    folderGitCommit: async (id, message) => {
+      const f = folderOf(id);
+      await git.commit(f, String(message ?? ''));
+      return git.status(f);
+    },
+    folderGitPull: async (id) => {
+      const f = folderOf(id);
+      const r = await git.pull(f);
+      // The folder changed under the workspace: read it now (the watch would, a moment later).
+      ws.folderChanged(id);
+      return { status: await git.status(f), ...r };
+    },
+    folderGitPush: async (id) => {
+      const f = folderOf(id);
+      await git.push(f);
+      return git.status(f);
+    },
+    folderGitInit: async (id) => {
+      const f = folderOf(id);
+      await git.init(f);
+      return git.status(f);
+    },
+    folderGitAbortMerge: async (id) => {
+      const f = folderOf(id);
+      await git.abortMerge(f);
+      ws.folderChanged(id);
+      return git.status(f);
+    },
+    gitState: async () => {
+      await repos.pollAll();
+      return repos.state();
+    },
+    gitWatch: async (on) => {
+      repos.watch(on === true);
+      return repos.state();
+    },
+    gitRepoAdd: async () => {
+      const r = await dialog.showOpenDialog(win!, { title: 'Add a repository (or a folder to start Git in)', buttonLabel: 'Add', properties: ['openDirectory'] });
+      if (r.canceled || !r.filePaths[0]) return null;
+      return repos.add(r.filePaths[0]);
+    },
+    gitRepoRemove: async (id) => repos.remove(String(id)),
+    gitRepoLog: async (id) => repos.log(String(id)),
+    gitRevealRepo: async (id) => {
+      await shell.openPath(repos.pathOf(String(id)));
+    },
+    gitOpenWorkspace: async (id) => {
+      const root = repos.pathOf(String(id));
+      const dir = workspaceIn(root) ?? join(root, 'dialcatz');
+      const w = ws.openFolder(dir);
+      void repos.pollAll();
+      // A new one is named after the repository, not after its folder ("dialcatz").
+      return (w.name === 'dialcatz' ? ws.save({ ...w, name: repos.state().repos.find((r) => r.id === id)?.name ?? w.name }) : w).id;
+    },
+    gitPickFolder: async (start) => {
+      const r = await dialog.showOpenDialog(win!, { title: 'Clone into this folder', buttonLabel: 'Choose', defaultPath: existsSync(String(start)) ? String(start) : undefined, properties: ['openDirectory', 'createDirectory'] });
+      return r.canceled ? null : (r.filePaths[0] ?? null);
+    },
+    gitStatus: (id) => repos.status(id),
+    gitInit: (id) => repos.init(id),
+    gitDiff: (id, file, staged) => repos.diff(id, String(file), staged === true),
+    gitStage: (id, files) => repos.stage(id, (files ?? []).map(String)),
+    gitUnstage: (id, files) => repos.unstage(id, (files ?? []).map(String)),
+    gitDiscard: async (id, files) => {
+      const list = (files ?? []).map(String);
+      const { response } = await dialog.showMessageBox(win!, {
+        type: 'warning',
+        buttons: ['Discard', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        message: list.length === 1 ? `Discard the changes to ${list[0]}?` : `Discard the changes to ${list.length} files?`,
+        detail: 'Edits are lost and new (untracked) files are deleted. This cannot be undone.',
+      });
+      if (response === 0) await repos.discard(id, list);
+    },
+    gitCommit: (id, message, amend) => repos.commit(id, String(message ?? ''), amend === true),
+    gitSync: (id, action) => repos.sync(id, action),
+    gitCancel: async (id) => repos.cancel(id),
+    gitLog: (id, search, skip, ref) => repos.history(id, String(search ?? ''), Number(skip) || 0, ref ? String(ref) : undefined),
+    gitShow: (id, sha) => repos.show(id, String(sha)),
+    gitBranches: (id) => repos.branches(id),
+    gitBranch: (id, action, name, from) => repos.branch(id, action, String(name), from ? String(from) : undefined),
+    gitStashes: (id) => repos.stashes(id),
+    gitStash: (id, action, arg) => repos.stash(id, action, String(arg ?? '')),
+    gitTags: (id) => repos.tags(id),
+    gitTag: (id, action, name, message) => repos.tag(id, action, String(name), message ? String(message) : undefined),
+    gitOperation: (id, action, onto) => repos.operation(id, action, onto ? String(onto) : undefined),
+    gitSquash: (id, onto, message) => repos.squash(id, String(onto), String(message ?? '')),
+    gitCherryPick: (id, sha) => repos.cherryPick(id, String(sha)),
+    gitRevert: (id, sha) => repos.revert(id, String(sha)),
+    gitReset: (id, mode, sha) => repos.reset(id, mode, String(sha)),
+    gitRestoreFile: (id, file, sha) => repos.restoreFile(id, String(file), String(sha)),
+    gitOpenFile: (id, file) => repos.openFile(id, String(file)),
+    gitIgnoreSuggestions: (id) => repos.ignoreSuggestions(id),
+    gitIgnoreAdd: (id, lines) => repos.ignoreAdd(id, (lines ?? []).map(String)),
+    gitignoreRead: (id) => repos.gitignoreRead(id),
+    gitignoreSave: (id, content) => repos.gitignoreSave(id, String(content ?? '')),
+    gitSetIdentity: (id, name, email, global) => repos.setIdentity(id, String(name ?? ''), String(email ?? ''), global === true),
+    gitAddRemote: (id, name, url) => repos.addRemote(id, String(name ?? ''), String(url ?? '')),
+    gitWorktrees: (id) => repos.worktrees(id),
+    gitWorktreeAdd: async (id, branch, create, from) => {
+      const root = repos.pathOf(String(id));
+      const r = await dialog.showSaveDialog(win!, { title: 'Folder for the new worktree', buttonLabel: 'Create worktree', defaultPath: join(dirname(root), `${basename(root)}-${String(branch).replace(/[^\w.-]+/g, '-')}`), properties: ['createDirectory'] });
+      if (r.canceled || !r.filePath) return null;
+      return repos.worktreeAdd(id, r.filePath, String(branch ?? ''), create === true, from ? String(from) : undefined);
+    },
+    gitWorktreeRemove: (id, path, force) => repos.worktreeRemove(id, String(path), force === true),
+    gitWorktreePrune: (id) => repos.worktreePrune(id),
+    gitPulls: (id) => repos.pulls(id),
+    gitCreatePull: (id, title, body, base, draft) => repos.createPull(id, String(title ?? ''), String(body ?? ''), String(base ?? ''), draft === true),
+    gitCheckoutPull: (id, pull) => repos.checkoutPull(id, pull),
+    gitAddAccount: async (kind, baseUrl, token, username) => {
+      const a = await gitHosts.addAccount(kind, String(baseUrl ?? ''), String(token ?? ''), String(username ?? ''));
+      repos.changed();
+      return a;
+    },
+    gitRemoveAccount: async (accountId) => {
+      await gitHosts.removeAccount(String(accountId));
+      repos.changed();
+    },
+    gitRepos: (accountId, search) => gitHosts.repos(String(accountId), String(search ?? '')),
+    gitSshKeys: () => gitHosts.sshKeys(),
+    gitSshGenerate: (email) => gitHosts.sshGenerate(String(email ?? '')),
+    gitSshAddToAccount: (accountId, keyPath, title) => gitHosts.sshAddToAccount(String(accountId), String(keyPath), String(title ?? '')),
+    gitClone: (url, parent, name, branch, shallow) => repos.cloneRepo(String(url ?? ''), String(parent ?? ''), String(name ?? ''), String(branch ?? ''), shallow === true),
+    gitCancelClone: async () => repos.cancelClone(),
+    gitDismissClone: async () => repos.dismissClone(),
+    gitAccounts: async () => gitHosts.listAccounts(),
+    gitCreateRemoteRepo: (accountId, name, priv, description) => gitHosts.createRepo(String(accountId), String(name ?? ''), priv !== false, String(description ?? '')),
+    gitDevCatzAccounts: async () => gitHosts.devcatzAccounts(),
+    gitImportDevCatz: async () => {
+      const n = await gitHosts.importDevCatz();
+      repos.changed();
+      return n;
+    },
+    folderGitConnect: async (id, url) => {
+      const f = folderOf(id);
+      const r = await git.connect(f, String(url ?? ''));
+      ws.folderChanged(id);
+      void repos.pollAll();
+      return { status: await git.status(f), ...r };
+    },
+    createFolderWorkspace: async (name, parent, folderName) => {
+      const n = String(name ?? '').trim().slice(0, 120);
+      const f = String(folderName ?? '').trim();
+      if (!n) throw new Error('Name the workspace');
+      if (!f || !/^[\w .-]+$/.test(f) || f.startsWith('.')) throw new Error('Folder name: letters, digits, spaces, . _ -');
+      const dir = join(String(parent ?? ''), f);
+      if (!existsSync(String(parent ?? ''))) throw new Error(`${parent} does not exist`);
+      if (existsSync(join(dir, 'dialcatz.yml'))) throw new Error('That folder already holds a DialCatz workspace: open it with “Open a folder…” instead');
+      const w = ws.openFolder(dir);
+      return w.name === n ? w : ws.save({ ...w, name: n });
+    },
+    pickFolder: async (title, start) => {
+      const r = await dialog.showOpenDialog(win!, { title: String(title ?? 'Choose a folder'), buttonLabel: 'Choose', defaultPath: existsSync(String(start)) ? String(start) : undefined, properties: ['openDirectory', 'createDirectory'] });
+      return r.canceled ? null : (r.filePaths[0] ?? null);
+    },
+    teamAdminUrl: async (id) => srv.adminUrl(String(id)),
+    revealFolder: async (id) => {
+      const f = ws.load(id).folder;
+      if (f) await shell.openPath(f);
     },
     deleteWorkspace: async (id) => {
       if (ws.load(id).serverId) throw new Error('Hide a team workspace from the Team page instead');
-      if (ws.list().filter((w) => !w.serverId).length <= 1) throw new Error('Keep at least one personal workspace');
       ws.remove(id);
+      // The last personal one gone: an empty one takes its place (there is always somewhere to work).
+      if (!ws.list().some((w) => !w.serverId)) ws.create('Personal');
     },
     saveItems: async (id, items) => ws.saveItems(id, items),
     deleteItems: async (id, ids) => ws.deleteItems(id, ids),
@@ -183,6 +370,14 @@ function api(): DialCatzApi {
     dbcatzInfo: async () => ({ installed: dbcatz.installed(), ...dbcatz.connections() }),
     dbcatzOpen: (target) => dbcatz.open(target),
     saveDbTarget: async (id, collectionId, database, requestId, table) => ws.saveDbTarget(id, String(collectionId), database, requestId ? String(requestId) : null, table == null ? null : String(table)),
+    devcatzWorkspace: async (siteId, create) => {
+      const site = devcatz.site(String(siteId));
+      const dir = devcatz.workspaceFolder(site.path);
+      if (!create && !existsSync(join(dir, 'dialcatz.yml'))) return null;
+      const w = ws.openFolder(dir);
+      // A new one is named after the site, not after its folder ("dialcatz").
+      return w.name === 'dialcatz' ? ws.save({ ...w, name: site.name }) : w;
+    },
     devcatzImport: async (id, siteId, what) => {
       const site = devcatz.site(String(siteId));
       let w = ws.load(id);
@@ -461,8 +656,35 @@ function api(): DialCatzApi {
   };
 }
 
+/** The Git section's repositories (folder workspaces' and the user's own). */
+let gitState: ReturnType<GitRepos['state']> | null = null;
+let gitTimer: ReturnType<typeof setTimeout> | null = null;
+const repos = new GitRepos({
+  workspaceFolders: () => ws.list().filter((w) => w.folder).map((w) => ({ id: w.id, name: w.name, folder: w.folder! })),
+  // Many changes in a row (clone progress): one message per 150 ms at most.
+  changed: () => {
+    gitTimer ??= setTimeout(() => {
+      gitTimer = null;
+      const st = repos.state();
+      if (JSON.stringify(st) !== JSON.stringify(gitState)) send('app:git', st);
+      gitState = st;
+    }, 150);
+  },
+  openFile: async (path) => {
+    const err = await shell.openPath(path);
+    if (err) throw new Error(err);
+  },
+});
+
 /** The Postman export read last, until the user has picked what to bring over. */
 let postmanExport: { token: string; found: postman.PostmanFound } | null = null;
+/** A folder workspace's folder (Git works on it), or a plain error for other workspaces. */
+function folderOf(id: string): string {
+  const f = ws.load(id).folder;
+  if (!f) throw new Error('Git works on folder workspaces: move this workspace to a folder first');
+  return f;
+}
+
 /** Keeps what an export held until the user has picked (only the last one read), and lists it to pick from. */
 function keepExport(found: postman.PostmanFound): PostmanChoice {
   postmanExport = { token: uid('px_'), found };
@@ -607,6 +829,9 @@ app.whenReady().then(() => {
   ipcMain.handle('dialcatz:dismissConnect', () => (pendingConnect = null));
   applySettings((s) => send('app:settings', s));
   sockets.onEvent((e) => send('app:ws', e));
+  // Git accounts connected or removed in another Catzoid app; avatars that arrived.
+  onSharedChange(() => repos.changed());
+  gitHosts.setAccountsListener(() => repos.changed());
   applyMenu();
   createWindow();
   // Updates (Catzoid #54): every state change reaches the window and relabels the menu item.
@@ -626,7 +851,9 @@ app.whenReady().then(() => {
   const link = process.argv.find((a) => a.startsWith('dialcatz://'));
   if (link) handleLink(link);
   // Team workspaces: refresh identities, then sync every minute while the app runs.
-  live.hooks({ presence: (id, list) => send('app:presence', { workspaceId: id, presence: list }), synced: () => send('app:synced', null) });
+  live.hooks({ presence: (id, list) => send('app:presence', { workspaceId: id, presence: list }), synced: () => send('app:synced', null), renamed: () => send('app:workspaces', null) });
+  // A workspace folder changed from outside (git pull, an editor): the window reloads it.
+  ws.onFolderChange(() => (send('app:synced', null), send('app:workspaces', null)));
   void Promise.all(srv.servers().map((s) => srv.refresh(s.id)))
     .then(() => srv.syncAll())
     .then(() => (live.refresh(), send('app:workspaces', null)));

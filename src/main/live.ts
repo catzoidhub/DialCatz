@@ -19,7 +19,9 @@ const streams = new Map<string, Stream>();
 const presence = new Map<string, PresenceEntry[]>();
 let onPresence: (workspaceId: string, list: PresenceEntry[]) => void = () => undefined;
 let onSynced: (workspaceId: string) => void = () => undefined;
-export function hooks(h: { presence: typeof onPresence; synced: typeof onSynced }): void {
+let onRenamed: (workspaceId: string) => void = () => undefined;
+export function hooks(h: { presence: typeof onPresence; synced: typeof onSynced; renamed?: typeof onRenamed }): void {
+  if (h.renamed) onRenamed = h.renamed;
   onPresence = h.presence;
   onSynced = h.synced;
 }
@@ -107,7 +109,7 @@ function handle(id: string, block: string): void {
     else if (line.startsWith('data:')) data += line.slice(5).trim();
   }
   if (!data) return;
-  let payload: { revision?: number; presence?: PresenceEntry[] };
+  let payload: { revision?: number; presence?: PresenceEntry[]; name?: string };
   try {
     payload = JSON.parse(data);
   } catch {
@@ -116,6 +118,16 @@ function handle(id: string, block: string): void {
   if (payload.presence) {
     presence.set(id, payload.presence);
     onPresence(id, payload.presence);
+  }
+  // The owner renamed it: read the new name (and roles) from the server.
+  if (event === 'renamed') {
+    try {
+      const w = ws.load(id);
+      if (w.serverId) void srv.refresh(w.serverId).then(() => onRenamed(id));
+    } catch {
+      /* gone meanwhile */
+    }
+    return;
   }
   if ((event === 'change' || event === 'hello') && payload.revision !== undefined) {
     let local = 0;

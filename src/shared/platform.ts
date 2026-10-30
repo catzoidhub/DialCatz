@@ -21,6 +21,7 @@ export function wordsFor(os: OS) {
     computer: os === 'mac' ? 'Mac' : os === 'windows' ? 'PC' : 'computer',
     secretStore: os === 'mac' ? 'Keychain' : os === 'windows' ? 'Windows Credential Manager' : 'the system keyring',
     fileManager: os === 'mac' ? 'Finder' : os === 'windows' ? 'File Explorer' : 'the file manager',
+    installGit: os === 'mac' ? 'run xcode-select --install in Terminal' : os === 'windows' ? 'install Git for Windows (git-scm.com)' : 'install git with your package manager',
   } as const;
 }
 

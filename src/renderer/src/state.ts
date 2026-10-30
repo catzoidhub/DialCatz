@@ -9,7 +9,7 @@ import { requestContext, responseContext, runScript, type ScriptResult } from '.
  * lasts goes through window.dialcatz (main process); tabs are kept in localStorage so a restart reopens them.
  */
 
-export type Section = 'requests' | 'environments' | 'history' | 'team' | 'settings';
+export type Section = 'requests' | 'environments' | 'history' | 'git' | 'team' | 'settings';
 
 export interface Tab {
   id: string;

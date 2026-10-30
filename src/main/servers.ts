@@ -20,7 +20,7 @@ import * as ws from './workspaces';
 
 type Schemas = components['schemas'];
 /** The JSON body of a Den endpoint's 200 answer. */
-type Ok<P extends keyof paths, M extends 'get' | 'post'> = paths[P][M] extends { responses: { 200: { content: { 'application/json': infer R } } } } ? R : never;
+type Ok<P extends keyof paths, M extends 'get' | 'post' | 'patch'> = paths[P][M] extends { responses: { 200: { content: { 'application/json': infer R } } } } ? R : never;
 /** `data` is a free-form object in the spec; DialCatz reads the fields it knows. */
 type RemoteItem = Omit<Schemas['Item'], 'data'> & { data: Record<string, unknown> };
 type Change = Omit<Schemas['Change'], 'data'> & { data: Record<string, unknown> };
@@ -157,6 +157,30 @@ export async function refresh(id: string): Promise<ServerConnection> {
   } catch (e) {
     return update(id, { lastError: (e as Error).message });
   }
+}
+
+/** Renames a team workspace on its DialCatz Den (its owner only); every member's app hears it and follows. */
+export async function renameRemote(workspaceId: string, name: string): Promise<Workspace> {
+  const w = ws.load(workspaceId);
+  if (!w.serverId || !w.remoteId) throw new Error('Not a team workspace');
+  if (w.role !== 'owner') throw new Error('Only the workspace’s owner can rename it');
+  const s = servers().find((x) => x.id === w.serverId);
+  if (!s) throw new Error('That server connection does not exist any more');
+  const r = await call<Ok<'/api/v1/workspaces/{id}', 'patch'>>(s.url, `/api/v1/workspaces/${encodeURIComponent(w.remoteId)}`, { method: 'PATCH', token: await getToken(s.id), body: { name } }).catch((e: Error) => {
+    // A Den from before owners could rename (no PATCH route yet).
+    if (/HTTP 404|HTTP 405|did not answer like/.test(e.message)) throw new Error('This DialCatz Den is older than renaming from the app: rename it in its admin panel, or update the server');
+    throw e;
+  });
+  await refresh(s.id);
+  return ws.save({ ...ws.load(workspaceId), name: r.name });
+}
+
+/** The server's admin panel, on its Workspaces page (deleting a team workspace happens there). */
+export function adminUrl(workspaceId: string): string {
+  const w = ws.load(workspaceId);
+  const s = servers().find((x) => x.id === w.serverId);
+  if (!s) throw new Error('Not a team workspace');
+  return `${s.url}/#workspaces`;
 }
 
 export async function disconnect(id: string): Promise<void> {

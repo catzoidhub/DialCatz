@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import type { DevCatzSite, PostmanChoice, PostmanPick, PostmanSummary, Workspace } from '@shared/types';
-import { notify, syncTabsWithWorkspace, workspace } from '../state';
+import { loadWorkspaces, notify, selectWorkspace, syncTabsWithWorkspace, workspace } from '../state';
 import CatMood from './CatMood.vue';
 import Icon from './Icon.vue';
 import devcatzLogo from '../assets/logos/devcatz.svg';
@@ -214,7 +214,26 @@ onMounted(async () => {
   if (!siteId.value) siteId.value = devcatz.value.sites[0]?.id ?? '';
 });
 const FW: Record<DevCatzSite['framework'], string> = { laravel: 'Laravel', nestjs: 'NestJS', node: 'Node', web: 'Web app', go: 'Go', python: 'Python', other: 'Other' };
+// Git sharing: the site's requests can live in its own repository (`<site folder>/dialcatz`, a folder workspace).
+const inRepo = ref(false);
+watch(site, (x) => (inRepo.value = !!x?.workspace), { immediate: true });
+const repoFolder = computed(() => (site.value ? `${site.value.path.replace(/\/+$/, '')}/dialcatz` : ''));
+/** Switches to the site's repository workspace (made when it has none yet). */
+async function toSiteWorkspace(create: boolean) {
+  const w = await guard(() => api.devcatzWorkspace(siteId.value, create));
+  if (!w) return null;
+  await loadWorkspaces();
+  await selectWorkspace(w.id);
+  return w;
+}
+async function openSiteWorkspace() {
+  if (await toSiteWorkspace(false)) {
+    notify('success', `Opened ${site.value?.name}'s workspace from its repository`);
+    emit('done', null);
+  }
+}
 async function importSite() {
+  if (inRepo.value && !(await toSiteWorkspace(true))) return;
   const r = await guard(() => api.devcatzImport(workspace.value!.id, siteId.value, { environment: withEnv.value, envVars: withEnv.value && withEnvVars.value, routes: withRoutes.value, app: app.value?.dir }));
   if (!r) return;
   use(r.workspace);
@@ -225,7 +244,7 @@ async function importSite() {
 
 <template>
   <dialog open class="modal modal-open" @keydown.esc="!busy && emit('cancel')">
-    <div class="modal-box w-[46rem] max-w-[95vw] space-y-4">
+    <div class="modal-box max-w-[95vw] space-y-4" :class="mode === 'choose' ? 'w-[34rem]' : 'w-[46rem]'">
       <div class="flex items-center gap-2">
         <button v-if="mode !== 'choose' && !summary" class="btn btn-ghost btn-sm btn-square -ml-2" title="Other ways to import" aria-label="Other ways to import" :disabled="busy" @click="pickMode('choose')"><Icon name="chevron" class="size-4 rotate-180" /></button>
         <h3 class="flex-1 text-lg font-semibold tracking-tight">{{ title }}<span class="font-normal opacity-50"> · {{ workspace?.name }}</span></h3>
@@ -233,23 +252,30 @@ async function importSite() {
 
       <!-- The choice -->
       <template v-if="mode === 'choose'">
-        <div class="grid grid-cols-2 gap-3">
-          <button class="import-choice" @click="pickMode('file')">
-            <span class="import-choice-icon"><Icon name="file" class="size-7" /></span>
-            <span class="font-semibold">File or paste</span>
-            <span class="text-xs opacity-60">Collection, environment or export zip (DialCatz or Postman), OpenAPI / Swagger, cURL</span>
+        <div class="space-y-2">
+          <button class="opt-card" @click="pickMode('file')">
+            <span class="opt-card-icon"><Icon name="file" class="size-5" /></span>
+            <span class="min-w-0 flex-1">
+              <span class="opt-card-title">File or paste</span>
+              <span class="opt-card-text">A collection, environment or export zip (DialCatz or Postman), OpenAPI / Swagger, or a cURL command</span>
+            </span>
+            <Icon name="chevron" class="size-4 shrink-0 opacity-40" />
           </button>
-          <button class="import-choice" @click="pickMode('devcatz')">
-            <img :src="devcatzLogo" alt="" class="size-12" draggable="false" />
-            <span class="flex items-center gap-1.5 font-semibold">From DevCatz<span v-if="notInstalled" class="badge badge-ghost badge-xs font-normal">not installed</span></span>
-            <span class="text-xs opacity-60">A local site's environment and its routes, ready to send</span>
+          <button class="opt-card" @click="pickMode('devcatz')">
+            <span class="opt-card-icon"><img :src="devcatzLogo" alt="" draggable="false" /></span>
+            <span class="min-w-0 flex-1">
+              <span class="opt-card-title">From DevCatz<span v-if="notInstalled" class="badge badge-ghost badge-xs font-normal">not installed</span></span>
+              <span class="opt-card-text">A local site's environment and its routes, ready to send</span>
+            </span>
+            <Icon name="chevron" class="size-4 shrink-0 opacity-40" />
           </button>
-        </div>
-        <div>
-          <button class="import-postman" @click="pickMode('postman')">
-            <svg viewBox="0 0 24 24" class="size-5 shrink-0" fill="currentColor" aria-hidden="true"><path :d="POSTMAN_MARK" /></svg>
-            <span class="flex-1 text-left"><span class="font-medium">Move everything from Postman</span><span class="block text-xs opacity-60">Collections, environments and globals, picked one by one — from an export or with your Postman API key</span></span>
-            <Icon name="chevron" class="size-4 opacity-50" />
+          <button class="opt-card" @click="pickMode('postman')">
+            <span class="opt-card-icon" style="--tile: #ff6c37"><svg viewBox="0 0 24 24" class="size-5" fill="currentColor" aria-hidden="true"><path :d="POSTMAN_MARK" /></svg></span>
+            <span class="min-w-0 flex-1">
+              <span class="opt-card-title">Move everything from Postman</span>
+              <span class="opt-card-text">Collections, environments and globals, picked one by one — from an export or with your Postman API key</span>
+            </span>
+            <Icon name="chevron" class="size-4 shrink-0 opacity-40" />
           </button>
         </div>
       </template>
@@ -390,6 +416,11 @@ async function importSite() {
               <option v-for="s in devcatz.sites" :key="s.id" :value="s.id">{{ s.name }} — {{ s.domain }} ({{ FW[s.framework] }}){{ s.running ? ' · running' : '' }}</option>
             </select>
           </div>
+          <div v-if="site?.workspace" class="alert alert-soft alert-success text-sm">
+            <Icon name="folder" class="size-5 shrink-0" />
+            <span class="flex-1">{{ site.name }} keeps a DialCatz workspace in its repository — your team's requests, shared with Git.</span>
+            <button class="btn btn-primary btn-sm shrink-0" :disabled="busy" @click="openSiteWorkspace">Open its workspace</button>
+          </div>
           <div v-if="apps.length > 1" class="opt-row">
             <span class="flex flex-col"><span class="label-caps">App</span><span class="text-xs opacity-50">Where requests go</span></span>
             <div class="seg seg-xs seg-choice">
@@ -403,6 +434,10 @@ async function importSite() {
           <div v-if="withEnv" class="opt-row">
             <span class="flex flex-col"><span class="label-caps">Add its .env variables</span><span class="text-xs opacity-50">{{ site?.hasEnv ? 'Keys, passwords and tokens are marked secret; values stay on this computer.' : 'This site has no .env.' }}</span></span>
             <input v-model="withEnvVars" type="checkbox" class="toggle toggle-sm toggle-primary" :disabled="!site?.hasEnv" />
+          </div>
+          <div class="opt-row">
+            <span class="flex flex-col"><span class="label-caps">Save in the site's repository</span><span class="text-xs opacity-50">{{ inRepo ? `As files in ${repoFolder} — commit them to share with your team (Git panel)` : `Into “${workspace?.name}”, on this computer` }}</span></span>
+            <input v-model="inRepo" type="checkbox" class="toggle toggle-sm toggle-primary" />
           </div>
           <div class="opt-row">
             <span class="flex flex-col"><span class="label-caps">Routes as a collection</span><span class="text-xs opacity-50">{{ isLaravel ? 'Runs php artisan route:list in the project (its code runs to list them).' : specs.length ? `From ${specs.map((o) => (o.file ? fileName(o.file) : o.url)).join(', ')} (found by DevCatz).` : site?.running ? `From the OpenAPI document ${base} serves.` : 'DevCatz found no OpenAPI file, and the site is not running — start it in DevCatz first.' }}</span></span>

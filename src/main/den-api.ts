@@ -285,6 +285,7 @@ export interface paths {
          *       stream gets it too.
          *     - `presence` — whenever the workspace's presence list changes (a device appears, leaves, moves to another
          *       item, or expires): `{"presence":[Presence…]}`. A heartbeat that changes nothing sends nothing.
+         *     - `renamed` — the owner renamed the workspace (PATCH /api/v1/workspaces/{id}): `{"name":"…","by":{…}}`.
          *
          *     A comment line `: ping` comes every 25 s. The stream ends when the token is revoked, the member loses the
          *     workspace or the token's scope no longer covers it (checked at each ping), when the server shuts down, or
@@ -335,6 +336,92 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Rename the workspace (its owner only)
+         * @description The workspace's owner may rename it from the app; editors and viewers get 403. The open event streams of the workspace get a `renamed` event ({"name", "by"}), so every member's app shows the new name. Deleting a workspace stays in the admin panel.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        name: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Renamed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            ok: boolean;
+                            name: string;
+                        };
+                    };
+                };
+                /** @description No name */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Missing or revoked token */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not the owner */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such workspace */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         trace?: never;
     };
     "/api/v1/workspaces/{id}/presence": {

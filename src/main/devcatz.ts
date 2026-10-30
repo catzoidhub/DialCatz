@@ -15,7 +15,8 @@ import { importText } from './importers';
  * A site's .env values stay on this computer (environment values never sync).
  */
 
-const DATA = process.platform === 'darwin' ? join(homedir(), 'Library', 'Application Support', 'DevCatz') : join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'DevCatz');
+// DIALCATZ_DEVCATZ_DIR points at another DevCatz data folder for tests.
+const DATA = process.env.DIALCATZ_DEVCATZ_DIR || (process.platform === 'darwin' ? join(homedir(), 'Library', 'Application Support', 'DevCatz') : join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'DevCatz'));
 
 interface DevCatzConfig {
   projects?: { id: string; name: string; path: string; domain: string }[];
@@ -74,6 +75,10 @@ function siteFramework(path: string, apps: DevCatzApp[]): DevCatzSite['framework
   return framework(path);
 }
 
+/** Where a site keeps its DialCatz workspace in its own repository (a folder workspace, for Git). */
+export const workspaceFolder = (sitePath: string) => join(sitePath, 'dialcatz');
+const hasWorkspace = (sitePath: string) => existsSync(join(workspaceFolder(sitePath), 'dialcatz.yml'));
+
 export function installed(): boolean {
   return existsSync(join(DATA, 'bridge.json')) || existsSync(join(DATA, 'config.json'));
 }
@@ -85,7 +90,7 @@ export function sites(): DevCatzSite[] {
       .filter((p) => p.domain && p.path)
       .map((p) => {
         const apps: DevCatzApp[] = (p.apps ?? []).map((a) => ({ dir: a.dir, name: a.name, framework: a.framework, kind: a.kind === 'api' || a.kind === 'assets' ? a.kind : 'web', url: a.url || null }));
-        return { id: p.id, name: p.name, domain: p.domain, path: p.path, url: p.url, framework: siteFramework(p.path, apps), hasEnv: existsSync(join(p.path, '.env')), running: !!p.running, apps, openapi: (p.openapi ?? []).filter((o) => o.file || o.url) };
+        return { id: p.id, name: p.name, domain: p.domain, path: p.path, workspace: hasWorkspace(p.path), url: p.url, framework: siteFramework(p.path, apps), hasEnv: existsSync(join(p.path, '.env')), running: !!p.running, apps, openapi: (p.openapi ?? []).filter((o) => o.file || o.url) };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -94,7 +99,7 @@ export function sites(): DevCatzSite[] {
   const port = c.settings?.httpsPort && c.settings.httpsPort !== 443 ? `:${c.settings.httpsPort}` : '';
   return c.projects
     .filter((p) => p.domain && p.path)
-    .map((p) => ({ id: p.id, name: p.name, domain: p.domain, path: p.path, url: `https://${p.domain}${port}`, framework: framework(p.path), hasEnv: existsSync(join(p.path, '.env')), running: false, apps: [], openapi: [] }))
+    .map((p) => ({ id: p.id, name: p.name, domain: p.domain, path: p.path, workspace: hasWorkspace(p.path), url: `https://${p.domain}${port}`, framework: framework(p.path), hasEnv: existsSync(join(p.path, '.env')), running: false, apps: [], openapi: [] }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 

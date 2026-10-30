@@ -1,12 +1,15 @@
-import { existsSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 import { emptyEnvLayout, emptyLayout, newRequest, uid, type Environment, type HttpMethod, type SidebarLayout, type EnvLayout, type EnvVariable, type TreeItem, type Workspace, type WorkspaceSummary } from '@shared/types';
 import { dataDir } from './store';
+import * as folders from './folders';
 
 /**
  * Workspaces on disk: one JSON file each in <userData>/workspaces/, written atomically (tmp + rename). Personal
  * workspaces live only here; team workspaces are a local copy of a server's workspace plus unsent changes
- * (sync.ts). Every change to a team item marks it dirty so the next sync pushes it.
+ * (sync.ts). Every change to a team item marks it dirty so the next sync pushes it. A folder workspace (git sharing,
+ * folders.ts) also writes its collections and environment names into its folder on every save, and reads the folder
+ * back when it is opened or changed from outside; this file keeps what stays on this computer (values, layout).
  */
 
 const dir = () => dataDir('workspaces');
@@ -34,6 +37,7 @@ function normalise(w: Partial<Workspace> & { id: string }): Workspace {
     syncedAt: w.syncedAt,
     syncError: w.syncError,
     conflicts: Array.isArray(w.conflicts) ? w.conflicts : [],
+    ...(w.folder ? { folder: w.folder } : {}),
   };
 }
 
@@ -88,12 +92,14 @@ export function load(id: string): Workspace {
   if (hit) return hit;
   const f = file(id);
   if (!existsSync(f)) throw new Error('That workspace does not exist any more');
-  const w = normalise(JSON.parse(readFileSync(f, 'utf8')));
+  let w = normalise(JSON.parse(readFileSync(f, 'utf8')));
+  if (w.folder) w = fromFolder(w);
   cache.set(id, w);
   return w;
 }
 
-export function save(w: Workspace): Workspace {
+/** This computer's copy (values, layout, the last known items) — without touching a workspace folder. */
+function writeLocal(w: Workspace): Workspace {
   const f = file(w.id);
   const tmp = `${f}.tmp`;
   writeFileSync(tmp, JSON.stringify(w, null, 1), { mode: 0o600 });
@@ -102,13 +108,102 @@ export function save(w: Workspace): Workspace {
   return w;
 }
 
+export function save(w: Workspace): Workspace {
+  if (w.folder) {
+    if (!folderThere(w.folder)) w.folderError = `The folder ${w.folder} is not there any more. Changes stay on this computer until it is back.`;
+    else if (w.folderError?.startsWith(UNREADABLE)) {
+      // A file DialCatz cannot read (a merge conflict, a typo) is not in the workspace: writing now would delete it.
+      // Nothing goes to the folder until the files read again.
+    } else {
+      try {
+        folders.quiet(w.id);
+        folders.writeFolder(w.folder, w);
+        if (w.folderError?.startsWith('The folder ') || w.folderError?.startsWith('Could not write')) w.folderError = undefined;
+      } catch (e) {
+        w.folderError = `Could not write to ${w.folder}: ${(e as Error).message}`;
+      }
+    }
+  }
+  return writeLocal(w);
+}
+
+// ------------------------------------------------------------------ folder workspaces (git sharing)
+
+const folderThere = (dir: string) => existsSync(dir) && statSync(dir).isDirectory();
+const UNREADABLE = folders.UNREADABLE;
+let folderListener: (id: string) => void = () => undefined;
+/** Called after a workspace folder changed from outside (the window reloads that workspace). */
+export function onFolderChange(fn: (id: string) => void): void {
+  folderListener = fn;
+}
+
+/** The folder's content into the workspace (on open), and a watch on it. */
+function fromFolder(w: Workspace): Workspace {
+  const dir = w.folder!;
+  if (!folderThere(dir)) return { ...w, folderError: `The folder ${dir} is not there any more. Changes stay on this computer until it is back.` };
+  folders.watchFolder(w.id, dir, () => folderChanged(w.id));
+  if (!folders.isWorkspaceFolder(dir)) return w;
+  return folders.mergeFolder(w, folders.readFolder(dir));
+}
+
+/** Edits from outside (git pull, an editor): read the folder again; true when anything changed. */
+export function folderChanged(id: string): boolean {
+  const w = cache.get(id);
+  if (!w?.folder || !folderThere(w.folder) || !folders.isWorkspaceFolder(w.folder)) return false;
+  const next = folders.mergeFolder(w, folders.readFolder(w.folder));
+  if (folders.fingerprint(next) === folders.fingerprint(w) && next.folderError === w.folderError) return false;
+  writeLocal(next);
+  folderListener(id);
+  return true;
+}
+
+/** Opens a folder as a workspace: the one it already is here, a DialCatz folder from elsewhere, or a new empty one. */
+export function openFolder(dir: string): Workspace {
+  const path = resolve(dir);
+  mkdirSync(path, { recursive: true });
+  const known = list().find((s) => s.folder && resolve(s.folder) === path);
+  if (known) return load(known.id);
+  const fresh = folders.isWorkspaceFolder(path) ? folders.readFolder(path) : null;
+  const w = normalise({ id: uid('w_'), name: fresh?.name || basename(path) || 'Workspace', serverId: null, folder: path });
+  if (fresh) {
+    const merged = folders.mergeFolder(w, fresh);
+    folders.watchFolder(merged.id, path, () => folderChanged(merged.id));
+    return writeLocal(merged);
+  }
+  folders.watchFolder(w.id, path, () => folderChanged(w.id));
+  return save(w);
+}
+
+/** Moves a personal workspace into a folder: its collections and environment names are written there from now on. */
+export function useFolder(id: string, dir: string): Workspace {
+  const w = load(id);
+  if (w.serverId) throw new Error('A team workspace syncs with its DialCatz Den; make a personal workspace for a folder');
+  const path = resolve(dir);
+  if (folders.isWorkspaceFolder(path)) throw new Error('That folder already holds a DialCatz workspace: open it with “Open a folder…” instead');
+  mkdirSync(path, { recursive: true });
+  if (list().some((s) => s.folder && resolve(s.folder) === path)) throw new Error('Another workspace already uses that folder');
+  w.folder = path;
+  w.folderError = undefined;
+  folders.watchFolder(w.id, path, () => folderChanged(w.id));
+  return save(w);
+}
+
+/** Stops writing to the folder (its files stay as they are); the workspace becomes an ordinary personal one. */
+export function stopUsingFolder(id: string): Workspace {
+  const w = load(id);
+  folders.stopWatching(id);
+  delete w.folder;
+  delete w.folderError;
+  return writeLocal(w);
+}
+
 export function list(): WorkspaceSummary[] {
   const out: WorkspaceSummary[] = [];
   for (const name of readdirSync(dir())) {
     if (!name.endsWith('.json')) continue;
     try {
       const w = load(name.slice(0, -5));
-      out.push({ id: w.id, name: w.name, serverId: w.serverId, remoteId: w.remoteId, role: w.role });
+      out.push({ id: w.id, name: w.name, serverId: w.serverId, remoteId: w.remoteId, role: w.role, ...(w.folder ? { folder: w.folder } : {}) });
     } catch (e) {
       console.warn(`Workspace ${name} could not be read:`, (e as Error).message);
     }
@@ -124,6 +219,8 @@ export function create(name: string, team?: { serverId: string; remoteId: string
 }
 
 export function remove(id: string): void {
+  // A folder workspace's files stay where they are: only this computer's copy goes.
+  folders.stopWatching(id);
   cache.delete(id);
   const f = file(id);
   if (existsSync(f)) unlinkSync(f);
