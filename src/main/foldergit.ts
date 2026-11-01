@@ -198,7 +198,8 @@ export async function connect(folder: string, url: string): Promise<{ merged: bo
 }
 
 export async function init(folder: string): Promise<void> {
-  await git(folder, ['init']);
+  // main, as the Git section starts repositories (git's own default is still master on many computers).
+  await git(folder, ['init', '-b', 'main']);
 }
 
 export async function abortMerge(folder: string): Promise<void> {
