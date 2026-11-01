@@ -17,7 +17,7 @@ protocols:
 mac:
   category: public.app-category.developer-tools
   icon: resources/icon.png
-  # Apple silicon only until the team agrees to release (then Intel, then Windows — Catzoid rule).
+  # Apple silicon here; the Intel build is `bun run package --x64` (both on every release, one merged latest-mac.yml).
   target:
     - target: dmg
       arch: [arm64]
@@ -39,6 +39,10 @@ dmg:
     - { x: 150, y: 190, type: file }
     - { x: 450, y: 190, type: link, path: /Applications }
   window: { width: 600, height: 400 }
+  # The DialCatz look, drawn from scripts/dmg/background.svg (1× and @2x), as DevCatz and DBCatz.
+  background: resources/dmg/background.png
+  iconSize: 112
+  iconTextSize: 13
 win:
   icon: resources/icon.png # ≥ 256 × 256; electron-builder makes the .ico
   target:
@@ -53,6 +57,15 @@ nsis:
   allowToChangeInstallationDirectory: true
   # What the Catzoid site's catalog matches (catalog.go winX64), like the other Catzoid apps (Catzoid #78).
   artifactName: ${productName}-Setup-${version}.${ext}
+  # The DialCatz look (drawn from scripts/installer/*.svg) and the Welcome / Shortcuts pages (resources/installer/installer.nsh).
+  installerSidebar: resources/installer/sidebar.bmp
+  uninstallerSidebar: resources/installer/sidebar.bmp
+  installerHeader: resources/installer/header.bmp
+  include: resources/installer/installer.nsh
+  shortcutName: DialCatz
+  # Asked on the Shortcuts page instead (installer.nsh); the Start menu entry is always made.
+  createDesktopShortcut: false
+  createStartMenuShortcut: true
   uninstallDisplayName: ${productName}
 npmRebuild: false
 # In-app updates (Catzoid #54): writes app-update.yml into the app. The feed address is set at run time from the

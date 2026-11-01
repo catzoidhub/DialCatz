@@ -19,7 +19,14 @@ export function wordsFor(os: OS) {
   return {
     os: os === 'mac' ? 'macOS' : os === 'windows' ? 'Windows' : 'Linux',
     computer: os === 'mac' ? 'Mac' : os === 'windows' ? 'PC' : 'computer',
-    secretStore: os === 'mac' ? 'Keychain' : os === 'windows' ? 'Windows Credential Manager' : 'the system keyring',
+    /** The same words as DevCatz and DBCatz: on Windows the secrets are DPAPI-encrypted for the user. */
+    secretStore: os === 'mac' ? 'Keychain' : os === 'windows' ? "Windows' protected storage (DPAPI)" : 'the system keyring',
+    trash: os === 'mac' ? 'Trash' : os === 'windows' ? 'Recycle Bin' : 'Trash',
+    /** The home folder as paths are written on this OS (~ on a Mac, %USERPROFILE% on Windows). */
+    home: os === 'windows' ? '%USERPROFILE%\\' : '~/',
+    /** The path separator as written on this OS. */
+    sep: os === 'windows' ? '\\' : '/',
+    appearanceSettings: os === 'mac' ? 'System Settings → Appearance' : os === 'windows' ? 'Settings → Personalization → Colors' : 'the system settings',
     fileManager: os === 'mac' ? 'Finder' : os === 'windows' ? 'File Explorer' : 'the file manager',
     installGit: os === 'mac' ? 'run xcode-select --install in Terminal' : os === 'windows' ? 'install Git for Windows (git-scm.com)' : 'install git with your package manager',
   } as const;
@@ -32,10 +39,10 @@ export function keyLabel(combo: string, os: OS = currentOS): string {
   const parts = combo.split('+');
   const key = (p: string) => (p.length === 1 ? p.toUpperCase() : p);
   if (os === 'mac') {
-    const map: Record<string, string> = { mod: '⌘', shift: '⇧', alt: '⌥', ctrl: '⌃', enter: '↩' };
+    const map: Record<string, string> = { mod: '⌘', shift: '⇧', alt: '⌥', ctrl: '⌃', enter: '↩', '⏎': '↩', backspace: '⌫' };
     return parts.map((p) => map[p.toLowerCase()] ?? key(p)).join('');
   }
-  const map: Record<string, string> = { mod: 'Ctrl', shift: 'Shift', alt: 'Alt', ctrl: 'Ctrl', enter: 'Enter' };
+  const map: Record<string, string> = { mod: 'Ctrl', shift: 'Shift', alt: 'Alt', ctrl: 'Ctrl', enter: 'Enter', '↩': 'Enter', '⏎': 'Enter', '⌫': 'Backspace', backspace: 'Backspace', '⌘': 'Ctrl', '⇧': 'Shift', '⌥': 'Alt' };
   return parts.map((p) => map[p.toLowerCase()] ?? key(p)).join('+');
 }
 

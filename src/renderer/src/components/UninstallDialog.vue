@@ -61,7 +61,7 @@ async function go() {
           <input v-model="removeShared" type="checkbox" class="toggle toggle-sm toggle-warning" />
         </label>
         <div v-if="plan.brew" class="alert alert-info alert-soft text-sm"><CatMood mood="info" class="size-7 shrink-0 -my-0.5" /><span>Installed with Homebrew: also run <code class="selectable font-mono">{{ plan.brew }}</code> in Terminal.</span></div>
-        <p v-if="plan.dev" class="text-xs text-warning">Running from a build folder: the data is removed, no app is moved to the Trash.</p>
+        <p v-if="plan.dev" class="text-xs text-warning">Running from a build folder: the data is removed, no app is moved to the {{ words.trash }}.</p>
         <div class="space-y-1.5">
           <p class="flex flex-wrap items-center gap-1 text-sm">Type <b class="font-mono">{{ NAME }}</b><button class="btn btn-ghost btn-xs btn-square" title="Copy the name" aria-label="Copy the name" @click="copyName"><Icon name="copy" class="size-3.5" /></button>to confirm:</p>
           <input v-model="typed" class="input input-sm w-full font-mono" :placeholder="NAME" spellcheck="false" autocomplete="off" @keydown.enter="go" />

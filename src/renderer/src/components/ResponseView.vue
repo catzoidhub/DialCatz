@@ -387,7 +387,7 @@ function closeDecoded() {
             <input ref="searchInput" v-model="search" placeholder="Search the response" @keydown.enter.exact="step(1)" @keydown.shift.enter="step(-1)" @keydown.esc="((searchOpen = false), (search = ''))" />
             <span class="font-mono text-[11px] opacity-60">{{ search ? `${matchCount ? activeIndex + 1 : 0}/${matchCount}` : '' }}</span>
             <button class="btn btn-ghost btn-xs btn-square" :title="`Previous (${keyLabel('shift+enter')})`" :disabled="!matchCount" @click="step(-1)">↑</button>
-            <button class="btn btn-ghost btn-xs btn-square" title="Next (↩)" :disabled="!matchCount" @click="step(1)">↓</button>
+            <button class="btn btn-ghost btn-xs btn-square" :title="`Next (${keyLabel('enter')})`" :disabled="!matchCount" @click="step(1)">↓</button>
             <button class="btn btn-ghost btn-xs btn-square" title="Close" @click="((searchOpen = false), (search = ''))">×</button>
           </div>
           <button v-else class="btn btn-ghost btn-xs btn-square" :title="`Search (${keyLabel('mod+F')})`" @click="openSearch"><Icon name="search" class="size-3.5" /></button>
@@ -510,8 +510,8 @@ function closeDecoded() {
             <Icon name="search" class="size-3.5 opacity-50" />
             <input ref="cellSearchInput" v-model="cellSearch" placeholder="Search the JSON" spellcheck="false" @keydown.enter.exact.prevent="cellStep(1)" @keydown.shift.enter.prevent="cellStep(-1)" @keydown.esc.stop="cellSearch ? (cellSearch = '') : (cellView = null)" />
             <span class="font-mono text-[11px] opacity-60">{{ cellSearch ? `${cellMatches ? cellIndex + 1 : 0}/${cellMatches}` : '' }}</span>
-            <button class="btn btn-ghost btn-xs btn-square" title="Previous (⇧↩)" :disabled="!cellMatches" @click="cellStep(-1)">↑</button>
-            <button class="btn btn-ghost btn-xs btn-square" title="Next (↩)" :disabled="!cellMatches" @click="cellStep(1)">↓</button>
+            <button class="btn btn-ghost btn-xs btn-square" :title="`Previous (${keyLabel('shift+enter')})`" :disabled="!cellMatches" @click="cellStep(-1)">↑</button>
+            <button class="btn btn-ghost btn-xs btn-square" :title="`Next (${keyLabel('enter')})`" :disabled="!cellMatches" @click="cellStep(1)">↓</button>
           </div>
           <button class="btn btn-ghost btn-xs gap-1" @click="copyCell"><Icon name="copy" class="size-3.5" />Copy</button>
           <button class="btn btn-ghost btn-xs btn-square" title="Close (Esc)" aria-label="Close" @click="cellView = null">✕</button>

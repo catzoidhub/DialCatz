@@ -1,0 +1,81 @@
+; DialCatz's additions to electron-builder's assisted NSIS installer (electron-builder.yml nsis.include).
+; Pages: Welcome → Only me / Anyone → folder → Shortcuts → install → Finish.
+; The desktop shortcut is DialCatz's own (createDesktopShortcut: false) so the installer can ask: an update (--updated)
+; leaves it as the user left it, uninstall removes it.
+; The Start menu entry is always made (Windows search finds the app through it). Pinning to the taskbar is the user's:
+; Windows offers no supported way for an installer to do it.
+
+!include nsDialogs.nsh
+!include LogicLib.nsh
+
+!ifndef BUILD_UNINSTALLER
+  Var scDesktop
+  Var scDesktopBox
+
+  !macro customWelcomePage
+    !define MUI_WELCOMEPAGE_TITLE "Welcome to DialCatz"
+    !define MUI_WELCOMEPAGE_TEXT "An API client: send REST, GraphQL and WebSocket requests, keep them in collections with environments, share them with your team through Git or a DialCatz Den, with an AI helper when you want one.$\r$\n$\r$\nDialCatz installs for your account only: no administrator rights needed, and your requests stay on this PC, and tokens and keys are encrypted for your account.$\r$\n$\r$\nPrivacy: DialCatz checks catzoid.com for updates and sends crash reports only if you agree; both can be turned off in Settings. Policy: catzoid.com/legal/privacy$\r$\n$\r$\nClick Next to continue."
+    !insertmacro skipPageIfUpdated
+    !insertmacro MUI_PAGE_WELCOME
+
+    ; The Finish page (inserted later by electron-builder) reads these.
+    !define MUI_FINISHPAGE_TITLE "DialCatz is ready"
+    !define MUI_FINISHPAGE_TEXT "Open it from the Start menu, or from the desktop shortcut if you chose one.$\r$\n$\r$\nTip: to keep it on the taskbar, right-click DialCatz in Start and choose Pin to taskbar."
+    !define MUI_FINISHPAGE_RUN_TEXT "Open DialCatz now"
+  !macroend
+
+  ; The page's functions live in the macro: it is expanded after electron-builder's helpers (isUpdated) exist.
+  !macro customPageAfterChangeDir
+    Page custom scPageCreate scPageLeave
+
+    Function scPageCreate
+      ${if} ${isUpdated}
+        Abort
+      ${endif}
+      !insertmacro MUI_HEADER_TEXT "Shortcuts" "Where you want to open DialCatz from."
+      nsDialogs::Create 1018
+      Pop $0
+      ${NSD_CreateLabel} 0 0 100% 20u "DialCatz is always added to the Start menu, so Windows search finds it."
+      Pop $0
+      ${NSD_CreateCheckbox} 0 26u 100% 12u "Create a &desktop shortcut"
+      Pop $scDesktopBox
+      ${if} $scDesktop != "0"
+        ${NSD_Check} $scDesktopBox
+      ${endif}
+      ${NSD_CreateLabel} 0 52u 100% 30u "Taskbar: Windows lets only you pin apps there. After installing, right-click DialCatz in Start (or its window's taskbar button) and choose Pin to taskbar."
+      Pop $0
+      nsDialogs::Show
+    FunctionEnd
+
+    Function scPageLeave
+      ${NSD_GetState} $scDesktopBox $0
+      ${if} $0 == ${BST_CHECKED}
+        StrCpy $scDesktop "1"
+      ${else}
+        StrCpy $scDesktop "0"
+      ${endif}
+    FunctionEnd
+  !macroend
+
+  !macro customInstall
+    ; An update keeps whatever the user did with the shortcut since.
+    ${ifNot} ${isUpdated}
+      ${if} $scDesktop == "0"
+        WinShell::UninstShortcut "$DESKTOP\${SHORTCUT_NAME}.lnk"
+        Delete "$DESKTOP\${SHORTCUT_NAME}.lnk"
+      ${else}
+        ; Also a silent install (/S), which shows no pages: the shortcut, as before.
+        CreateShortCut "$DESKTOP\${SHORTCUT_NAME}.lnk" "$appExe" "" "$appExe" 0 "" "" "${APP_DESCRIPTION}"
+        ClearErrors
+        WinShell::SetLnkAUMI "$DESKTOP\${SHORTCUT_NAME}.lnk" "${APP_ID}"
+      ${endif}
+    ${endif}
+  !macroend
+!else
+  !macro customUnInstall
+    ${ifNot} ${isUpdated}
+      WinShell::UninstShortcut "$DESKTOP\${SHORTCUT_NAME}.lnk"
+      Delete "$DESKTOP\${SHORTCUT_NAME}.lnk"
+    ${endif}
+  !macroend
+!endif

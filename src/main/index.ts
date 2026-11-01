@@ -1,4 +1,5 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, shell } from 'electron';
+import { isWin } from './platform';
 import { execFile } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
@@ -42,6 +43,16 @@ let pendingConnect: ConnectRequest | null = null;
 const HISTORY = 'history';
 const HISTORY_MAX = 300;
 
+/**
+ * Windows: the minimize / maximize / close buttons on a neutral block in the theme's colours (on the page's own
+ * background they vanish in dark mode), 40 px tall — the page headers start below it. Repainted when the theme
+ * changes. As DevCatz and DBCatz (Catzoid #76).
+ */
+function titleBarOverlay(): { color: string; symbolColor: string; height: number } {
+  return nativeTheme.shouldUseDarkColors ? { color: '#2b2d34', symbolColor: '#e5e7eb', height: 40 } : { color: '#e7e8ec', symbolColor: '#1f2937', height: 40 };
+}
+if (isWin) nativeTheme.on('updated', () => win && !win.isDestroyed() && win.setTitleBarOverlay(titleBarOverlay()));
+
 function createWindow(): void {
   if (win && !win.isDestroyed()) {
     if (win.isMinimized()) win.restore();
@@ -57,6 +68,8 @@ function createWindow(): void {
     minHeight: 560,
     title: 'DialCatz',
     ...(mac ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 18, y: 18 }, vibrancy: 'sidebar' as const, backgroundColor: '#00000000' } : {}),
+    // Windows: no menu bar; the system buttons sit over the top right corner (Catzoid #76), the menu is behind ☰.
+    ...(isWin ? { titleBarStyle: 'hidden' as const, titleBarOverlay: titleBarOverlay(), backgroundColor: nativeTheme.shouldUseDarkColors ? '#1d1f24' : '#f6f7f9' } : {}),
     show: false,
     // plugins: the built-in PDF viewer for PDF responses.
     webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false, contextIsolation: true, plugins: true },
@@ -321,6 +334,9 @@ function api(): DialCatzApi {
       return r.canceled ? null : (r.filePaths[0] ?? null);
     },
     teamAdminUrl: async (id) => srv.adminUrl(String(id)),
+    appMenu: async (x, y) => appMenuPopup(Number(x), Number(y)),
+    menuShortcuts: async () => menuShortcuts(),
+    menuKey: async (key) => menuKey(String(key)),
     revealFolder: async (id) => {
       const f = ws.load(id).folder;
       if (f) await shell.openPath(f);
@@ -784,7 +800,7 @@ function applyMenu(): void {
           { type: 'separator' },
           { label: 'Save Request', accelerator: 'CmdOrCtrl+S', click: cmd('save') },
           { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: cmd('closeTab') },
-          ...(mac ? [] : [{ type: 'separator' as const }, { role: 'quit' as const }]),
+          ...(mac ? [] : [{ type: 'separator' as const }, { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: cmd('settings') }, { type: 'separator' as const }, { role: 'quit' as const, label: 'Exit' }]),
         ],
       },
       { role: 'editMenu' },
@@ -796,7 +812,8 @@ function applyMenu(): void {
         ],
       },
       { role: 'viewMenu' },
-      { role: 'windowMenu' },
+      // Windows: no Zoom / Bring All to Front (macOS-only roles).
+      mac ? { role: 'windowMenu' as const } : { label: 'Window', submenu: [{ role: 'minimize' as const }, { role: 'close' as const }] },
       {
         role: 'help' as const,
         submenu: [
@@ -805,11 +822,46 @@ function applyMenu(): void {
           { type: 'separator' as const },
           { label: 'DialCatz Docs', click: () => void shell.openExternal(`${siteBase()}/docs`) },
           { label: 'Privacy and Data', click: () => void shell.openExternal(`${siteBase()}/docs/privacy-and-data`) },
-          ...(mac ? [] : [{ type: 'separator' as const }, { label: updateLabel(), click: cmd('checkUpdates') }]),
+          ...(mac ? [] : [{ type: 'separator' as const }, { label: updateLabel(), click: cmd('checkUpdates') }, { label: 'About DialCatz', click: cmd('about') }]),
         ],
       },
     ]),
   );
+}
+
+/**
+ * Windows: the window has no menu bar (titleBarStyle 'hidden' for the title bar overlay), and Electron registers no
+ * menu accelerators for such a window. The rail's ☰ button opens the same menu, and the window sends the shortcuts
+ * the page left alone to menuKey(), so every menu command and shortcut works as on the Mac. As DBCatz.
+ */
+function appMenuPopup(x: number, y: number): void {
+  if (win && !win.isDestroyed()) Menu.getApplicationMenu()?.popup({ window: win, x: Math.round(x), y: Math.round(y) });
+}
+/** "CmdOrCtrl+Shift+N" → "ctrl+shift+n" (the form the window builds from a key press). */
+const order = (p: string) => ['ctrl', 'alt', 'shift'].indexOf(p) + 1 || 9;
+const normalKey = (acc: string) =>
+  acc
+    .split('+')
+    .map((p) => p.toLowerCase())
+    .map((p) => (p === 'cmdorctrl' || p === 'commandorcontrol' || p === 'control' ? 'ctrl' : p === 'return' ? 'enter' : p === 'option' ? 'alt' : p))
+    .sort((a, b) => order(a) - order(b))
+    .join('+');
+/** The menu's own items with a shortcut (not roles: text editing keys stay the page's). */
+function menuItems(): { key: string; item: Electron.MenuItem }[] {
+  const out: { key: string; item: Electron.MenuItem }[] = [];
+  const walk = (m: Electron.Menu) =>
+    m.items.forEach((i) => {
+      if (i.submenu) walk(i.submenu);
+      else if (i.accelerator && !i.role && i.visible !== false) out.push({ key: normalKey(String(i.accelerator)), item: i });
+    });
+  const m = Menu.getApplicationMenu();
+  if (m) walk(m);
+  return out;
+}
+const menuShortcuts = (): string[] => [...new Set(menuItems().map((x) => x.key))];
+function menuKey(key: string): void {
+  const hit = menuItems().find((x) => x.key === key && x.item.enabled);
+  if (win && !win.isDestroyed() && hit) hit.item.click(undefined, win, win.webContents);
 }
 
 function updateLabel(): string {

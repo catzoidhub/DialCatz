@@ -5,8 +5,8 @@ import { store } from './store';
 /**
  * Server tokens in the system's secret store. macOS: a Keychain generic password (service "DialCatz Den",
  * account = the connection id), through `/usr/bin/security` with the secret on stdin, never in argv — the same
- * way shared.ts keeps the AI keys. Elsewhere (Windows / Linux, until the Credential Manager is wired): encrypted with
- * Electron's safeStorage in config.json.
+ * way shared.ts keeps the AI keys. Elsewhere: encrypted with Electron's safeStorage in config.json — on Windows that is
+ * DPAPI for the current user, the same protection the shared AI keys get there.
  */
 
 const SERVICE = 'DialCatz Den';
