@@ -208,6 +208,54 @@ export function toCurl(w: WireRequest): string {
   return parts.join(' \\\n  ');
 }
 
+/**
+ * cURL for Windows' Command Prompt: curl.exe (built into Windows 10 and 11), every argument in ^"…^" with cmd's ^
+ * escapes and ^ at line ends — the form Chrome's "Copy as cURL (cmd)" writes, which parseCurl reads back.
+ */
+export function toCurlCmd(w: WireRequest): string {
+  const q = (s: string) =>
+    '^"' +
+    s
+      // curl.exe reads its arguments the Windows way: backslashes are literal, except a run before a quote, doubled.
+      .replace(/(\\*)"/g, '$1$1\\"')
+      .replace(/(\\+)$/, '$1$1')
+      .replace(/[^a-zA-Z0-9\s_\-:=+~'\/.,?;()*`]/g, '^$&')
+      .replace(/%(?=[a-zA-Z0-9_])/g, '%^')
+      .replace(/\r?\n/g, '^\n\n') +
+    '^"';
+  const parts = [`curl.exe -X ${w.method} ${q(w.url)}`];
+  for (const [k, val] of w.headers) if (!(w.multipart && /^content-type$/i.test(k))) parts.push(`-H ${q(`${k}: ${val}`)}`);
+  if (w.body !== undefined && w.body !== '') parts.push(`--data-raw ${q(w.body)}`);
+  for (const p of w.multipart ?? []) parts.push(`-F ${q(p.file !== undefined ? `${p.name}=@${p.file || '<file>'}` : `${p.name}=${p.value ?? ''}`)}`);
+  if (w.bodyFile !== undefined) parts.push(`--data-binary ${q(`@${w.bodyFile || '<file>'}`)}`);
+  return parts.join(' ^\n  ');
+}
+
+/**
+ * PowerShell (Windows PowerShell 5 and PowerShell 7): Invoke-WebRequest, whose arguments PowerShell passes as they are
+ * (curl.exe from PowerShell 5 loses the quotes inside a JSON body). Strings in '…' with '' for a quote.
+ */
+export function toPowerShell(w: WireRequest): string {
+  const q = (s: string) => `'${s.replace(/'/g, "''")}'`;
+  const ct = w.headers.find(([k]) => /^content-type$/i.test(k))?.[1];
+  const hs = w.headers.filter(([k]) => !/^content-type$/i.test(k));
+  const lines: string[] = [];
+  if (hs.length) lines.push(`$headers = @{\n${hs.map(([k, v]) => `  ${q(k)} = ${q(v)}`).join('\n')}\n}`);
+  const args = [`-Method ${w.method}`, `-Uri ${q(w.url)}`];
+  if (hs.length) args.push('-Headers $headers');
+  if (w.multipart) {
+    lines.push(`# -Form needs PowerShell 7 or later`);
+    args.push(`-Form @{ ${w.multipart.map((p) => `${q(p.name)} = ${p.file !== undefined ? `(Get-Item ${q(p.file || '<file>')})` : q(p.value ?? '')}`).join('; ')} }`);
+  } else {
+    if (ct) args.push(`-ContentType ${q(ct)}`);
+    // As UTF-8 bytes: Windows PowerShell 5 sends a string body as ISO-8859-1.
+    if (w.body !== undefined && w.body !== '') args.push(`-Body ([Text.Encoding]::UTF8.GetBytes(${q(w.body)}))`);
+    if (w.bodyFile !== undefined) args.push(`-InFile ${q(w.bodyFile || '<file>')}`);
+  }
+  lines.push(`$res = Invoke-WebRequest -UseBasicParsing ${args.join(' `\n  ')}`, '$res.StatusCode', '$res.Content');
+  return lines.join('\n');
+}
+
 /** A fetch() snippet (JavaScript). */
 export function toFetch(w: WireRequest): string {
   const opts: string[] = [`  method: ${JSON.stringify(w.method)}`];
@@ -260,7 +308,12 @@ function shellWords(cmd: string): string[] {
 export function parseCurl(cmd: string): RequestSpec | null {
   let text = cmd.trim();
   // Windows forms: Chrome's "Copy as cURL (cmd)" (^ escapes, ^ at line ends) and PowerShell's ` at line ends.
-  if (/\^\r?\n|\^"/.test(text)) text = text.replace(/\^\r?\n/g, ' ').replace(/\^(.)/g, '$1');
+  if (/\^\r?\n|\^"/.test(text))
+    text = text
+      .replace(/\^\r?\n/g, ' ')
+      .replace(/\^(.)/g, '$1')
+      // Windows argument rules: a backslash run not before a quote is literal (the shell-style reading below halves it).
+      .replace(/(\\+)(?=[^\\"]|$)/g, '$1$1');
   text = text.replace(/`\r?\n/g, ' ');
   const words = shellWords(text);
   if (!/^curl(\.exe)?$/i.test(words[0] ?? '')) return null;

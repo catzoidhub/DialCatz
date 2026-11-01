@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { HTTP_METHODS, type BodyMode, type KeyValue, type RequestAuth } from '@shared/types';
-import { AUTO_HEADERS, joinUrl, parseCurl, prettyJson, splitUrl, toCurl, toFetch, effectiveAuth } from '@shared/request';
+import { AUTO_HEADERS, joinUrl, parseCurl, prettyJson, splitUrl, toCurl, toCurlCmd, toFetch, toPowerShell, effectiveAuth } from '@shared/request';
+import { currentOS } from '@shared/platform';
 import { activeTab, aiOn, appVersion, inheritedAuth, isWs, knownVar, notify, plain, readOnly, sendTab, sendWs, wireFor, workspace, type Tab } from '../state';
 import { keyLabel } from '../platform';
 import KeyValueTable from './KeyValueTable.vue';
@@ -185,10 +186,14 @@ const inherited = computed(() => {
   return props.tab.itemId ? `Uses the auth of the folder or collection above: ${label}.` : 'Not saved in a collection yet: nothing to inherit (no auth).';
 });
 
-const codeLang = ref<'curl' | 'fetch'>('curl');
+/** Windows: cURL for cmd (curl.exe) first, PowerShell, and bash (Git Bash, WSL); a Mac: cURL for its shell. */
+const codeLangs = currentOS === 'windows' ? (['cmd', 'powershell', 'curl', 'fetch'] as const) : (['curl', 'fetch'] as const);
+type CodeLang = 'curl' | 'cmd' | 'powershell' | 'fetch';
+const CODE_LABEL: Record<CodeLang, string> = { curl: currentOS === 'windows' ? 'cURL (bash)' : 'cURL', cmd: 'cURL (cmd)', powershell: 'PowerShell', fetch: 'JavaScript fetch' };
+const codeLang = ref<CodeLang>(codeLangs[0]);
 const code = computed(() => {
   const w = wireFor(props.tab);
-  return codeLang.value === 'curl' ? toCurl(w) : toFetch(w);
+  return codeLang.value === 'curl' ? toCurl(w) : codeLang.value === 'cmd' ? toCurlCmd(w) : codeLang.value === 'powershell' ? toPowerShell(w) : toFetch(w);
 });
 async function copyCode() {
   await window.dialcatz.copyText(code.value);
@@ -351,8 +356,7 @@ defineExpose({ focusUrl: () => urlInput.value?.select() });
       <div v-else class="flex h-full min-h-48 flex-col gap-2">
         <div class="flex items-center gap-2">
           <div class="seg seg-xs seg-choice">
-            <button role="tab" class="seg-item normal-case" :class="{ 'is-active': codeLang === 'curl' }" @click="codeLang = 'curl'">cURL</button>
-            <button role="tab" class="seg-item normal-case" :class="{ 'is-active': codeLang === 'fetch' }" @click="codeLang = 'fetch'">JavaScript fetch</button>
+            <button v-for="l in codeLangs" :key="l" role="tab" class="seg-item normal-case" :class="{ 'is-active': codeLang === l }" @click="codeLang = l">{{ CODE_LABEL[l] }}</button>
           </div>
           <span class="flex-1 text-xs opacity-50">With the active environment’s values filled in.</span>
           <button class="btn btn-ghost btn-xs gap-1" @click="copyCode"><Icon name="copy" class="size-3.5" />Copy</button>
