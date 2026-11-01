@@ -37,6 +37,20 @@ export interface FolderData {
 
 export const isWorkspaceFolder = (dir: string) => existsSync(join(dir, META));
 
+/** renameSync, again for a moment when Windows reports the file busy (an editor, the indexer or antivirus has it open). */
+export function renameRetry(from: string, to: string): void {
+  for (let i = 0; ; i++) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (i >= 8 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+  }
+}
+
 const slug = (name: string) =>
   name
     .toLowerCase()
@@ -45,7 +59,9 @@ const slug = (name: string) =>
     .replace(/[\s_]+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
-    .slice(0, 60) || 'untitled';
+    .slice(0, 60)
+    // Names Windows reserves for devices (a teammate's Git for Windows could not check them out).
+    .replace(/^(con|prn|aux|nul|com\d|lpt\d)$/, '$1-') || 'untitled';
 
 /** Fields worth a line in a file (empty ones are left out so files stay short). */
 function compact<T extends Record<string, unknown>>(o: T): Partial<T> {
@@ -135,10 +151,11 @@ export function writeFolder(root: string, w: Workspace): void {
   const want = folderFiles(w);
   for (const [rel, text] of want) {
     const abs = join(root, rel);
-    if (existsSync(abs) && readFileSync(abs, 'utf8') === text) continue;
+    // Git for Windows checks files out with CRLF (core.autocrlf): the same text, not a change to write again.
+    if (existsSync(abs) && readFileSync(abs, 'utf8').replace(/\r\n/g, '\n') === text) continue;
     mkdirSync(dirname(abs), { recursive: true });
     writeFileSync(`${abs}.tmp`, text);
-    renameSync(`${abs}.tmp`, abs);
+    renameRetry(`${abs}.tmp`, abs);
   }
   for (const m of MANAGED) mkdirSync(join(root, m), { recursive: true });
   for (const rel of listManaged(root)) if (!want.has(rel)) unlinkSync(join(root, rel));
@@ -287,7 +304,7 @@ export function watchFolder(id: string, root: string, changed: () => void): void
   try {
     const watcher = watch(root, { recursive: true }, (_e, file) => {
       const f = String(file ?? '');
-      if (f.startsWith('.git') || f.includes(`${'/'}.git${'/'}`) || f.endsWith('.tmp')) return;
+      if (/(^|[\\/])\.git([\\/]|$)/.test(f) || f.endsWith('.tmp')) return;
       const w = watches.get(id);
       if (!w || Date.now() < w.quietUntil) return;
       if (w.timer) clearTimeout(w.timer);

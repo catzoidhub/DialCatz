@@ -27,7 +27,8 @@ interface Added {
 }
 
 const SHA = /^[0-9a-f]{4,40}$/i;
-const idOf = (root: string) => `r${createHash('sha1').update(resolve(root)).digest('hex').slice(0, 12)}`;
+// Windows paths are the same folder in any case: the id must be too.
+const idOf = (root: string) => `r${createHash('sha1').update(process.platform === 'win32' ? resolve(root).toLowerCase() : resolve(root)).digest('hex').slice(0, 12)}`;
 const LOG_LINES = 400;
 
 /** A DialCatz workspace in the repository: its root, or its dialcatz/ folder (where DevCatz sites keep it). */
@@ -139,7 +140,7 @@ export class GitRepos {
     const dir = resolve(path);
     if (!existsSync(dir)) throw new Error(`${dir} does not exist`);
     const root = (await g.repoRoot(dir)) ?? dir;
-    if (!this.added().some((a) => resolve(a.path) === root)) store.setExtra('gitRepos', [...this.added(), { path: root, addedAt: new Date().toISOString() }]);
+    if (!this.added().some((a) => idOf(a.path) === idOf(root))) store.setExtra('gitRepos', [...this.added(), { path: root, addedAt: new Date().toISOString() }]);
     await this.pollAll();
     return idOf(root);
   }
@@ -148,7 +149,7 @@ export class GitRepos {
   async remove(id: string): Promise<void> {
     const r = this.roots.get(id);
     if (!r) return;
-    store.setExtra('gitRepos', this.added().filter((a) => idOf(a.path) !== id && resolve(a.path) !== r.root));
+    store.setExtra('gitRepos', this.added().filter((a) => idOf(a.path) !== id));
     this.logs.delete(id);
     await this.pollAll();
   }
@@ -197,7 +198,11 @@ export class GitRepos {
 
   async status(id: string): Promise<GitStatus | null> {
     const path = this.pathOf(id);
-    if (!(await g.repoRoot(path))) return null;
+    if (!(await g.repoRoot(path))) {
+      const owner = await g.ownershipProblem(path);
+      if (owner) throw new Error(owner);
+      return null;
+    }
     const s = await g.status(path);
     const { remoteUrls, ...rest } = s;
     this.summaries.set(id, { branch: s.branch, detached: s.detached, upstream: s.upstream, ahead: s.ahead, behind: s.behind, changed: s.changed, conflicts: s.conflicts, operation: s.operation });
@@ -487,7 +492,7 @@ export class GitRepos {
 
   async addRemote(id: string, name: string, url: string): Promise<void> {
     if (!/^[\w.-]+$/.test(name)) throw new Error('Remote name: letters, digits, . _ -');
-    if (!g.parseRemote(url) && !url.startsWith('/')) throw new Error('Not a Git URL');
+    if (!g.parseRemote(url) && !g.isLocalRepoPath(url)) throw new Error('Not a Git URL');
     await this.op(id, ['remote', 'add', name, url.trim()]);
   }
 
@@ -572,11 +577,11 @@ export class GitRepos {
 
   async cloneRepo(url: string, parent: string, name: string, branch: string, shallow: boolean): Promise<string> {
     if (this.cloneAbort) throw new Error('A clone is already running');
-    if (!/^[\w.-]+$/.test(name) || name.startsWith('.')) throw new Error('Folder name: letters, digits, . _ -');
+    if (!/^[\w.-]+$/.test(name) || name.startsWith('.') || name.endsWith('.')) throw new Error('Folder name: letters, digits, . _ - (not ending in a dot)');
     if (!existsSync(parent)) throw new Error(`${parent} does not exist`);
     const src = url.trim();
     const remote = g.parseRemote(src);
-    if (!remote && !src.startsWith('/')) throw new Error('Not a Git URL (https://…, git@host:owner/repo.git)');
+    if (!remote && !g.isLocalRepoPath(src)) throw new Error('Not a Git URL (https://…, git@host:owner/repo.git)');
     if (branch && (branch.startsWith('-') || /\s/.test(branch))) throw new Error('Not a branch or tag name');
     const dest = join(parent, name);
     const abort = new AbortController();
@@ -604,7 +609,12 @@ export class GitRepos {
       return dest;
     } catch (err) {
       this.clone = { ...this.clone!, done: true, error: (err as Error).message };
-      if (abort.signal.aborted) rmSync(dest, { recursive: true, force: true });
+      if (abort.signal.aborted)
+        try {
+          rmSync(dest, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+        } catch {
+          /* still held by git's helpers on Windows: left for the user */
+        }
       throw err;
     } finally {
       this.cloneAbort = null;

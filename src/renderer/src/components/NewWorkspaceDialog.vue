@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { homePath, words } from '../platform';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { GitCloneTask } from '@shared/types';
 import { notify } from '../state';
@@ -31,7 +32,7 @@ const name = ref('');
 const parent = ref('');
 const folderName = ref('');
 const folderTouched = ref(false);
-const slug = (s: string) => s.trim().replace(/[^\w .-]+/g, '-').replace(/\s+/g, '-').replace(/^[-.]+|-+$/g, '');
+const slug = (s: string) => s.trim().replace(/[^\w .-]+/g, '-').replace(/\s+/g, '-').replace(/^[-.]+|[-. ]+$/g, '');
 watch(name, (n) => !folderTouched.value && (folderName.value = slug(n)));
 onMounted(async () => {
   parent.value = (await api.gitState().catch(() => null))?.cloneDir ?? '';
@@ -66,7 +67,7 @@ const ready = computed(() => {
   if (mode.value === 'folder') return !!name.value.trim() && !!parent.value.trim() && !!folderName.value.trim() && (!connectNow.value || !!target.value);
   return !!target.value && !!parent.value.trim() && !!folderName.value.trim();
 });
-const path = computed(() => (parent.value && folderName.value ? `${parent.value.replace(/\/+$/, '')}/${folderName.value}`.replace(/^\/Users\/[^/]+/, '~') : ''));
+const path = computed(() => (parent.value && folderName.value ? homePath(`${parent.value.replace(/[\\/]+$/, '')}${words.sep}${folderName.value}`) : ''));
 
 async function create() {
   if (step.value !== 2 || !ready.value || busy.value) return;

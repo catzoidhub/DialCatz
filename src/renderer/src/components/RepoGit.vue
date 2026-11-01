@@ -384,6 +384,7 @@ const openGitPage = () => emit('accounts');
               class="textarea textarea-sm w-full"
               :placeholder="staged.length ? 'Commit message (first line = summary)' : 'Stage files, then write a message'"
               @keydown.meta.enter.prevent="commit()"
+              @keydown.ctrl.enter.prevent="commit()"
             />
             <div class="flex flex-wrap items-center gap-2">
               <label class="flex items-center gap-1.5 text-xs" title="Replace the last commit (message and staged changes)"><input v-model="amend" type="checkbox" class="checkbox checkbox-xs" />Amend last commit</label>

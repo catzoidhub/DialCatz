@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { currentOS } from '@shared/platform';
 import { onMounted, ref } from 'vue';
 import type { ConnectRequest } from '@shared/types';
 import { loadWorkspaces, notify, section } from '../state';
@@ -73,7 +74,7 @@ async function cancel() {
       </div>
       <div class="opt-row">
         <span class="label-caps">This device</span>
-        <input v-model="device" class="input input-sm flex-1" placeholder="e.g. Andi – MacBook" />
+        <input v-model="device" class="input input-sm flex-1" :placeholder="`e.g. Andi – ${currentOS === 'mac' ? 'MacBook' : 'Laptop'}`" />
       </div>
       <p class="text-xs opacity-50">The one-time code is exchanged for your own token, kept in {{ words.secretStore }}. The admin sees this device name and can revoke it alone.</p>
       <div v-if="error" class="alert alert-error alert-soft text-sm"><CatMood mood="error" class="size-7 shrink-0 -my-0.5" /><span>{{ error }}</span></div>

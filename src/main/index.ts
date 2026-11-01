@@ -114,7 +114,12 @@ function handleLink(raw: string): void {
   }
 }
 
-if (!app.requestSingleInstanceLock()) app.quit();
+// A second copy (Windows starts one for every dialcatz:// click) hands its link to the first and ends here, before it
+// starts anything of its own (reports, syncs, the window).
+const primary = app.requestSingleInstanceLock();
+if (!primary) app.exit(0);
+// Windows: notifications and the taskbar group need the app id the installer gave the shortcut.
+if (isWin) app.setAppUserModelId('com.mrcatz.dialcatz');
 app.on('second-instance', (_e, argv) => {
   const link = argv.find((a) => a.startsWith('dialcatz://'));
   if (link) handleLink(link);
@@ -322,7 +327,7 @@ function api(): DialCatzApi {
       const n = String(name ?? '').trim().slice(0, 120);
       const f = String(folderName ?? '').trim();
       if (!n) throw new Error('Name the workspace');
-      if (!f || !/^[\w .-]+$/.test(f) || f.startsWith('.')) throw new Error('Folder name: letters, digits, spaces, . _ -');
+      if (!f || !/^[\w .-]+$/.test(f) || f.startsWith('.') || /[. ]$/.test(f)) throw new Error('Folder name: letters, digits, spaces, . _ - (not ending in a dot or space)');
       const dir = join(String(parent ?? ''), f);
       if (!existsSync(String(parent ?? ''))) throw new Error(`${parent} does not exist`);
       if (existsSync(join(dir, 'dialcatz.yml'))) throw new Error('That folder already holds a DialCatz workspace: open it with “Open a folder…” instead');
@@ -714,7 +719,7 @@ function keepExport(found: postman.PostmanFound): PostmanChoice {
 /** An environment or globals file (DialCatz's or Postman's), not a collection. */
 function isVariablesFile(text: string): boolean {
   try {
-    const d = JSON.parse(text) as Record<string, unknown>;
+    const d = JSON.parse(text.replace(/^\uFEFF/, '')) as Record<string, unknown>;
     return (d.dialcatz === 1 && (d.kind === 'environment' || d.kind === 'globals')) || (Array.isArray(d.values) && typeof d._postman_variable_scope === 'string');
   } catch {
     return false;
@@ -722,7 +727,7 @@ function isVariablesFile(text: string): boolean {
 }
 
 /** A skipped file without the temporary unzip folder in front. */
-const shortSkip = (f: string) => f.replace(/^.*dialcatz-postman-[^/]+\//, '');
+const shortSkip = (f: string) => f.replace(/^.*dialcatz-postman-[^\\/]+[\\/]/, '');
 
 /** Saves what was found in Postman (export or API) into the workspace: collections, environments, globals. */
 function applyPostman(id: string, found: postman.PostmanFound) {
@@ -862,6 +867,18 @@ function menuItems(): { key: string; item: Electron.MenuItem }[] {
 }
 const menuShortcuts = (): string[] => [...new Set(menuItems().map((x) => x.key))];
 function menuKey(key: string): void {
+  // The View menu's roles (zoom, full screen, reload, developer tools).
+  if (key.startsWith('role:') && win && !win.isDestroyed()) {
+    const wc = win.webContents;
+    const role = key.slice(5);
+    if (role === 'zoomIn') wc.setZoomLevel(Math.min(wc.getZoomLevel() + 0.5, 5));
+    else if (role === 'zoomOut') wc.setZoomLevel(Math.max(wc.getZoomLevel() - 0.5, -5));
+    else if (role === 'resetZoom') wc.setZoomLevel(0);
+    else if (role === 'togglefullscreen') win.setFullScreen(!win.isFullScreen());
+    else if (role === 'reload') wc.reload();
+    else if (role === 'toggleDevTools') wc.toggleDevTools();
+    return;
+  }
   const hit = menuItems().find((x) => x.key === key && x.item.enabled);
   if (win && !win.isDestroyed() && hit) hit.item.click(undefined, win, win.webContents);
 }
@@ -872,9 +889,9 @@ function updateLabel(): string {
 }
 
 // Crash and error reports (Catzoid #65): crashReporter starts before the window; uploads only when the user opted in.
-reports.init();
+if (primary) reports.init();
 
-app.whenReady().then(() => {
+if (primary) app.whenReady().then(() => {
   if (app.isPackaged) app.setAsDefaultProtocolClient('dialcatz');
   ws.ensureDefault();
   const impl = api() as unknown as Record<string, (...args: unknown[]) => unknown>;

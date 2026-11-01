@@ -158,10 +158,13 @@ export function folderChanged(id: string): boolean {
 }
 
 /** Opens a folder as a workspace: the one it already is here, a DialCatz folder from elsewhere, or a new empty one. */
+/** The same folder (Windows paths compare without case). */
+const samePath = (a: string, b: string) => (process.platform === 'win32' ? resolve(a).toLowerCase() === resolve(b).toLowerCase() : resolve(a) === resolve(b));
+
 export function openFolder(dir: string): Workspace {
   const path = resolve(dir);
   mkdirSync(path, { recursive: true });
-  const known = list().find((s) => s.folder && resolve(s.folder) === path);
+  const known = list().find((s) => s.folder && samePath(s.folder, path));
   if (known) return load(known.id);
   const fresh = folders.isWorkspaceFolder(path) ? folders.readFolder(path) : null;
   const w = normalise({ id: uid('w_'), name: fresh?.name || basename(path) || 'Workspace', serverId: null, folder: path });
@@ -181,7 +184,7 @@ export function useFolder(id: string, dir: string): Workspace {
   const path = resolve(dir);
   if (folders.isWorkspaceFolder(path)) throw new Error('That folder already holds a DialCatz workspace: open it with “Open a folder…” instead');
   mkdirSync(path, { recursive: true });
-  if (list().some((s) => s.folder && resolve(s.folder) === path)) throw new Error('Another workspace already uses that folder');
+  if (list().some((s) => s.folder && samePath(s.folder, path))) throw new Error('Another workspace already uses that folder');
   w.folder = path;
   w.folderError = undefined;
   folders.watchFolder(w.id, path, () => folderChanged(w.id));

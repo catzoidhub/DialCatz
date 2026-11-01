@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { homePath, words } from '../platform';
 import SyncConflicts from './SyncConflicts.vue';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { ExportFormat, FolderGitStatus } from '@shared/types';
@@ -91,11 +92,11 @@ async function remove() {
 
 // ---------------------------------------------------------------- folder workspaces (git sharing)
 
-/** ~/… instead of the whole home path, and only the last parts of a long one. */
+/** The home folder written the OS's way (~ or %USERPROFILE%), and only the last parts of a long path. */
 function shortPath(p: string) {
-  const home = p.replace(/^\/Users\/[^/]+|^[A-Za-z]:\\Users\\[^\\]+/, '~');
+  const home = homePath(p);
   const parts = home.split(/[\\/]/);
-  return parts.length > 4 ? `…/${parts.slice(-3).join('/')}` : home;
+  return parts.length > 4 ? `…${words.sep}${parts.slice(-3).join(words.sep)}` : home;
 }
 async function openFolder() {
   const w = await attempt(() => api.openFolderWorkspace());

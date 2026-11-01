@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import type { GitBranch, GitCommit, GitFile, GitStash, GitStatus, GitSummary, GitTag } from '@shared/types';
 import { dataDir } from './store';
+import { exePath, isWin, killTree, userSsh } from './platform';
 
 /**
  * Git for the Git section (ported from DevCatz), with the user's own `git` binary and configuration (credential
@@ -36,10 +37,15 @@ function askpass(): string {
 export function gitEnv(creds?: GitCreds | null): Record<string, string> {
   return {
     GIT_TERMINAL_PROMPT: '0',
-    // Accept a new host's key once (like a first `ssh` would after "yes"), never prompt.
-    GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new',
+    // Accept a new host's key once (like a first `ssh` would after "yes"), never prompt — unless the user set up their
+    // own SSH for git (core.sshCommand, GIT_SSH: Windows' OpenSSH agent, Pageant …), which then stays theirs.
+    ...(userSsh() ? {} : { GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new' }),
     LC_ALL: 'C',
-    ...(creds ? { GIT_ASKPASS: askpass(), SSH_ASKPASS: askpass(), DIALCATZ_GIT_USERNAME: creds.username, DIALCATZ_GIT_TOKEN: creds.token } : {}),
+    // A connected account's token: no credential helper first (Git Credential Manager would answer, or open a sign-in
+    // window, with stored credentials of its own), only DialCatz's askpass.
+    ...(creds
+      ? { GIT_ASKPASS: askpass(), SSH_ASKPASS: askpass(), DIALCATZ_GIT_USERNAME: creds.username, DIALCATZ_GIT_TOKEN: creds.token, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'credential.helper', GIT_CONFIG_VALUE_0: '' }
+      : {}),
   };
 }
 
@@ -52,7 +58,7 @@ export interface GitResult {
 /** Runs git with arguments (no shell) and collects its output. */
 export function git(cwd: string, args: string[], opts: { env?: Record<string, string>; input?: string; timeout?: number; maxBytes?: number } = {}): Promise<GitResult> {
   return new Promise((done) => {
-    const child = spawn('git', args, { cwd, env: { ...process.env, ...gitEnv(), ...opts.env } as NodeJS.ProcessEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(exePath('git'), args, { cwd, env: { ...process.env, ...gitEnv(), ...opts.env } as NodeJS.ProcessEnv, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     let size = 0;
@@ -62,7 +68,7 @@ export function git(cwd: string, args: string[], opts: { env?: Record<string, st
       if (size <= max) out.push(d);
     });
     child.stderr.on('data', (d: Buffer) => err.push(d));
-    const timer = setTimeout(() => child.kill('SIGTERM'), opts.timeout ?? 60_000);
+    const timer = setTimeout(() => killTree(child), opts.timeout ?? 60_000);
     child.on('error', (e) => {
       clearTimeout(timer);
       done({ code: 127, stdout: '', stderr: e.message.includes('ENOENT') ? (process.platform === 'win32' ? 'git is not installed (Git for Windows, git-scm.com)' : 'git is not installed (xcode-select --install)') : e.message });
@@ -108,8 +114,8 @@ export function gitStream(
   opts: { env?: Record<string, string>; signal?: AbortSignal } = {},
 ): Promise<number> {
   return new Promise((done) => {
-    const child = spawn('git', args, { cwd, env: { ...process.env, ...gitEnv(), ...opts.env } as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'] });
-    const onAbort = () => child.kill('SIGTERM');
+    const child = spawn(exePath('git'), args, { cwd, env: { ...process.env, ...gitEnv(), ...opts.env } as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    const onAbort = () => killTree(child);
     opts.signal?.addEventListener('abort', onAbort);
     const feed = (d: Buffer) => {
       const text = d.toString('utf8');
@@ -141,9 +147,23 @@ export async function gitVersion(): Promise<string | null> {
 export async function repoRoot(dir: string): Promise<string | null> {
   if (!existsSync(dir)) return null;
   const r = await git(dir, ['rev-parse', '--show-toplevel'], { timeout: 10_000 });
-  const root = r.code === 0 ? r.stdout.trim() : null;
+  // resolve(): git answers C:/Users/… on Windows; Node's paths (and every comparison here) use C:\Users\….
+  const root = r.code === 0 ? resolve(r.stdout.trim()) : null;
+  const fold = (p: string) => (isWin ? p.toLowerCase() : p);
   // A repository at the home folder (a stray `git init ~`) is not the folder's: everything would look changed.
-  return root && resolve(root) !== resolve(homedir()) ? root : null;
+  return root && fold(root) !== fold(resolve(homedir())) ? root : null;
+}
+
+/**
+ * git refuses a repository owned by another user ("dubious ownership": common on Windows for other drives, USB drives
+ * and shares). Then it is a repository git will not touch, not a folder to start Git in: git's own fix, said plainly.
+ */
+export async function ownershipProblem(dir: string): Promise<string | null> {
+  if (!existsSync(dir)) return null;
+  const r = await git(dir, ['rev-parse', '--show-toplevel'], { timeout: 10_000 });
+  if (r.code === 0 || !/dubious ownership/i.test(r.stderr)) return null;
+  const m = r.stderr.match(/safe\.directory '?([^'\n]+)'?/);
+  return `Git does not trust this folder: it belongs to another user account. If it is yours, run once: git config --global --add safe.directory "${m?.[1]?.trim() ?? dir}"`;
 }
 
 async function gitDir(root: string): Promise<string> {
@@ -237,9 +257,12 @@ export async function status(dir: string): Promise<Omit<GitStatus, 'remotes'> & 
 
 /** A path inside the repository (no escaping it with ../ or an absolute path). */
 export function inside(root: string, file: string): string {
-  const abs = resolve(root, file);
-  if (abs !== root && !abs.startsWith(root + sep)) throw new Error(`${file} is outside the repository`);
-  return relative(root, abs);
+  const base = resolve(root);
+  const abs = resolve(base, file);
+  // Windows paths compare without case (C:\Users and c:\users are the same folder).
+  const fold = (p: string) => (process.platform === 'win32' ? p.toLowerCase() : p);
+  if (fold(abs) !== fold(base) && !fold(abs).startsWith(fold(base) + sep)) throw new Error(`${file} is outside the repository`);
+  return relative(base, abs);
 }
 
 export async function diff(root: string, file: string, staged: boolean): Promise<string> {
@@ -357,8 +380,13 @@ export async function checkRefName(root: string, name: string, kind: 'branch' | 
 }
 
 /** Remote URL → host, owner (may contain subgroups), repo. */
+/** A repository on this computer or a share as a remote: /path, C:\path, C:/path or \\server\share. */
+export const isLocalRepoPath = (u: string) => /^\/|^[A-Za-z]:[\\/]|^\\\\/.test(u.trim());
+
 export function parseRemote(url: string): { host: string; owner: string; repo: string; https: boolean } | null {
   const u = url.trim();
+  // C:/repo is a Windows path, not an scp-style host "C".
+  if (isLocalRepoPath(u)) return null;
   let host: string;
   let path: string;
   let https = false;
@@ -441,7 +469,12 @@ export async function clone(o: CloneOptions): Promise<void> {
     if (o.signal.aborted) throw new Error('Clone cancelled');
     if (code !== 0) throw new Error(`git clone failed (exit ${code}); see the output above`);
   } catch (err) {
-    rmSync(o.dest, { recursive: true, force: true });
+    // Windows: git's helpers may still hold files for a moment after a cancel.
+    try {
+      rmSync(o.dest, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch {
+      /* the real error matters more; the folder is left for the user */
+    }
     throw err;
   }
 }
@@ -465,7 +498,7 @@ export async function worktrees(root: string): Promise<WorktreeEntry[]> {
   let cur: WorktreeEntry | null = null;
   for (const line of out.split('\n')) {
     if (line.startsWith('worktree ')) {
-      cur = { path: line.slice(9), branch: null, head: null, main: list.length === 0, locked: false, prunable: false };
+      cur = { path: resolve(line.slice(9)), branch: null, head: null, main: list.length === 0, locked: false, prunable: false };
       list.push(cur);
     } else if (!cur) continue;
     else if (line.startsWith('HEAD ')) cur.head = line.slice(5);

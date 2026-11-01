@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { basename, delimiter, join } from 'node:path';
 import { newRequest, uid, type DevCatzApp, type DevCatzOpenApi, type DevCatzSite, type EnvVariable, type HttpMethod, type TreeItem } from '@shared/types';
 import { send } from './http';
+import { exePath } from './platform';
 import { importText } from './importers';
 
 /**
@@ -145,7 +146,7 @@ export function envVariables(s: DevCatzSite): EnvVariable[] {
 
 function run(cmd: string, args: string[], cwd: string, timeout = 60_000): Promise<string> {
   return new Promise((resolve, reject) =>
-    execFile(cmd, args, { cwd, timeout, maxBuffer: 64 * 1024 * 1024, env: { ...process.env, PATH: `${join(DATA, 'bin')}${delimiter}${process.env.PATH ?? ''}` } }, (err, stdout, stderr) =>
+    execFile(cmd, args, { cwd, timeout, maxBuffer: 64 * 1024 * 1024, windowsHide: true, env: { ...process.env, PATH: `${join(DATA, 'bin')}${delimiter}${process.env.PATH ?? ''}` } }, (err, stdout, stderr) =>
       err ? reject(new Error((stderr || err.message).toString().trim().split('\n').slice(-3).join(' '))) : resolve(stdout),
     ),
   );
@@ -161,7 +162,7 @@ async function laravelRoutes(cwd: string, collectionId: string): Promise<TreeIte
   // .cmd directly). Else the php on the Path.
   const shim = join(DATA, 'bin', process.platform === 'win32' ? 'php.cmd' : 'php');
   const args = ['artisan', 'route:list', '--json'];
-  const out = !existsSync(shim) ? await run('php', args, cwd) : process.platform === 'win32' ? await run(process.env.ComSpec || 'cmd.exe', ['/d', '/c', shim, ...args], cwd) : await run(shim, args, cwd);
+  const out = !existsSync(shim) ? await run(exePath('php'), args, cwd) : process.platform === 'win32' ? await run(process.env.ComSpec || 'cmd.exe', ['/d', '/c', shim, ...args], cwd) : await run(shim, args, cwd);
   const routes = JSON.parse(out.slice(out.indexOf('['))) as { method: string; uri: string; name: string | null; action: string; middleware?: string[] }[];
   const kept = routes.filter((r) => !/^(_ignition|sanctum\/csrf-cookie|telescope|horizon|_debugbar|livewire|up$|storage\/)/.test(r.uri));
   const isApi = (r: (typeof kept)[number]) => (r.middleware ?? []).includes('api') || r.uri === 'api' || r.uri.startsWith('api/');

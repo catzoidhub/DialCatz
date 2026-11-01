@@ -2234,3 +2234,8 @@ body.is-resizing * {
 html.is-win .req-tabs {
   padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 0.5rem);
 }
+
+/* A page header that starts at the window's top edge: on Windows it starts below the window buttons (Catzoid #76). */
+html.is-win .win-top {
+  padding-top: 2.75rem;
+}

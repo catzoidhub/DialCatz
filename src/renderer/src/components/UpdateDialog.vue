@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { currentOS } from '@shared/platform';
 import { computed } from 'vue';
 import { updateState } from '../state';
 import { esc } from '../highlight';
@@ -130,9 +131,9 @@ async function installOnQuit() {
           </div>
         </div>
         <p class="text-sm opacity-70">Open tabs and unsaved edits come back after the restart. Requests still running and WebSocket connections stop.</p>
-        <p v-if="st.onQuit" class="text-sm text-primary">It installs when you quit DialCatz.</p>
+        <p v-if="st.onQuit" class="text-sm text-primary">It installs when you {{ currentOS === 'mac' ? 'quit' : 'close' }} DialCatz.</p>
         <div class="modal-action mt-0">
-          <button v-if="!st.onQuit" class="btn btn-ghost btn-sm" @click="installOnQuit">Install when I quit</button>
+          <button v-if="!st.onQuit" class="btn btn-ghost btn-sm" @click="installOnQuit">Install when I {{ currentOS === 'mac' ? 'quit' : 'close DialCatz' }}</button>
           <button v-else class="btn btn-ghost btn-sm" @click="close">OK</button>
           <button class="btn btn-primary btn-sm" @click="api.updateInstall('now')">Restart now</button>
         </div>

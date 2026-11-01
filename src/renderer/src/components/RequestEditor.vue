@@ -25,7 +25,7 @@ const COMMON_HEADERS = ['Accept', 'Accept-Language', 'Authorization', 'Cache-Con
 // The URL's query and the Params table are one thing: editing either updates the other.
 function setUrl(url: string) {
   // A pasted cURL command fills the whole request.
-  if (/^\s*curl\s/.test(url)) {
+  if (/^\s*curl(\.exe)?\s/i.test(url)) {
     const parsed = parseCurl(url);
     if (parsed) {
       props.tab.spec = parsed;

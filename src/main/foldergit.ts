@@ -3,7 +3,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { parse } from 'yaml';
 import type { FolderGitChange, FolderGitStatus } from '@shared/types';
-import { gitEnv, parseRemote } from './gitcore';
+import { gitEnv, isLocalRepoPath, parseRemote } from './gitcore';
+import { exePath, isWin, userSsh } from './platform';
 import { credsFor } from './githosts';
 
 /**
@@ -18,11 +19,11 @@ const TIMEOUT = 90_000;
 class GitError extends Error {}
 
 function git(cwd: string, args: string[], allowFail = false, extra: Record<string, string> = {}): Promise<{ out: string; err: string; code: number }> {
-  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C', ...(process.env.GIT_SSH_COMMAND ? {} : { GIT_SSH_COMMAND: 'ssh -o BatchMode=yes' }), ...extra };
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C', ...(userSsh() ? {} : { GIT_SSH_COMMAND: 'ssh -o BatchMode=yes' }), ...extra };
   return new Promise((resolve, reject) =>
-    execFile('git', args, { cwd, env, timeout: TIMEOUT, maxBuffer: 32 * 1024 * 1024 }, (e, stdout, stderr) => {
+    execFile(exePath('git'), args, { cwd, env, timeout: TIMEOUT, maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (e, stdout, stderr) => {
       const code = e ? (typeof (e as { code?: unknown }).code === 'number' ? ((e as { code: number }).code) : -1) : 0;
-      if (e && (e as NodeJS.ErrnoException).code === 'ENOENT') return reject(new GitError('Git is not installed on this computer. Install Git (on a Mac: xcode-select --install), then try again.'));
+      if (e && (e as NodeJS.ErrnoException).code === 'ENOENT') return reject(new GitError(isWin ? 'Git is not installed on this computer. Install Git for Windows (git-scm.com), then try again.' : 'Git is not installed on this computer. Install it (in Terminal: xcode-select --install), then try again.'));
       if (e && !allowFail) return reject(new GitError(friendly(String(stderr || e.message))));
       resolve({ out: String(stdout), err: String(stderr), code });
     }),
@@ -72,6 +73,9 @@ export async function status(folder: string, fetch = false): Promise<FolderGitSt
   let top: string;
   try {
     const r = await git(folder, ['rev-parse', '--show-toplevel'], true);
+    // A repository owned by another user account (common on Windows for other drives and shares): git's fix, not "start Git here".
+    if (r.code !== 0 && /dubious ownership/i.test(r.err))
+      return { repo: false, gitMissing: true, error: `Git does not trust this folder: it belongs to another user account. If it is yours, run once: git config --global --add safe.directory "${(r.err.match(/safe\.directory '?([^'\n]+)'?/)?.[1] ?? folder).trim()}"`, changes: [], ahead: 0, behind: 0, conflicts: [], merging: false };
     if (r.code !== 0) return { repo: false, changes: [], ahead: 0, behind: 0, conflicts: [], merging: false };
     top = r.out.trim();
   } catch (e) {
@@ -167,7 +171,7 @@ export async function push(folder: string): Promise<void> {
  */
 export async function connect(folder: string, url: string): Promise<{ merged: boolean; conflicts: boolean }> {
   const u = url.trim();
-  if (!u || u.startsWith('-') || (!parseRemote(u) && !u.startsWith('/'))) throw new GitError('Not a Git URL (https://…, git@host:owner/repo.git)');
+  if (!u || u.startsWith('-') || (!parseRemote(u) && !isLocalRepoPath(u))) throw new GitError('Not a Git URL (https://…, git@host:owner/repo.git)');
   if ((await git(folder, ['rev-parse', '--show-toplevel'], true)).code !== 0) await git(folder, ['init', '-b', 'main']);
   const has = (await git(folder, ['remote'], true)).out.split('\n').includes('origin');
   await git(folder, ['remote', has ? 'set-url' : 'add', 'origin', u]);

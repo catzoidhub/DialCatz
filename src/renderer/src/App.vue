@@ -174,12 +174,25 @@ onBeforeUnmount(() => {
  */
 const isWin = currentOS === 'windows';
 let menuKeys = new Set<string>();
-const CODE_KEY: Record<string, string> = { Comma: ',', Period: '.', Slash: '/', BracketLeft: '[', BracketRight: ']', Backspace: 'backspace', Delete: 'delete', Enter: 'enter', NumpadEnter: 'enter', Tab: 'tab', Escape: 'escape' };
+const CODE_KEY: Record<string, string> = { Equal: '=', Minus: '-', NumpadAdd: '=', NumpadSubtract: '-', Comma: ',', Period: '.', Slash: '/', BracketLeft: '[', BracketRight: ']', Backspace: 'backspace', Delete: 'delete', Enter: 'enter', NumpadEnter: 'enter', Tab: 'tab', Escape: 'escape' };
+/** The View menu's own keys (roles, which a window without a menu bar does not get either). */
+const ROLE_KEYS: Record<string, string> = { 'ctrl+=': 'zoomIn', 'ctrl+shift+=': 'zoomIn', 'ctrl+-': 'zoomOut', 'ctrl+0': 'resetZoom', f11: 'togglefullscreen', 'ctrl+r': 'reload', 'ctrl+shift+i': 'toggleDevTools' };
 function onMenuKey(e: KeyboardEvent) {
-  if (e.defaultPrevented || !(e.ctrlKey || e.altKey) || e.metaKey) return;
+  if (e.defaultPrevented || e.metaKey) return;
+  if (e.code === 'F11' && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    void api.menuKey('role:togglefullscreen');
+    return;
+  }
+  if (!(e.ctrlKey || e.altKey)) return;
   const key = /^Key[A-Z]$/.test(e.code) ? e.code.slice(3).toLowerCase() : /^(Digit|Numpad)\d$/.test(e.code) ? e.code.slice(-1) : /^F\d+$/.test(e.code) ? e.code.toLowerCase() : CODE_KEY[e.code];
   if (!key) return;
   const combo = [e.ctrlKey && 'ctrl', e.altKey && 'alt', e.shiftKey && 'shift', key].filter(Boolean).join('+');
+  if (ROLE_KEYS[combo] && !menuKeys.has(combo)) {
+    e.preventDefault();
+    void api.menuKey(`role:${ROLE_KEYS[combo]}`);
+    return;
+  }
   if (!menuKeys.has(combo)) return;
   e.preventDefault();
   void api.menuKey(combo);

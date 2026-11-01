@@ -7,6 +7,7 @@ import type { GitAccount, GitHostKind, GitPull, GitRepo, GitSshKey } from '@shar
 import type { GitCreds } from './gitcore';
 import { setSharedGitAccounts, setSharedGitToken, sharedGitAccounts, sharedGitToken } from './shared';
 import { store } from './store';
+import { exePath, isWin } from './platform';
 
 /**
  * Hosting accounts (GitHub, GitLab, Gitea / Forgejo, Bitbucket) through their REST APIs with a personal access
@@ -26,7 +27,7 @@ async function decrypt(a: StoredAccount): Promise<string> {
 
 function run(cmd: string, args: string[], opts: { timeout?: number } = {}): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((done) =>
-    execFile(cmd, args, { timeout: opts.timeout ?? 60_000 }, (e, stdout, stderr) =>
+    execFile(cmd, args, { timeout: opts.timeout ?? 60_000, windowsHide: true }, (e, stdout, stderr) =>
       done({ code: e ? (typeof (e as { code?: unknown }).code === 'number' ? (e as { code: number }).code : 1) : 0, stdout: String(stdout), stderr: String(stderr || (e?.message ?? '')) }),
     ),
   );
@@ -494,7 +495,7 @@ export async function sshKeys(): Promise<GitSshKey[]> {
     const text = readFileSync(path, 'utf8').trim();
     const [type, , ...comment] = text.split(/\s+/);
     if (!/^(ssh-|ecdsa-|sk-)/.test(type ?? '')) continue;
-    const fp = await run('ssh-keygen', ['-lf', path], { timeout: 10_000 });
+    const fp = await run(exePath('ssh-keygen'), ['-lf', path], { timeout: 10_000 });
     out.push({ path, type, comment: comment.join(' '), fingerprint: fp.stdout.split(/\s+/)[1] ?? '', publicKey: text });
   }
   return out;
@@ -508,7 +509,9 @@ export async function sshGenerate(email: string): Promise<GitSshKey> {
   if (existsSync(path)) throw new Error(`${path} already exists`);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   // Windows: the OpenSSH client that ships with Windows 10/11 (System32\\OpenSSH, on the Path).
-  const r = await run('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', email.trim() || 'dialcatz', '-f', path]);
+  const r = await run(exePath('ssh-keygen'), ['-q', '-t', 'ed25519', '-N', '', '-C', email.trim() || 'dialcatz', '-f', path]);
+  if (r.code !== 0 && /ENOENT/.test(r.stderr))
+    throw new Error(isWin ? 'ssh-keygen is missing: turn on Windows’ OpenSSH Client (Settings → System → Optional features), then try again' : 'ssh-keygen is missing on this computer');
   if (r.code !== 0) throw new Error(`ssh-keygen: ${r.stderr.trim()}`);
   const key = (await sshKeys()).find((k) => k.path === `${path}.pub`);
   if (!key) throw new Error('Key not found after ssh-keygen');
@@ -518,7 +521,7 @@ export async function sshGenerate(email: string): Promise<GitSshKey> {
 export async function sshAddToAccount(accountId: string, keyPath: string, title: string): Promise<void> {
   const a = account(accountId);
   const key = (await sshKeys()).find((k) => k.path === keyPath);
-  if (!key) throw new Error('Not a public key in ~/.ssh');
+  if (!key) throw new Error(`Not a public key in ${isWin ? '%USERPROFILE%\\.ssh' : '~/.ssh'}`);
   const label = title.trim() || `DialCatz ${new Date().toISOString().slice(0, 10)}`;
   // Comment-free key body (some hosts reject a trailing comment).
   const body = key.publicKey.split(/\s+/).slice(0, 2).join(' ');

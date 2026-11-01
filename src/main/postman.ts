@@ -21,10 +21,13 @@ export interface PostmanFound {
 
 const MAX_FILES = 2000;
 
+/** Windows' own bsdtar (System32): a GNU tar from Git or MSYS found first on the Path cannot write zip, and reads C:\\ as a host. */
+const TAR = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : '/usr/bin/tar';
+
 /** Packs a folder into a zip with the system's tar (bsdtar writes zip by the name, -a, on macOS and Windows 10+). */
 export function zipFolder(dir: string, zip: string): Promise<void> {
   return new Promise((resolve, reject) =>
-    execFile(process.platform === 'win32' ? 'tar.exe' : '/usr/bin/tar', ['-a', '-cf', zip, '-C', dir, '.'], { timeout: 120_000 }, (err) => (err ? reject(new Error(`Could not write ${zip}: ${err.message}`)) : resolve())),
+    execFile(TAR, ['-a', '-cf', zip, '-C', dir, '.'], { timeout: 120_000, windowsHide: true }, (err) => (err ? reject(new Error(`Could not write ${zip}: ${err.message}`)) : resolve())),
   );
 }
 
@@ -32,7 +35,7 @@ export function zipFolder(dir: string, zip: string): Promise<void> {
 function unzip(zip: string): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), 'dialcatz-postman-'));
   return new Promise((resolve, reject) =>
-    execFile(process.platform === 'win32' ? 'tar.exe' : '/usr/bin/tar', ['-xf', zip, '-C', dir], { timeout: 120_000 }, (err) => (err ? (rmSync(dir, { recursive: true, force: true }), reject(new Error(`Could not open ${zip}: ${err.message}`))) : resolve(dir))),
+    execFile(TAR, ['-xf', zip, '-C', dir], { timeout: 120_000, windowsHide: true }, (err) => (err ? (rmSync(dir, { recursive: true, force: true }), reject(new Error(`Could not open ${zip}: ${err.message}`))) : resolve(dir))),
   );
 }
 
@@ -55,7 +58,8 @@ const vars = (list: PmVar[]): EnvVariable[] => list.filter((v) => v?.key).map((v
 
 function classify(file: string, found: PostmanFound): void {
   let doc: Record<string, unknown>;
-  const text = readFileSync(file, 'utf8');
+  // A byte-order mark (Notepad, Windows PowerShell 5) is not JSON.
+  const text = readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
   try {
     doc = JSON.parse(text);
   } catch {

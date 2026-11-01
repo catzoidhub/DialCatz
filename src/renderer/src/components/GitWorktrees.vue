@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { homePath } from '../platform';
 import { computed, ref, watch } from 'vue';
 import type { GitBranch, GitRepoEntry, GitStatus, GitWorktree } from '@shared/types';
 import ConfirmDialog from './ConfirmDialog.vue';
@@ -60,7 +61,7 @@ const prune = async () => {
   await attempt(() => herd.gitWorktreePrune(id.value).then(() => true), 'Worktree records pruned');
   await load();
 };
-const short = (p: string) => p.replace(/^\/Users\/[^/]+/, '~');
+const short = homePath;
 </script>
 
 <template>

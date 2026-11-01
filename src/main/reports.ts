@@ -74,8 +74,13 @@ export function scrub(text: string): string {
     .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>)]+/gi, (u) => (/^file:/i.test(u) ? '<file>' : `${u.split(':')[0]}://<host>`))
     .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '<ip>')
     .replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, '<email>')
-    .split(homedir())
-    .join('~');
+    .replace(homeRe(), '~');
+}
+
+/** The home folder in any form a path takes: C:\\Users\\x, C:/Users/x, c:\\users\\x, JSON-escaped C:\\\\Users\\\\x, /Users/x. */
+function homeRe(): RegExp {
+  const parts = homedir().split(/[\\/]+/).filter(Boolean).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  return new RegExp(`${homedir().startsWith('/') ? '[\\\\/]+' : ''}${parts.join('[\\\\/]+')}`, 'gi');
 }
 
 const osName = () => (process.platform === 'darwin' ? 'macos' : process.platform === 'win32' ? 'windows' : 'linux');

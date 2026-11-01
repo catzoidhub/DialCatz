@@ -340,7 +340,7 @@ async function activate() {
     </aside>
 
     <section class="flex min-w-0 flex-1 flex-col">
-      <header class="drag flex items-center gap-3 border-b border-base-300/60 px-6 pt-5 pb-4">
+      <header class="win-top drag flex items-center gap-3 border-b border-base-300/60 px-6 pt-5 pb-4">
         <div class="min-w-0 flex-1">
           <h1 class="text-lg font-semibold tracking-tight">{{ selected === GLOBALS ? 'Globals' : env?.name }}</h1>
           <p class="text-xs opacity-60">{{ selected === GLOBALS ? GLOBALS_HINT : ENV_HINT }}</p>

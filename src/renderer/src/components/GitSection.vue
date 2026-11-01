@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { homePath } from '../platform';
 import { currentOS, words } from '@shared/platform';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import type { GitAccount, GitHostKind, GitRepo, GitRepoEntry, GitSshKey } from '@shared/types';
@@ -48,7 +49,7 @@ onBeforeUnmount(() => {
 const NAME: Record<GitHostKind, string> = { github: 'GitHub', gitlab: 'GitLab', gitea: 'Gitea / Forgejo', bitbucket: 'Bitbucket' };
 const DEFAULT_URL: Record<GitHostKind, string> = { github: 'https://github.com', gitlab: 'https://gitlab.com', gitea: 'https://codeberg.org', bitbucket: 'https://bitbucket.org' };
 const host = (u: string) => u.replace(/^https?:\/\//, '');
-const short = (p: string) => p.replace(/^\/Users\/[^/]+/, '~');
+const short = homePath;
 
 // ---- accounts DevCatz has that are not shared yet
 const fromDevCatz = ref<GitAccount[]>([]);

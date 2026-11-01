@@ -42,7 +42,7 @@ export function parseCsv(text: string): Record<string, string>[] {
 }
 
 export function parseJson(text: string): Record<string, string>[] {
-  const doc = JSON.parse(text) as unknown;
+  const doc = JSON.parse(text.replace(/^\uFEFF/, '')) as unknown;
   if (!Array.isArray(doc)) throw new Error('A JSON data file is an array of objects: [{ "id": 1 }, { "id": 2 }]');
   return doc.slice(0, MAX_ROWS).map((o) => Object.fromEntries(Object.entries(o && typeof o === 'object' ? o : { value: o }).map(([k, v]) => [k, v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)])));
 }

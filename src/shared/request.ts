@@ -258,8 +258,12 @@ function shellWords(cmd: string): string[] {
 
 /** Reads a pasted cURL command into a request (null: not a cURL command). */
 export function parseCurl(cmd: string): RequestSpec | null {
-  const words = shellWords(cmd.trim());
-  if (words[0] !== 'curl') return null;
+  let text = cmd.trim();
+  // Windows forms: Chrome's "Copy as cURL (cmd)" (^ escapes, ^ at line ends) and PowerShell's ` at line ends.
+  if (/\^\r?\n|\^"/.test(text)) text = text.replace(/\^\r?\n/g, ' ').replace(/\^(.)/g, '$1');
+  text = text.replace(/`\r?\n/g, ' ');
+  const words = shellWords(text);
+  if (!/^curl(\.exe)?$/i.test(words[0] ?? '')) return null;
   let method: string | null = null;
   let url = '';
   const headers: KeyValue[] = [];
