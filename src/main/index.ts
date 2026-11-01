@@ -779,6 +779,8 @@ function applyMenu(): void {
                 // Check for Updates… right under About (Catzoid #54); "Update Available…" once a version is found.
                 { label: updateLabel(), click: cmd('checkUpdates') },
                 { type: 'separator' as const },
+                { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: cmd('settings') },
+                { type: 'separator' as const },
                 { role: 'services' as const },
                 { type: 'separator' as const },
                 { role: 'hide' as const },

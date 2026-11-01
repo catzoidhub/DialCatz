@@ -2,6 +2,7 @@
 import { nextTick, onMounted, ref } from 'vue';
 import { connectRequest, loadWorkspaces, notify } from '../state';
 import { words } from '../platform';
+import { currentOS } from '@shared/platform';
 import CatMood from './CatMood.vue';
 
 /**
@@ -75,7 +76,7 @@ async function useToken() {
           <input v-model="token" type="password" class="input input-sm flex-1 font-mono" placeholder="dct_…" spellcheck="false" @keydown.enter="useToken" />
         </div>
       </template>
-      <p class="text-xs opacity-50">Your token is kept in {{ words.secretStore }}, never in DialCatz’s files. It belongs to you and this device only.</p>
+      <p class="text-xs opacity-50"><template v-if="currentOS === 'mac'">Your token is kept in {{ words.secretStore }}, never in DialCatz’s files.</template><template v-else>Your token is encrypted for your account with {{ words.secretStore }} in DialCatz’s settings, never kept as plain text.</template> It belongs to you and this device only.</p>
       <div v-if="error" class="alert alert-error alert-soft text-sm"><CatMood mood="error" class="size-7 shrink-0 -my-0.5" /><span>{{ error }}</span></div>
 
       <div class="modal-action">
