@@ -25,7 +25,8 @@ import { isWin } from './platform';
  *              "avatarUrl" (the remote URL), "addedAt" } ] }
  *   Keychain: generic password, service "Catzoid Git", account = the account id, password = its token.
  *   Windows: %APPDATA%\Catzoid\shared.json; the AI keys DPAPI-encrypted for the user in Catzoid\keys\<provider>.dpapi
- *   (PowerShell's ConvertFrom-SecureString, as DevCatz and DBCatz), Git tokens in Catzoid\keys\git-<account id>.dpapi.
+ *   (PowerShell's ConvertFrom-SecureString, as DevCatz and DBCatz), Git tokens in Catzoid\git\<account id>.dpapi
+ *   (characters outside [\w.-] in the id become "_"), as DevCatz 1.0.2 for Windows writes them.
  *
  * CATZOID_SHARED_DIR and CATZOID_KEYCHAIN (a keychain file) point both elsewhere, for tests.
  */
@@ -160,6 +161,8 @@ const keyCache = new Map<AiProvider, { at: number; key: string }>();
  * stdin, never the command line.
  */
 const keyFile = (name: string) => join(SHARED_DIR, 'keys', `${name}.dpapi`);
+/** A Git account's token file, as DevCatz names it: Catzoid\git\<id>.dpapi. */
+const gitTokenFile = (id: string) => join(SHARED_DIR, 'git', `${id.replace(/[^\w.-]/g, '_')}.dpapi`);
 const psQuote = (s: string) => `'${s.replace(/'/g, "''")}'`;
 function powershell(script: string, input = ''): Promise<{ code: number; out: string }> {
   return new Promise((resolve) => {
@@ -171,8 +174,7 @@ function powershell(script: string, input = ''): Promise<{ code: number; out: st
     p.stdin.end(input);
   });
 }
-async function winSecret(name: string): Promise<string> {
-  const file = keyFile(name);
+async function winSecret(file: string): Promise<string> {
   if (!existsSync(file)) return '';
   const r = await powershell(
     `$s = ConvertTo-SecureString (Get-Content -Raw -Path ${psQuote(file)}).Trim(); ` +
@@ -180,8 +182,7 @@ async function winSecret(name: string): Promise<string> {
   );
   return r.code === 0 ? r.out.trim() : '';
 }
-async function setWinSecret(name: string, value: string): Promise<void> {
-  const file = keyFile(name);
+async function setWinSecret(file: string, value: string): Promise<void> {
   if (!value) {
     rmSync(file, { force: true });
     return;
@@ -199,7 +200,7 @@ export async function sharedKey(provider: AiProvider): Promise<string> {
   const hit = keyCache.get(provider);
   if (hit && Date.now() - hit.at < 60_000) return hit.key;
   let key: string;
-  if (isWin) key = await winSecret(provider);
+  if (isWin) key = await winSecret(keyFile(provider));
   else {
     const r = await security(['find-generic-password', '-s', SERVICE, '-a', provider, '-w', ...KEYCHAIN]);
     key = r.code === 0 ? r.stdout.replace(/\n$/, '') : '';
@@ -213,7 +214,7 @@ export async function setSharedKey(provider: AiProvider, key: string): Promise<v
   const k = key.trim();
   if (isWin) {
     if (/["\\\n\r]/.test(k)) throw new Error('That key has characters an API key does not have');
-    await setWinSecret(provider, k);
+    await setWinSecret(keyFile(provider), k);
   } else if (!k) {
     await security(['delete-generic-password', '-s', SERVICE, '-a', provider, ...KEYCHAIN]);
   } else {
@@ -251,7 +252,7 @@ export async function sharedGitToken(id: string): Promise<string> {
   const hit = gitTokens.get(id);
   if (hit && Date.now() - hit.at < 60_000) return hit.token;
   let token: string;
-  if (isWin) token = /^[\w.-]+$/.test(id) ? await winSecret(`git-${id}`) : '';
+  if (isWin) token = id ? await winSecret(gitTokenFile(id)) : '';
   else {
     const r = await security(['find-generic-password', '-s', GIT_SERVICE, '-a', id, '-w', ...KEYCHAIN]);
     token = r.code === 0 ? r.stdout.replace(/\n$/, '') : '';
@@ -263,11 +264,12 @@ export async function sharedGitToken(id: string): Promise<string> {
 /** Saves (or with '' removes) an account's token in the shared Keychain item, through `security -i` (never in a process list). */
 export async function setSharedGitToken(id: string, token: string): Promise<void> {
   const t = token.trim();
-  if (!/^[\w.-]+$/.test(id)) throw new Error('Bad account id');
   if (isWin) {
+    if (!id) throw new Error('Bad account id');
     if (/["\\\n\r]/.test(t)) throw new Error('That token has characters a token does not have');
-    await setWinSecret(`git-${id}`, t);
-  } else if (!t) await security(['delete-generic-password', '-s', GIT_SERVICE, '-a', id, ...KEYCHAIN]);
+    await setWinSecret(gitTokenFile(id), t);
+  } else if (!/^[\w.-]+$/.test(id)) throw new Error('Bad account id');
+  else if (!t) await security(['delete-generic-password', '-s', GIT_SERVICE, '-a', id, ...KEYCHAIN]);
   else {
     if (/["\\\n\r]/.test(t)) throw new Error('That token has characters a token does not have');
     await new Promise<void>((resolve, reject) => {
