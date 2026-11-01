@@ -17,6 +17,7 @@ import ConnectDialog from './components/ConnectDialog.vue';
 import AskDialCatz from './components/AskDialCatz.vue';
 import askMark from './assets/logos/ask-catzoid.svg';
 import { isMac, keyLabel, modKey } from './platform';
+import { currentOS } from '@shared/platform';
 import EnvPicker from './components/EnvPicker.vue';
 import CatMood from './components/CatMood.vue';
 import Icon, { type IconName } from './components/Icon.vue';
@@ -51,6 +52,9 @@ function onCommand(cmd: string) {
   switch (cmd) {
     case 'about':
       settingsTab.value = 'about';
+      goSection('settings');
+      break;
+    case 'settings':
       goSection('settings');
       break;
     case 'checkUpdates':
@@ -149,14 +153,41 @@ function onMouse(e: MouseEvent) {
   if (e.button === 3) goBack();
   else if (e.button === 4) goForward();
 }
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener('keydown', onKey);
   window.addEventListener('mouseup', onMouse);
+  if (isWin) {
+    menuKeys = new Set(await api.menuShortcuts());
+    window.addEventListener('keydown', onMenuKey);
+  }
 });
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey);
   window.removeEventListener('mouseup', onMouse);
+  window.removeEventListener('keydown', onMenuKey);
 });
+
+/**
+ * Windows has no menu bar (the title bar overlay), and Electron gives such a window no menu shortcuts: the rail's ☰
+ * button opens the app menu, and a shortcut the page left alone (as the Mac menu gets it after the page) runs its
+ * menu item. As DBCatz.
+ */
+const isWin = currentOS === 'windows';
+let menuKeys = new Set<string>();
+const CODE_KEY: Record<string, string> = { Comma: ',', Period: '.', Slash: '/', BracketLeft: '[', BracketRight: ']', Backspace: 'backspace', Delete: 'delete', Enter: 'enter', NumpadEnter: 'enter', Tab: 'tab', Escape: 'escape' };
+function onMenuKey(e: KeyboardEvent) {
+  if (e.defaultPrevented || !(e.ctrlKey || e.altKey) || e.metaKey) return;
+  const key = /^Key[A-Z]$/.test(e.code) ? e.code.slice(3).toLowerCase() : /^(Digit|Numpad)\d$/.test(e.code) ? e.code.slice(-1) : /^F\d+$/.test(e.code) ? e.code.toLowerCase() : CODE_KEY[e.code];
+  if (!key) return;
+  const combo = [e.ctrlKey && 'ctrl', e.altKey && 'alt', e.shiftKey && 'shift', key].filter(Boolean).join('+');
+  if (!menuKeys.has(combo)) return;
+  e.preventDefault();
+  void api.menuKey(combo);
+}
+function openAppMenu(e: MouseEvent) {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  void api.appMenu(r.left, r.bottom + 4);
+}
 
 onMounted(async () => {
   await Promise.all([loadSettings(), loadWorkspaces(), loadHistory()]);
@@ -247,6 +278,10 @@ onBeforeUnmount(() => offs.forEach((f) => f()));
     <!-- Back / forward right of the rail, level with the traffic lights (as in DevCatz); right-click lists the recent
        screens. Every sidebar / page header leaves this strip free. Last in the document on purpose: Electron builds
        the drag area in document order, so a no-drag hole made before the drag strips would be filled again. -->
+    <!-- Windows: no menu bar — the app menu (every command and its shortcut) behind ☰, where the traffic lights sit on a Mac. -->
+    <button v-if="isWin" class="no-drag btn btn-ghost btn-sm btn-square fixed top-1.5 left-3 z-30" title="Menu: every DialCatz command and its shortcut" aria-label="Menu" @click="openAppMenu">
+      <svg viewBox="0 0 20 20" class="size-4" fill="currentColor"><path d="M3 5a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H4a1 1 0 0 1-1-1Zm0 5a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H4a1 1 0 0 1-1-1Zm1 4a1 1 0 1 0 0 2h12a1 1 0 1 0 0-2H4Z" /></svg>
+    </button>
     <div class="no-drag fixed top-2.5 left-[6.75rem] z-30 flex items-center gap-0.5">
       <PopMenu ref="backMenu" :items="backItems" :width="240">
         <button class="btn btn-ghost btn-xs btn-square" :disabled="!canBack" :title="`Back (${keyLabel('mod+[')}) · right-click for recent screens`" aria-label="Back" @click.stop="goBack" @contextmenu.prevent.stop="canBack && backMenu?.toggle()">

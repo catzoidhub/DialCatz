@@ -1,9 +1,10 @@
 import { app } from 'electron';
 import { execFile, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { AiProvider, GitAccount, Theme } from '@shared/types';
+import { isWin } from './platform';
 
 /**
  * Settings shared by the Catzoid apps (DevCatz, DBCatz, DialCatz): the theme and the AI connection
@@ -23,11 +24,14 @@ import type { AiProvider, GitAccount, Theme } from '@shared/types';
  *     "git": { "accounts": [ { "id", "kind": "github"|"gitlab"|"gitea"|"bitbucket", "baseUrl", "username", "name",
  *              "avatarUrl" (the remote URL), "addedAt" } ] }
  *   Keychain: generic password, service "Catzoid Git", account = the account id, password = its token.
+ *   Windows: %APPDATA%\Catzoid\shared.json; the AI keys DPAPI-encrypted for the user in Catzoid\keys\<provider>.dpapi
+ *   (PowerShell's ConvertFrom-SecureString, as DevCatz and DBCatz), Git tokens in Catzoid\keys\git-<account id>.dpapi.
  *
  * CATZOID_SHARED_DIR and CATZOID_KEYCHAIN (a keychain file) point both elsewhere, for tests.
  */
 
-export const SHARED_DIR = process.env.CATZOID_SHARED_DIR || join(homedir(), 'Library', 'Application Support', 'Catzoid');
+export const SHARED_DIR =
+  process.env.CATZOID_SHARED_DIR || (isWin ? join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'Catzoid') : join(homedir(), 'Library', 'Application Support', 'Catzoid'));
 const FILE = join(SHARED_DIR, 'shared.json');
 const SERVICE = 'Catzoid AI';
 const GIT_SERVICE = 'Catzoid Git';
@@ -59,7 +63,7 @@ let cache: Shared | null = null;
 export function readShared(): Shared {
   if (cache) return cache;
   try {
-    const v = JSON.parse(readFileSync(FILE, 'utf8')) as Shared;
+    const v = JSON.parse(readFileSync(FILE, 'utf8').replace(/^\uFEFF/, '')) as Shared;
     cache = v && typeof v === 'object' ? { ...v, version: 1 } : { version: 1 };
   } catch {
     cache = { version: 1 };
@@ -150,12 +154,56 @@ function security(args: string[]): Promise<{ code: number; stdout: string }> {
 
 const keyCache = new Map<AiProvider, { at: number; key: string }>();
 
+/**
+ * Windows: a secret encrypted with DPAPI for the current user in Catzoid\keys\<name>.dpapi, so every Catzoid app of the
+ * same user reads it, as the Keychain item on macOS (the same files as DevCatz and DBCatz). The secret goes in through
+ * stdin, never the command line.
+ */
+const keyFile = (name: string) => join(SHARED_DIR, 'keys', `${name}.dpapi`);
+const psQuote = (s: string) => `'${s.replace(/'/g, "''")}'`;
+function powershell(script: string, input = ''): Promise<{ code: number; out: string }> {
+  return new Promise((resolve) => {
+    const p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    let out = '';
+    p.stdout.on('data', (d) => (out += d));
+    p.on('error', () => resolve({ code: 1, out: '' }));
+    p.on('close', (c) => resolve({ code: c ?? 1, out }));
+    p.stdin.end(input);
+  });
+}
+async function winSecret(name: string): Promise<string> {
+  const file = keyFile(name);
+  if (!existsSync(file)) return '';
+  const r = await powershell(
+    `$s = ConvertTo-SecureString (Get-Content -Raw -Path ${psQuote(file)}).Trim(); ` +
+      '[Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))',
+  );
+  return r.code === 0 ? r.out.trim() : '';
+}
+async function setWinSecret(name: string, value: string): Promise<void> {
+  const file = keyFile(name);
+  if (!value) {
+    rmSync(file, { force: true });
+    return;
+  }
+  mkdirSync(join(file, '..'), { recursive: true });
+  const r = await powershell(
+    `$k = [Console]::In.ReadToEnd().Trim(); ConvertTo-SecureString $k -AsPlainText -Force | ConvertFrom-SecureString | Set-Content -NoNewline -Path ${psQuote(file)}`,
+    value,
+  );
+  if (r.code !== 0) throw new Error('Windows could not store the secret');
+}
+
 /** The provider's API key from the shared Keychain item ('' when there is none). Cached for a minute. */
 export async function sharedKey(provider: AiProvider): Promise<string> {
   const hit = keyCache.get(provider);
   if (hit && Date.now() - hit.at < 60_000) return hit.key;
-  const r = await security(['find-generic-password', '-s', SERVICE, '-a', provider, '-w', ...KEYCHAIN]);
-  const key = r.code === 0 ? r.stdout.replace(/\n$/, '') : '';
+  let key: string;
+  if (isWin) key = await winSecret(provider);
+  else {
+    const r = await security(['find-generic-password', '-s', SERVICE, '-a', provider, '-w', ...KEYCHAIN]);
+    key = r.code === 0 ? r.stdout.replace(/\n$/, '') : '';
+  }
   keyCache.set(provider, { at: Date.now(), key });
   return key;
 }
@@ -163,7 +211,10 @@ export async function sharedKey(provider: AiProvider): Promise<string> {
 /** Saves (or with '' removes) a provider's key in the shared Keychain item and lists it in shared.json. */
 export async function setSharedKey(provider: AiProvider, key: string): Promise<void> {
   const k = key.trim();
-  if (!k) {
+  if (isWin) {
+    if (/["\\\n\r]/.test(k)) throw new Error('That key has characters an API key does not have');
+    await setWinSecret(provider, k);
+  } else if (!k) {
     await security(['delete-generic-password', '-s', SERVICE, '-a', provider, ...KEYCHAIN]);
   } else {
     if (/["\\\n\r]/.test(k)) throw new Error('That key has characters an API key does not have');
@@ -199,8 +250,12 @@ const gitTokens = new Map<string, { at: number; token: string }>();
 export async function sharedGitToken(id: string): Promise<string> {
   const hit = gitTokens.get(id);
   if (hit && Date.now() - hit.at < 60_000) return hit.token;
-  const r = await security(['find-generic-password', '-s', GIT_SERVICE, '-a', id, '-w', ...KEYCHAIN]);
-  const token = r.code === 0 ? r.stdout.replace(/\n$/, '') : '';
+  let token: string;
+  if (isWin) token = /^[\w.-]+$/.test(id) ? await winSecret(`git-${id}`) : '';
+  else {
+    const r = await security(['find-generic-password', '-s', GIT_SERVICE, '-a', id, '-w', ...KEYCHAIN]);
+    token = r.code === 0 ? r.stdout.replace(/\n$/, '') : '';
+  }
   gitTokens.set(id, { at: Date.now(), token });
   return token;
 }
@@ -209,7 +264,10 @@ export async function sharedGitToken(id: string): Promise<string> {
 export async function setSharedGitToken(id: string, token: string): Promise<void> {
   const t = token.trim();
   if (!/^[\w.-]+$/.test(id)) throw new Error('Bad account id');
-  if (!t) await security(['delete-generic-password', '-s', GIT_SERVICE, '-a', id, ...KEYCHAIN]);
+  if (isWin) {
+    if (/["\\\n\r]/.test(t)) throw new Error('That token has characters a token does not have');
+    await setWinSecret(`git-${id}`, t);
+  } else if (!t) await security(['delete-generic-password', '-s', GIT_SERVICE, '-a', id, ...KEYCHAIN]);
   else {
     if (/["\\\n\r]/.test(t)) throw new Error('That token has characters a token does not have');
     await new Promise<void>((resolve, reject) => {

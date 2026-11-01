@@ -237,7 +237,7 @@ const broken = reactive(new Set<string>());
             </div>
           </a>
         </li>
-        <li v-if="fromDevCatz.length" class="mx-1 my-1 rounded-xl border border-dashed border-base-content/20 p-2.5 text-xs">
+        <li v-if="fromDevCatz.length && currentOS === 'mac'" class="mx-1 my-1 rounded-xl border border-dashed border-base-content/20 p-2.5 text-xs">
           <div class="block p-0 hover:bg-transparent">
             <div class="font-medium">In DevCatz: {{ fromDevCatz.map((a) => `${a.username} (${NAME[a.kind].split(' ')[0]})`).join(', ') }}</div>
             <p class="mt-1 opacity-70">Bring {{ fromDevCatz.length === 1 ? 'it' : 'them' }} over once: macOS asks to let DialCatz read DevCatz's key. After that every Catzoid app shares {{ fromDevCatz.length === 1 ? 'it' : 'them' }}.</p>
@@ -256,7 +256,7 @@ const broken = reactive(new Set<string>());
             <span class="grid size-7 shrink-0 place-items-center rounded-lg bg-base-300/70 font-mono text-[10px] font-bold">SSH</span>
             <div class="min-w-0 flex-1">
               <div class="font-medium">SSH keys</div>
-              <div class="text-[11px] opacity-60">~/.ssh</div>
+              <div class="text-[11px] opacity-60">{{ words.home }}.ssh</div>
             </div>
           </a>
         </li>
@@ -305,7 +305,7 @@ const broken = reactive(new Set<string>());
       <template v-else-if="view.kind === 'keys'">
         <header class="drag border-b border-base-300/60 px-6 pt-11 pb-4">
           <h1 class="text-lg font-semibold tracking-tight">SSH keys</h1>
-          <div class="text-xs opacity-60">Keys in ~/.ssh, used for git@… remotes. Add one to an account so pushes over SSH work.</div>
+          <div class="text-xs opacity-60">Keys in {{ words.home }}.ssh, used for git@… remotes. Add one to an account so pushes over SSH work.</div>
         </header>
         <div class="flex-1 space-y-4 overflow-y-auto p-6">
           <div v-for="k in keys" :key="k.path" class="card">
@@ -330,8 +330,8 @@ const broken = reactive(new Set<string>());
             <div class="card-body gap-2">
               <div class="font-semibold">New key</div>
               <p class="text-xs opacity-70">
-                ed25519 without a passphrase: <code>~/.ssh/id_ed25519</code> when free (ssh uses it by default), else <code>id_ed25519_dialcatz</code> (add an
-                <code>IdentityFile</code> line to ~/.ssh/config for it).
+                ed25519 without a passphrase: <code>{{ words.home }}.ssh{{ words.sep }}id_ed25519</code> when free (ssh uses it by default), else <code>id_ed25519_dialcatz</code> (add an
+                <code>IdentityFile</code> line to {{ words.home }}.ssh{{ words.sep }}config for it).
               </p>
               <div class="flex gap-2">
                 <input v-model="keyEmail" class="input input-sm w-72" placeholder="you@example.com (key comment)" />
@@ -441,7 +441,7 @@ const broken = reactive(new Set<string>());
     <ConfirmDialog
       v-if="removing"
       :title="`Remove ${NAME[removing.kind]} account ${removing.username}?`"
-      text="It is removed from every Catzoid app on this computer, and its token from the Keychain. Repositories stay; revoke the token on the host too if you no longer need it."
+      :text="`It is removed from every Catzoid app on this computer, and its token from the ${words.secretStore}. Repositories stay; revoke the token on the host too if you no longer need it.`"
       confirm="Remove"
       tone="error"
       @cancel="removing = null"

@@ -27,7 +27,7 @@ class Store {
     this.file = dataDir('config.json');
     this.data = {};
     try {
-      if (existsSync(this.file)) this.data = JSON.parse(readFileSync(this.file, 'utf8')) as Data;
+      if (existsSync(this.file)) this.data = JSON.parse(readFileSync(this.file, 'utf8').replace(/^\uFEFF/, '')) as Data;
     } catch (e) {
       console.error('config.json could not be read:', e);
     }

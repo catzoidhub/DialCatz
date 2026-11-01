@@ -65,7 +65,7 @@ export function git(cwd: string, args: string[], opts: { env?: Record<string, st
     const timer = setTimeout(() => child.kill('SIGTERM'), opts.timeout ?? 60_000);
     child.on('error', (e) => {
       clearTimeout(timer);
-      done({ code: 127, stdout: '', stderr: e.message.includes('ENOENT') ? 'git is not installed (xcode-select --install)' : e.message });
+      done({ code: 127, stdout: '', stderr: e.message.includes('ENOENT') ? (process.platform === 'win32' ? 'git is not installed (Git for Windows, git-scm.com)' : 'git is not installed (xcode-select --install)') : e.message });
     });
     child.on('close', (code) => {
       clearTimeout(timer);

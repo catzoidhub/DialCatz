@@ -911,6 +911,12 @@ export interface DialCatzApi {
   createFolderWorkspace(name: string, parent: string, folderName: string): Promise<Workspace>;
   /** A team workspace's DialCatz Den admin panel (Workspaces page): deleting one happens there. */
   teamAdminUrl(workspaceId: string): Promise<string>;
+  /** Windows (no menu bar): the app menu at the rail's ☰ button (window coordinates). */
+  appMenu(x: number, y: number): Promise<void>;
+  /** Windows: the app menu's shortcuts ("ctrl+shift+n"), which the window handles itself. */
+  menuShortcuts(): Promise<string[]>;
+  /** Windows: runs the app menu item with this shortcut. */
+  menuKey(key: string): Promise<void>;
   /** A folder picker (null = cancelled). */
   pickFolder(title: string, start: string): Promise<string | null>;
   /** Adds or replaces items (by id). */
@@ -1042,7 +1048,7 @@ export interface DialCatzApi {
 export const API_METHODS = [
   'appInfo', 'settings', 'setSettings', 'setAiKey',
   'workspaces', 'workspace', 'createWorkspace', 'renameWorkspace', 'deleteWorkspace', 'openFolderWorkspace', 'useFolder', 'stopUsingFolder', 'revealFolder', 'folderGitStatus', 'folderGitDiff', 'folderGitCommit', 'folderGitPull', 'folderGitPush', 'folderGitInit', 'folderGitAbortMerge',
-  'gitState', 'gitWatch', 'gitRepoAdd', 'gitRepoRemove', 'gitRepoLog', 'gitRevealRepo', 'gitOpenWorkspace', 'gitPickFolder', 'gitStatus', 'gitInit', 'gitDiff', 'gitStage', 'gitUnstage', 'gitDiscard', 'gitCommit', 'gitSync', 'gitCancel', 'gitLog', 'gitShow', 'gitBranches', 'gitBranch', 'gitStashes', 'gitStash', 'gitTags', 'gitTag', 'gitOperation', 'gitSquash', 'gitCherryPick', 'gitRevert', 'gitReset', 'gitRestoreFile', 'gitOpenFile', 'gitIgnoreSuggestions', 'gitIgnoreAdd', 'gitignoreRead', 'gitignoreSave', 'gitSetIdentity', 'gitAddRemote', 'gitWorktrees', 'gitWorktreeAdd', 'gitWorktreeRemove', 'gitWorktreePrune', 'gitPulls', 'gitCreatePull', 'gitCheckoutPull', 'gitAddAccount', 'gitRemoveAccount', 'gitRepos', 'gitSshKeys', 'gitSshGenerate', 'gitSshAddToAccount', 'gitClone', 'gitCancelClone', 'gitDismissClone', 'gitAccounts', 'gitCreateRemoteRepo', 'gitDevCatzAccounts', 'gitImportDevCatz', 'folderGitConnect', 'createFolderWorkspace', 'pickFolder', 'teamAdminUrl',
+  'gitState', 'gitWatch', 'gitRepoAdd', 'gitRepoRemove', 'gitRepoLog', 'gitRevealRepo', 'gitOpenWorkspace', 'gitPickFolder', 'gitStatus', 'gitInit', 'gitDiff', 'gitStage', 'gitUnstage', 'gitDiscard', 'gitCommit', 'gitSync', 'gitCancel', 'gitLog', 'gitShow', 'gitBranches', 'gitBranch', 'gitStashes', 'gitStash', 'gitTags', 'gitTag', 'gitOperation', 'gitSquash', 'gitCherryPick', 'gitRevert', 'gitReset', 'gitRestoreFile', 'gitOpenFile', 'gitIgnoreSuggestions', 'gitIgnoreAdd', 'gitignoreRead', 'gitignoreSave', 'gitSetIdentity', 'gitAddRemote', 'gitWorktrees', 'gitWorktreeAdd', 'gitWorktreeRemove', 'gitWorktreePrune', 'gitPulls', 'gitCreatePull', 'gitCheckoutPull', 'gitAddAccount', 'gitRemoveAccount', 'gitRepos', 'gitSshKeys', 'gitSshGenerate', 'gitSshAddToAccount', 'gitClone', 'gitCancelClone', 'gitDismissClone', 'gitAccounts', 'gitCreateRemoteRepo', 'gitDevCatzAccounts', 'gitImportDevCatz', 'folderGitConnect', 'createFolderWorkspace', 'pickFolder', 'teamAdminUrl', 'appMenu', 'menuShortcuts', 'menuKey',
   'saveItems', 'deleteItems',
   'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection',
   'aiModels', 'aiTest', 'aiAsk', 'aiExplain', 'aiTests', 'aiBody', 'aiCancel',

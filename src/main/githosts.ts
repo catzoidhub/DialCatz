@@ -20,7 +20,7 @@ type StoredAccount = GitAccount;
 const accountsOf = (): StoredAccount[] => sharedGitAccounts();
 async function decrypt(a: StoredAccount): Promise<string> {
   const t = await sharedGitToken(a.id);
-  if (!t) throw new Error(`The token of ${a.username} is not in the Keychain: remove the account and connect it again`);
+  if (!t) throw new Error(`The token of ${a.username} is not in the ${process.platform === 'win32' ? 'protected storage' : 'Keychain'}: remove the account and connect it again`);
   return t;
 }
 
