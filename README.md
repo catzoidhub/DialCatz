@@ -9,7 +9,7 @@
   <a href="https://catzoid.com/community">Community</a>
 </p>
 
-An API client for macOS: REST, GraphQL and WebSocket requests, collections, environments, scripts, tests and a runner — and your team’s own server, [DialCatz Den](https://github.com/catzoidhub/DialCatz-Den), when you want to share them.
+An API client for macOS and Windows: REST, GraphQL and WebSocket requests, collections, environments, scripts, tests and a runner — and your team’s own server, [DialCatz Den](https://github.com/catzoidhub/DialCatz-Den), when you want to share them.
 
 Part of [Catzoid](https://catzoid.com) — free, open-source developer tools with nine lives. All cats, no catch: no
 account, no Pro tier, nothing locked behind a payment.
@@ -19,7 +19,7 @@ account, no Pro tier, nothing locked behind a payment.
 - **Requests** — REST, GraphQL and WebSocket; params, headers, auth, bodies (JSON, form, multipart, binary); paste a cURL command and it becomes a request.
 - **Collections and environments** — folders, variables, pre-request and test scripts, a runner with iterations; results export as JSON or JUnit XML.
 - **Import** — Postman collections and data exports, Postman workspaces with an API key, OpenAPI / Swagger, cURL.
-- **Teams** — a self-hosted [DialCatz Den](https://github.com/catzoidhub/DialCatz-Den): live sync, invite links instead of accounts, environment values that stay on each Mac.
+- **Teams** — a self-hosted [DialCatz Den](https://github.com/catzoidhub/DialCatz-Den): live sync, invite links instead of accounts, environment values that stay on each computer. Or share through Git: a workspace kept as files in your repository.
 - **AI, optional** — explain a response, write tests, generate a body; names and URLs only, never your secrets.
 - **The family** — every [DevCatz](https://github.com/catzoidhub/DevCatz) site is an environment; Check in DBCatz opens the table a request touched.
 
@@ -34,8 +34,11 @@ brew tap catzoidhub/catz && brew trust catzoidhub/catz
 brew install --cask dialcatz
 ```
 
-The app is signed and notarized by Apple and updates itself (Settings → About → Check for Updates). Windows builds
-are on the way.
+The app is signed and notarized by Apple and updates itself (Settings → About → Check for Updates).
+
+Windows 10 / 11 (x64): `DialCatz-Setup-<version>.exe` from the same page or the
+[latest release](https://github.com/catzoidhub/DialCatz/releases/latest). It installs for your account only, no
+administrator rights needed, and updates itself too. It is not code-signed yet (see Code signing below).
 
 ## Build from source
 
@@ -47,6 +50,15 @@ bun run package      # a signed DMG in dist/ (notarized when a notarytool profil
 ```
 
 Found a bug? Use **Help → Report a Bug…** in the app, or [open an issue](https://github.com/catzoidhub/DialCatz/issues).
+
+## Code signing
+
+macOS builds are signed with a Developer ID and notarized by Apple. **The Windows installer is not code-signed yet**:
+the SignPath Foundation, which signs open-source projects for free, asks for a project with more history and public
+use than DialCatz has today, and paid certificates are out of reach for now. Windows SmartScreen therefore warns when you
+open the installer: choose **More info → Run anyway**. The installer is built by GitHub Actions from this repository,
+so what you run is this source. Stars, issues and pull requests help DialCatz qualify for free signing later. Policy:
+[catzoid.com/legal/code-signing](https://catzoid.com/legal/code-signing).
 
 ## Licence
 
