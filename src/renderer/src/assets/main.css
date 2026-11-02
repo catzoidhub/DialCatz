@@ -1815,7 +1815,7 @@ body.is-resizing * {
   height: 1rem;
 }
 .ask-send:disabled {
-  opacity: 0.35;
+  opacity: 0.55;
 }
 .ask-send:not(:disabled):hover {
   transform: translateY(-1px);
@@ -2012,15 +2012,17 @@ body.is-resizing * {
   from { opacity: 0; transform: translateY(-4px) scale(0.98); }
 }
 
-/* A primary button that cannot be pressed yet reads as such (not a faded teal with unreadable text). */
-.btn.btn-primary:not(.btn-outline):not(.btn-ghost):not(.btn-soft):not(.btn-link):disabled,
-.btn.btn-primary:not(.btn-outline):not(.btn-ghost):not(.btn-soft):not(.btn-link)[disabled] {
-  background-image: none;
-  opacity: 1;
-  background: oklch(from var(--color-base-content) l c h / 0.08);
+/* A primary button that cannot be pressed yet (disabled, or busy with a spinner): the gradient stays under it, so
+   the label keeps its own colour and the whole button fades (Catzoid family). daisyUI's grey disabled text would
+   vanish on the teal. */
+.btn.btn-primary:not(.btn-outline):not(.btn-ghost):not(.btn-soft):not(.btn-link):is(:disabled, [disabled], .btn-disabled) {
+  --btn-fg: var(--color-primary-content);
+  background-image: var(--accent-gradient);
   border-color: transparent;
-  color: oklch(from var(--color-base-content) l c h / 0.38);
+  color: var(--color-primary-content);
+  opacity: 0.55;
   box-shadow: none;
+  filter: none;
 }
 
 /* Option cards (Import's first choice, New workspace): an icon tile, a title and one line; the picked one is ringed. */
