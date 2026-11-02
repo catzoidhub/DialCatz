@@ -458,6 +458,32 @@ export interface DevCatzSite {
   openapi: DevCatzOpenApi[];
 }
 
+/** One container of a DoCatz compose project, from DoCatz's bridge.json. */
+export interface DoCatzService {
+  service: string;
+  /** The container's name (for `docker exec`). */
+  container: string;
+  running: boolean;
+  /** https://<service>.<project>.docatz.<tld>; null while stopped, or for a service with no page. */
+  url: string | null;
+  /** What it is built from (nestjs, laravel, nuxt, go …); null for a plain image. */
+  framework: string | null;
+  library: string | null;
+  /** Serves an API (rather than a web front end): first pick for baseUrl. */
+  api: boolean;
+}
+/** A compose project DoCatz runs: its HTTP services (databases, caches and mail servers left out). */
+export interface DoCatzProject {
+  name: string;
+  /** The compose folder, and the compose file in it (for docatz://compose). */
+  dir: string | null;
+  composeFile: string | null;
+  running: boolean;
+  /** DoCatz keeps a .env for it (`<DoCatz data>/env/<project>.env`), or the compose folder has one. */
+  hasEnv: boolean;
+  services: DoCatzService[];
+}
+
 /**
  * What Postman has, to pick from before moving: one group per Postman workspace (an export is one group). Ids are
  * Postman's uids with an API key, positions in the export otherwise. `token` names the export read in the main process.
@@ -947,6 +973,11 @@ export interface DialCatzApi {
    */
   devcatzWorkspace(siteId: string, create: boolean): Promise<Workspace | null>;
   devcatzImport(workspaceId: string, siteId: string, what: { environment: boolean; envVars: boolean; routes: boolean; app?: string }): Promise<{ workspace: Workspace; collectionId: string | null; requests: number; source: string | null }>;
+  /** DoCatz: its compose projects; an environment and / or a collection of routes for one of them. */
+  docatzProjects(): Promise<{ installed: boolean; engine: boolean; projects: DoCatzProject[] }>;
+  docatzImport(workspaceId: string, project: string, what: { environment: boolean; envVars: boolean; routes: boolean; service?: string }): Promise<{ workspace: Workspace; collectionId: string | null; requests: number; source: string | null }>;
+  /** Shows the project in DoCatz (its compose file, ready to Up; nothing runs from the link). */
+  docatzOpen(project: string): Promise<void>;
   /** Postman: pick its data export (zip), a folder or JSON files and read what is in it (null when cancelled). */
   postmanReadExport(how: 'files' | 'folder'): Promise<PostmanChoice | null>;
   /** Brings the picked collections, environments and globals of the export read last into the workspace. */
@@ -1050,7 +1081,7 @@ export const API_METHODS = [
   'workspaces', 'workspace', 'createWorkspace', 'renameWorkspace', 'deleteWorkspace', 'openFolderWorkspace', 'useFolder', 'stopUsingFolder', 'revealFolder', 'folderGitStatus', 'folderGitDiff', 'folderGitCommit', 'folderGitPull', 'folderGitPush', 'folderGitInit', 'folderGitAbortMerge',
   'gitState', 'gitWatch', 'gitRepoAdd', 'gitRepoRemove', 'gitRepoLog', 'gitRevealRepo', 'gitOpenWorkspace', 'gitPickFolder', 'gitStatus', 'gitInit', 'gitDiff', 'gitStage', 'gitUnstage', 'gitDiscard', 'gitCommit', 'gitSync', 'gitCancel', 'gitLog', 'gitShow', 'gitBranches', 'gitBranch', 'gitStashes', 'gitStash', 'gitTags', 'gitTag', 'gitOperation', 'gitSquash', 'gitCherryPick', 'gitRevert', 'gitReset', 'gitRestoreFile', 'gitOpenFile', 'gitIgnoreSuggestions', 'gitIgnoreAdd', 'gitignoreRead', 'gitignoreSave', 'gitSetIdentity', 'gitAddRemote', 'gitWorktrees', 'gitWorktreeAdd', 'gitWorktreeRemove', 'gitWorktreePrune', 'gitPulls', 'gitCreatePull', 'gitCheckoutPull', 'gitAddAccount', 'gitRemoveAccount', 'gitRepos', 'gitSshKeys', 'gitSshGenerate', 'gitSshAddToAccount', 'gitClone', 'gitCancelClone', 'gitDismissClone', 'gitAccounts', 'gitCreateRemoteRepo', 'gitDevCatzAccounts', 'gitImportDevCatz', 'folderGitConnect', 'createFolderWorkspace', 'pickFolder', 'teamAdminUrl', 'appMenu', 'menuShortcuts', 'menuKey',
   'saveItems', 'deleteItems',
-  'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection',
+  'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'docatzProjects', 'docatzImport', 'docatzOpen', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection',
   'aiModels', 'aiTest', 'aiAsk', 'aiExplain', 'aiTests', 'aiBody', 'aiCancel',
   'send', 'pickFile', 'pickDataFile', 'saveText', 'cancel', 'wsConnect', 'wsSend', 'wsClose', 'saveResponse', 'history', 'addHistory', 'clearHistory',
   'servers', 'probeServer', 'connectWithToken', 'connectWithCode', 'refreshServer', 'disconnectServer', 'subscribeWorkspace', 'setPresence', 'presence', 'syncWorkspace', 'resolveConflict',

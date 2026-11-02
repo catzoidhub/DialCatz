@@ -14,6 +14,7 @@ import * as srv from './servers';
 import * as live from './live';
 import { copyPlan, exportCollection, importText } from './importers';
 import * as devcatz from './devcatz';
+import * as docatz from './docatz';
 import * as dbcatz from './dbcatz';
 import * as git from './foldergit';
 import * as gitHosts from './githosts';
@@ -34,6 +35,7 @@ import * as reports from './reports';
  * through a self-hosted DialCatz Den. Links it answers:
  *   dialcatz://open                                  bring the window up
  *   dialcatz://open?site=<DevCatz site id>           the DevCatz import for that site (asks before importing)
+ *   dialcatz://open?docatz=<compose project>         the DoCatz import for that project (asks before importing)
  *   dialcatz://connect?server=<url>&code=<code>       join a team server with a one-time invite code; the window
  *                                                    shows the server address and asks before anything is sent
  */
@@ -99,6 +101,12 @@ function handleLink(raw: string): void {
       // From DevCatz: show the import for that site (nothing happens without the user's click).
       const site = u.searchParams.get('site')!;
       if (/^[\w-]{1,64}$/.test(site)) send('app:devcatz', site);
+      return;
+    }
+    if (u.hostname === 'open' && u.searchParams.get('docatz')) {
+      // From DoCatz: show the import for that compose project (nothing happens without the user's click).
+      const project = u.searchParams.get('docatz')!;
+      if (docatz.PROJECT_NAME.test(project)) send('app:docatz', project);
       return;
     }
     if (u.hostname === 'connect') {
@@ -425,6 +433,43 @@ function api(): DialCatzApi {
         w = ws.saveEnvironment(id, { id: env?.id ?? uid('e_'), name, variables: merged, shared: env?.shared });
         const envId = w.environments.find((e) => e.name === name)!.id;
         // The imported collection uses the site's environment, so sites with the same variable names never mix.
+        const col = collectionId ? w.items.find((i) => i.id === collectionId) : null;
+        if (col) w = ws.saveItems(id, [{ ...col, environmentId: envId }]);
+        else if (!w.activeEnvironmentId) w = ws.setActiveEnvironment(id, envId);
+      }
+      if (w.serverId) void srv.sync(id).then(() => send('app:workspaces', null));
+      return { workspace: w, collectionId, requests, source };
+    },
+    docatzProjects: async () => ({ installed: docatz.installed(), engine: docatz.engineRunning(), projects: docatz.projects() }),
+    docatzOpen: async (name) => void (await shell.openExternal(docatz.link(docatz.project(String(name))))),
+    docatzImport: async (id, name, what) => {
+      const p = docatz.project(String(name));
+      // A stopped project has no addresses yet (DoCatz gives them while it runs): nothing useful to make.
+      if (!p.running) throw new Error(`${p.name} is not running, so its services have no addresses yet. Start it in DoCatz, then import again.`);
+      const service = what.service ? String(what.service) : undefined;
+      let w = ws.load(id);
+      let collectionId: string | null = null;
+      let requests = 0;
+      let source: string | null = null;
+      if (what.routes) {
+        const r = await docatz.routes(p, service);
+        r.root.sort = w.items.filter((i) => i.kind === 'collection').length;
+        w = ws.saveItems(id, [r.root, ...r.items]);
+        collectionId = r.root.id;
+        requests = r.items.filter((i) => i.kind === 'request').length;
+        source = r.source;
+      }
+      if (what.environment) {
+        const envName = `DoCatz · ${p.name}`;
+        const env = w.environments.find((e) => e.name === envName);
+        const urls = docatz.urlVariables(p, service);
+        const extra = what.envVars ? docatz.envVariables(p) : [];
+        const vars = [...urls, ...extra.filter((v) => !urls.some((u) => u.key === v.key))];
+        // Again for the same project: the values are refreshed, variables added by hand stay.
+        const merged = env ? [...vars, ...env.variables.filter((v) => !vars.some((x) => x.key === v.key))] : vars;
+        w = ws.saveEnvironment(id, { id: env?.id ?? uid('e_'), name: envName, variables: merged, shared: env?.shared });
+        const envId = w.environments.find((e) => e.name === envName)!.id;
+        // The imported collection uses the project's environment, so projects with the same variable names never mix.
         const col = collectionId ? w.items.find((i) => i.id === collectionId) : null;
         if (col) w = ws.saveItems(id, [{ ...col, environmentId: envId }]);
         else if (!w.activeEnvironmentId) w = ws.setActiveEnvironment(id, envId);

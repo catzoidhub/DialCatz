@@ -6,7 +6,7 @@ import { notify } from './state';
  * DMG — Catzoid #78), worked out when clicked from the app's real platform and processor, never a guess made before
  * that is known. Without a build for this computer it says so instead of opening another platform's file.
  */
-export async function openDownload(app: 'devcatz' | 'dbcatz', name: string): Promise<boolean> {
+export async function openDownload(app: 'devcatz' | 'dbcatz' | 'docatz', name: string): Promise<boolean> {
   const api = window.dialcatz;
   const info = await api.appInfo();
   const url = downloadLink(info.site, app, info.platform, info.arch);

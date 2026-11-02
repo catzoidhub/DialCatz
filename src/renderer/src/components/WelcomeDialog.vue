@@ -85,7 +85,7 @@ const privacy = () => site.value && api.openUrl(`${site.value}/docs/privacy-and-
               <div class="min-w-0">
                 <p class="font-medium">2 · Bring your collections</p>
                 <p class="mt-1 text-sm opacity-70">
-                  From Postman (a collection, a whole data export, or straight from your account with a Postman API key), OpenAPI or Swagger in JSON or YAML — or the routes of a site DevCatz runs.
+                  From Postman (a collection, a whole data export, or straight from your account with a Postman API key), OpenAPI or Swagger in JSON or YAML — or the routes of a site DevCatz runs or a project DoCatz runs.
                 </p>
               </div>
               <button class="btn btn-outline btn-sm shrink-0" @click="bringCollections">Import…</button>

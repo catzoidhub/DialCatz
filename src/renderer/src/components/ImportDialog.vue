@@ -1,23 +1,26 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import type { DevCatzSite, PostmanChoice, PostmanPick, PostmanSummary, Workspace } from '@shared/types';
+import type { DevCatzSite, DoCatzProject, PostmanChoice, PostmanPick, PostmanSummary, Workspace } from '@shared/types';
 import { loadWorkspaces, notify, selectWorkspace, syncTabsWithWorkspace, workspace } from '../state';
 import CatMood from './CatMood.vue';
 import Icon from './Icon.vue';
 import devcatzLogo from '../assets/logos/devcatz.svg';
+import docatzLogo from '../assets/logos/docatz.png';
 import { openDownload } from '../download';
 
 /**
  * Bringing requests in: a file or pasted text (Postman collection, OpenAPI / Swagger in JSON or YAML, DialCatz
- * export, cURL); everything from Postman at once (its data export); or a DevCatz site (an environment for it and
- * its routes as a collection). It opens on a choice (File or paste, From DevCatz, and Postman less prominent) and
- * shows the form once one is picked; a link from DevCatz or the Postman shortcut opens its form straight away.
+ * export, cURL); everything from Postman at once (its data export); a DevCatz site or a DoCatz compose project (an
+ * environment for it and its routes as a collection). It opens on a choice (File or paste, From DevCatz, From DoCatz,
+ * and Postman last) and shows the form once one is picked; a link from DevCatz / DoCatz or the Postman shortcut opens
+ * its form straight away.
  */
-const props = withDefaults(defineProps<{ tab?: 'choose' | 'file' | 'postman' | 'devcatz'; siteId?: string }>(), { tab: 'choose', siteId: '' });
+type Mode = 'choose' | 'file' | 'postman' | 'devcatz' | 'docatz';
+const props = withDefaults(defineProps<{ tab?: Mode; siteId?: string; project?: string }>(), { tab: 'choose', siteId: '', project: '' });
 const emit = defineEmits<{ done: [collectionId: string | null]; cancel: [] }>();
 const api = window.dialcatz;
 const mode = ref(props.tab);
-function pickMode(m: 'choose' | 'file' | 'postman' | 'devcatz') {
+function pickMode(m: Mode) {
   mode.value = m;
   error.value = '';
   bundle.value = false;
@@ -71,7 +74,7 @@ async function migrate(how: 'files' | 'folder') {
   const r = await guard(() => api.postmanReadExport(how));
   if (r) choose(r);
 }
-const TITLES = { choose: 'Import', file: 'Import a file or text', postman: 'Move from Postman', devcatz: 'Import from DevCatz' } as const;
+const TITLES = { choose: 'Import', file: 'Import a file or text', postman: 'Move from Postman', devcatz: 'Import from DevCatz', docatz: 'Import from DoCatz' } as const;
 /** Files picked under "File or paste" that hold more than one collection: the same pick-what-comes-in list. */
 const bundle = ref(false);
 const title = computed(() => (bundle.value && mode.value === 'postman' ? 'Import — choose what comes in' : TITLES[mode.value]));
@@ -240,6 +243,39 @@ async function importSite() {
   notify('success', [withEnv.value ? `Environment “DevCatz · ${site.value?.name}”` : '', r.collectionId ? `${r.requests} route(s) from ${r.source}` : ''].filter(Boolean).join(' and ') + ' added');
   emit('done', r.collectionId);
 }
+
+// ---------------------------------------------------------------- DoCatz
+
+const docatz = ref<{ installed: boolean; engine: boolean; projects: DoCatzProject[] } | null>(null);
+const dcName = ref(props.project);
+const dcWithEnv = ref(true);
+const dcWithEnvVars = ref(false);
+const dcWithRoutes = ref(true);
+const dcProject = computed(() => docatz.value?.projects.find((p) => p.name === dcName.value) ?? null);
+const dcNotInstalled = computed(() => docatz.value !== null && !docatz.value.installed);
+// Which service requests go to (baseUrl): an API service with an address first, as the main process picks it.
+const dcService = ref('');
+watch(dcProject, (p) => (dcService.value = (p?.services.find((s) => s.api && s.url) ?? p?.services.find((s) => s.url) ?? p?.services.find((s) => s.api) ?? p?.services[0])?.service ?? ''), { immediate: true });
+const dcPicked = computed(() => dcProject.value?.services.find((s) => s.service === dcService.value) ?? null);
+const dcVar = (s: string) => `${s.replace(/[^A-Za-z0-9]+(.)?/g, (_, ch: string | undefined) => (ch ? ch.toUpperCase() : ''))}Url`;
+const dcUrls = computed(() => dcProject.value?.services.filter((s) => s.url) ?? []);
+const dcLaravel = computed(() => dcPicked.value?.framework === 'laravel');
+const FW_NAMES: Record<string, string> = { nestjs: 'NestJS', laravel: 'Laravel', nuxt: 'Nuxt', next: 'Next.js', go: 'Go', gin: 'Gin', echo: 'Echo', fiber: 'Fiber', chi: 'chi', fastapi: 'FastAPI', django: 'Django', flask: 'Flask', express: 'Express', fastify: 'Fastify', hono: 'Hono', koa: 'Koa', rust: 'Rust', axum: 'Axum', actix: 'Actix', symfony: 'Symfony', php: 'PHP', python: 'Python', node: 'Node', wordpress: 'WordPress' };
+const fwName = (s: { framework: string | null; library: string | null }) => (s.library ? (FW_NAMES[s.library] ?? s.library) : s.framework ? (FW_NAMES[s.framework] ?? s.framework) : '');
+async function loadDoCatz() {
+  docatz.value = await api.docatzProjects();
+  if (!dcProject.value) dcName.value = docatz.value.projects.find((p) => p.running)?.name ?? docatz.value.projects[0]?.name ?? '';
+}
+onMounted(loadDoCatz);
+async function importProject() {
+  const p = dcProject.value;
+  if (!p) return;
+  const r = await guard(() => api.docatzImport(workspace.value!.id, p.name, { environment: dcWithEnv.value, envVars: dcWithEnv.value && dcWithEnvVars.value, routes: dcWithRoutes.value, service: dcService.value || undefined }));
+  if (!r) return;
+  use(r.workspace);
+  notify('success', [dcWithEnv.value ? `Environment “DoCatz · ${p.name}”` : '', r.collectionId ? `${r.requests} route(s) from ${r.source}` : ''].filter(Boolean).join(' and ') + ' added');
+  emit('done', r.collectionId);
+}
 </script>
 
 <template>
@@ -266,6 +302,14 @@ async function importSite() {
             <span class="min-w-0 flex-1">
               <span class="opt-card-title">From DevCatz<span v-if="notInstalled" class="badge badge-ghost badge-xs font-normal">not installed</span></span>
               <span class="opt-card-text">A local site's environment and its routes, ready to send</span>
+            </span>
+            <Icon name="chevron" class="size-4 shrink-0 opacity-40" />
+          </button>
+          <button class="opt-card" @click="pickMode('docatz')">
+            <span class="opt-card-icon"><img :src="docatzLogo" alt="" draggable="false" /></span>
+            <span class="min-w-0 flex-1">
+              <span class="opt-card-title">From DoCatz<span v-if="dcNotInstalled" class="badge badge-ghost badge-xs font-normal">not installed</span></span>
+              <span class="opt-card-text">A compose project's services as an environment, and their routes, ready to send</span>
             </span>
             <Icon name="chevron" class="size-4 shrink-0 opacity-40" />
           </button>
@@ -447,6 +491,49 @@ async function importSite() {
         <div v-else class="py-6 text-center"><span class="loading loading-dots" /></div>
       </template>
 
+      <!-- DoCatz -->
+      <template v-else-if="mode === 'docatz'">
+        <div v-if="dcNotInstalled" class="alert alert-info alert-soft text-sm">
+          <CatMood mood="info" class="size-7 shrink-0 -my-0.5" />
+          <span class="flex-1">DoCatz is not installed on this computer. With it, your compose projects show up here with their services and routes.</span>
+          <button class="btn btn-primary btn-sm shrink-0 gap-1.5" @click="openDownload('docatz', 'DoCatz')"><img :src="docatzLogo" alt="" class="size-4" />Get DoCatz</button>
+        </div>
+        <div v-else-if="docatz && !docatz.projects.length" class="text-sm opacity-60">DoCatz has no compose projects with a web or API service yet.</div>
+        <template v-else-if="docatz">
+          <div class="opt-row">
+            <span class="label-caps">Project</span>
+            <select v-model="dcName" class="select select-sm flex-1">
+              <option v-for="p in docatz.projects" :key="p.name" :value="p.name">{{ p.name }} — {{ p.services.map((s) => s.service).join(', ') }}{{ p.running ? ' · running' : ' · stopped' }}</option>
+            </select>
+          </div>
+          <div v-if="dcProject && !dcProject.running" class="alert alert-warning alert-soft text-sm">
+            <CatMood mood="warning" class="size-7 shrink-0 -my-0.5" />
+            <span class="flex-1">{{ dcProject.name }} is not running{{ docatz.engine ? '' : ' (DoCatz is stopped)' }}, so its services have no addresses yet. Start it in DoCatz, then come back.</span>
+            <button class="btn btn-sm shrink-0 gap-1.5" @click="api.docatzOpen(dcProject.name)"><img :src="docatzLogo" alt="" class="size-4" />Open in DoCatz</button>
+            <button class="btn btn-ghost btn-sm btn-square shrink-0" title="Read DoCatz again" aria-label="Read DoCatz again" @click="loadDoCatz"><Icon name="refresh" class="size-4" /></button>
+          </div>
+          <div v-if="(dcProject?.services.length ?? 0) > 1" class="opt-row">
+            <span class="flex flex-col"><span class="label-caps">Service</span><span class="text-xs opacity-50">Where requests go (baseUrl)</span></span>
+            <div class="seg seg-xs seg-choice">
+              <button v-for="s in dcProject!.services" :key="s.service" class="seg-item normal-case" :class="{ 'is-active': dcService === s.service }" :title="s.url ?? 'no address'" @click="dcService = s.service">{{ s.service }}<span v-if="fwName(s)" class="opacity-50"> {{ fwName(s) }}</span></button>
+            </div>
+          </div>
+          <div class="opt-row">
+            <span class="flex flex-col"><span class="label-caps">Environment</span><span class="text-xs opacity-50">“DoCatz · {{ dcProject?.name }}”<template v-if="dcPicked?.url"> with baseUrl = {{ dcPicked.url }}</template><template v-if="dcUrls.length"> and {{ dcUrls.map((s) => dcVar(s.service)).join(', ') }}</template></span></span>
+            <input v-model="dcWithEnv" type="checkbox" class="toggle toggle-sm toggle-primary" />
+          </div>
+          <div v-if="dcWithEnv" class="opt-row">
+            <span class="flex flex-col"><span class="label-caps">Add its .env variables</span><span class="text-xs opacity-50">{{ dcProject?.hasEnv ? 'The project’s .env in DoCatz. Keys, passwords and tokens are marked secret; values stay on this computer.' : 'This project has no .env.' }}</span></span>
+            <input v-model="dcWithEnvVars" type="checkbox" class="toggle toggle-sm toggle-primary" :disabled="!dcProject?.hasEnv" />
+          </div>
+          <div class="opt-row">
+            <span class="flex flex-col"><span class="label-caps">Routes as a collection</span><span class="text-xs opacity-50">{{ dcLaravel ? `Runs php artisan route:list inside the ${dcPicked?.service} container (its code runs to list them).` : dcProject?.running ? `From an OpenAPI file in the compose folder, or the one ${dcPicked?.url ?? 'the service'} serves.` : 'From an OpenAPI file in the compose folder — or start the project in DoCatz first.' }}</span></span>
+            <input v-model="dcWithRoutes" type="checkbox" class="toggle toggle-sm toggle-primary" />
+          </div>
+        </template>
+        <div v-else class="py-6 text-center"><span class="loading loading-dots" /></div>
+      </template>
+
       <div v-if="error" class="alert alert-error alert-soft text-sm"><CatMood mood="error" class="size-7 shrink-0 -my-0.5" /><span>{{ error }}</span></div>
       <div class="modal-action">
         <button v-if="mode === 'postman' && pmChoice && !summary" class="btn btn-ghost btn-sm mr-auto" :disabled="busy" @click="pmBack">Back</button>
@@ -456,6 +543,7 @@ async function importSite() {
         <button v-else-if="mode === 'postman' && pmChoice" class="btn btn-primary btn-sm" :disabled="busy || pmNothing" @click="pmImport">
           <span v-if="busy" class="loading loading-spinner loading-xs" />{{ pmChoice.token ? 'Import' : 'Move' }} {{ plural(pmPick.collections.length, 'collection') }}<template v-if="pmPick.environments.length"> and {{ plural(pmPick.environments.length, 'environment') }}</template>
         </button>
+        <button v-else-if="mode === 'docatz' && !dcNotInstalled" class="btn btn-primary btn-sm" :disabled="busy || !dcProject?.running || (!dcWithEnv && !dcWithRoutes)" @click="importProject"><span v-if="busy" class="loading loading-spinner loading-xs" />Import</button>
         <button v-else-if="mode === 'devcatz' && !notInstalled" class="btn btn-primary btn-sm" :disabled="busy || !site || (!withEnv && !withRoutes)" @click="importSite"><span v-if="busy" class="loading loading-spinner loading-xs" />Import</button>
       </div>
     </div>

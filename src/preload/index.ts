@@ -33,6 +33,8 @@ const bridge = {
   onWs: (cb: (e: WsEvent) => void) => on('app:ws', cb),
   /** dialcatz://open?site=<id> from DevCatz. */
   onDevCatz: (cb: (siteId: string) => void) => on('app:devcatz', cb),
+  /** dialcatz://open?docatz=<compose project> from DoCatz. */
+  onDoCatz: (cb: (project: string) => void) => on('app:docatz', cb),
   /** Who has which request open in a team workspace. */
   onPresence: (cb: (p: { workspaceId: string; presence: PresenceEntry[] }) => void) => on('app:presence', cb),
   /** The update check / download moved on (Catzoid #54). */

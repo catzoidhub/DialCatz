@@ -42,7 +42,7 @@ export function goSection(s: Section): void {
   else section.value = s;
 }
 /** Open the Import dialog on a tab (a dialcatz://open?site= link from DevCatz, the Postman shortcut …). */
-export const importRequest = ref<{ tab: 'choose' | 'file' | 'postman' | 'devcatz'; siteId?: string } | null>(null);
+export const importRequest = ref<{ tab: 'choose' | 'file' | 'postman' | 'devcatz' | 'docatz'; siteId?: string; project?: string } | null>(null);
 /** A dialcatz://connect request waiting for the user's yes (from a link, or pasted on the Team page). */
 export const connectRequest = ref<ConnectRequest | null>(null);
 export const settings = ref<DialCatzSettings | null>(null);

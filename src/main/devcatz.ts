@@ -126,9 +126,14 @@ export function baseUrl(s: DevCatzSite, dir?: string): string {
 
 /** The site's .env as variables; names that look like secrets are marked secret. */
 export function envVariables(s: DevCatzSite): EnvVariable[] {
+  return envFileVariables(join(s.path, '.env'));
+}
+
+/** A .env file as variables (none when it cannot be read); names that look like secrets are marked secret. */
+export function envFileVariables(file: string): EnvVariable[] {
   let text = '';
   try {
-    text = readFileSync(join(s.path, '.env'), 'utf8');
+    text = readFileSync(file, 'utf8');
   } catch {
     return [];
   }
@@ -163,6 +168,11 @@ async function laravelRoutes(cwd: string, collectionId: string): Promise<TreeIte
   const shim = join(DATA, 'bin', process.platform === 'win32' ? 'php.cmd' : 'php');
   const args = ['artisan', 'route:list', '--json'];
   const out = !existsSync(shim) ? await run(exePath('php'), args, cwd) : process.platform === 'win32' ? await run(process.env.ComSpec || 'cmd.exe', ['/d', '/c', shim, ...args], cwd) : await run(shim, args, cwd);
+  return laravelTree(out, collectionId);
+}
+
+/** `artisan route:list --json` output as requests (also used for DoCatz, where artisan runs in the container). */
+export function laravelTree(out: string, collectionId: string): TreeItem[] {
   const routes = JSON.parse(out.slice(out.indexOf('['))) as { method: string; uri: string; name: string | null; action: string; middleware?: string[] }[];
   const kept = routes.filter((r) => !/^(_ignition|sanctum\/csrf-cookie|telescope|horizon|_debugbar|livewire|up$|storage\/)/.test(r.uri));
   const isApi = (r: (typeof kept)[number]) => (r.middleware ?? []).includes('api') || r.uri === 'api' || r.uri.startsWith('api/');
@@ -204,12 +214,13 @@ async function laravelRoutes(cwd: string, collectionId: string): Promise<TreeIte
   return items;
 }
 
-const OPENAPI_PATHS = ['/openapi.json', '/swagger.json', '/api/openapi.json', '/docs/openapi.json', '/api-docs', '/v3/api-docs', '/swagger/v1/swagger.json', '/api/docs.json', '/openapi.yaml'];
-const MAX_SPEC = 20 * 1024 * 1024;
+// NestJS serves its document next to the Swagger UI: <path>-json (/api-json, /docs-json, /api/docs-json).
+export const OPENAPI_PATHS = ['/openapi.json', '/swagger.json', '/api/openapi.json', '/docs/openapi.json', '/api-docs', '/v3/api-docs', '/swagger/v1/swagger.json', '/api/docs.json', '/openapi.yaml', '/api-json', '/docs-json', '/api/docs-json', '/swagger/doc.json'];
+export const MAX_SPEC = 20 * 1024 * 1024;
 
-type Parsed = { root: TreeItem; items: TreeItem[] };
+export type Parsed = { root: TreeItem; items: TreeItem[] };
 
-function parseSpec(text: string): Parsed | null {
+export function parseSpec(text: string): Parsed | null {
   if (!/openapi|swagger/i.test(text.slice(0, 4000))) return null;
   try {
     return importText(text);
@@ -218,8 +229,11 @@ function parseSpec(text: string): Parsed | null {
   }
 }
 
-async function fetchSpec(url: string, siteId: string): Promise<Parsed | null> {
-  const r = await send({ method: 'GET', url, headers: [['Accept', 'application/json, application/yaml']] }, `devcatz-${siteId}`, { timeoutMs: 5000, insecure: true, followRedirects: true });
+/** `basic`: an Authorization header to try when the document is behind Basic auth (a 401). */
+async function fetchSpec(url: string, jar: string, basic?: string): Promise<Parsed | null> {
+  const get = (auth?: string) => send({ method: 'GET', url, headers: [['Accept', 'application/json, application/yaml'], ...(auth ? [['Authorization', auth] as [string, string]] : [])] }, jar, { timeoutMs: 5000, insecure: true, followRedirects: true });
+  let r = await get();
+  if (r.response?.status === 401 && basic) r = await get(basic);
   return r.response?.ok ? parseSpec(r.response.body) : null;
 }
 
@@ -236,7 +250,7 @@ async function bridgeSpec(s: DevCatzSite, app: DevCatzApp | null): Promise<{ api
         /* moved or unreadable: try the next one */
       }
     } else if (o.url) {
-      const api = await fetchSpec(o.url, s.id);
+      const api = await fetchSpec(o.url, `devcatz-${s.id}`);
       if (api) return { api, from: o.url };
     }
   }
@@ -245,10 +259,15 @@ async function bridgeSpec(s: DevCatzSite, app: DevCatzApp | null): Promise<{ api
 
 /** Any framework: the first OpenAPI document one of the site's addresses answers with (chosen app, API apps, site). */
 async function servedSpec(s: DevCatzSite, app: DevCatzApp | null): Promise<{ api: Parsed; from: string } | null> {
-  const bases = [...new Set([app?.url, ...s.apps.filter((a) => a.kind === 'api').map((a) => a.url), s.url].filter((u): u is string => !!u).map((u) => u.replace(/\/+$/, '')))];
+  return servedOpenApi([app?.url, ...s.apps.filter((a) => a.kind === 'api').map((a) => a.url), s.url], `devcatz-${s.id}`);
+}
+
+/** The first OpenAPI document one of these addresses serves at the usual paths. `jar` names the cookie jar. */
+export async function servedOpenApi(urls: (string | null | undefined)[], jar: string, basic?: string): Promise<{ api: Parsed; from: string } | null> {
+  const bases = [...new Set(urls.filter((u): u is string => !!u).map((u) => u.replace(/\/+$/, '')))];
   for (const b of bases)
     for (const p of OPENAPI_PATHS) {
-      const api = await fetchSpec(`${b}${p}`, s.id);
+      const api = await fetchSpec(`${b}${p}`, jar, basic);
       if (api) return { api, from: `${b}${p}` };
     }
   return null;
