@@ -63,7 +63,11 @@ async function renameGroup(g: { id: string; name: string }) {
   if (name) await setLay({ groups: lay.value.groups.map((x) => (x.id === g.id ? { ...x, name } : x)) });
 }
 const deleteGroup = (g: { id: string }) => setLay({ groups: lay.value.groups.filter((x) => x.id !== g.id), groupOf: Object.fromEntries(Object.entries(lay.value.groupOf).filter(([, v]) => v !== g.id)) });
-defineExpose({ newGroup: () => newGroup(), setSort: (sortBy: EnvLayout['sortBy']) => setLay({ sortBy }) });
+/** Expand / Collapse all (as DoCatz and DevCatz), shown in the section header; not while filtering (all open then). */
+const foldable = computed(() => !filter.value.trim() && lay.value.groups.length > 1);
+const anyOpen = computed(() => lay.value.groups.some((g) => !lay.value.collapsed.includes(g.id)));
+const setAll = (expand: boolean) => setLay({ collapsed: expand ? lay.value.collapsed.filter((id) => !groupIds.value.has(id)) : [...new Set([...lay.value.collapsed, ...groupIds.value])] });
+defineExpose({ newGroup: () => newGroup(), setSort: (sortBy: EnvLayout['sortBy']) => setLay({ sortBy }), foldable, anyOpen, setAll });
 
 // ---------------------------------------------------------------- context menus
 

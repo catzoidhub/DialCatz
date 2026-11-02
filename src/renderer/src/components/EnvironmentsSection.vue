@@ -318,6 +318,9 @@ async function activate() {
       </div>
       <div v-else class="flex items-center gap-1 px-4 pt-1 pb-2">
         <span class="label-caps flex-1">Environments</span>
+        <button v-if="envList?.foldable" class="btn btn-ghost btn-xs btn-square" :title="envList.anyOpen ? 'Collapse all: only the group names' : 'Expand all: every group open'" :aria-label="envList.anyOpen ? 'Collapse all' : 'Expand all'" @click="envList.setAll(!envList.anyOpen)">
+          <Icon :name="envList.anyOpen ? 'collapseAll' : 'expandAll'" class="size-4" />
+        </button>
         <div class="dropdown dropdown-end">
           <button tabindex="0" class="btn btn-ghost btn-xs btn-square" :class="{ 'text-primary': envSort !== 'default' }" :title="`Sort by: ${envSort === 'name' ? 'Name' : 'Default (your order)'}`" aria-label="Sort environments" :disabled="!envs.length"><Icon name="sort" class="size-4" /></button>
           <ul tabindex="0" class="dropdown-content menu z-30 mt-1 w-56 rounded-box border border-base-300/60 bg-base-100 p-1 shadow-lg">

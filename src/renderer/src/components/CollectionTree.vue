@@ -61,6 +61,16 @@ async function renameGroup(g: { id: string; name: string }) {
 const deleteGroup = (g: { id: string }) =>
   setLayout({ groups: layout.value.groups.filter((x) => x.id !== g.id), groupOf: Object.fromEntries(Object.entries(layout.value.groupOf).filter(([, v]) => v !== g.id)) });
 
+/** Expand / Collapse all (as DoCatz and DevCatz): the groups and the collections; collapsing closes the folders too. */
+const foldable = computed(() => !filter.value && layout.value.groups.length + roots.value.length > 1);
+const anyOpen = computed(() => layout.value.groups.some((g) => !groupCollapsed(g.id)) || roots.value.some((c) => open.has(c.id)));
+async function setAll(expand: boolean) {
+  if (expand) roots.value.forEach((c) => open.add(c.id));
+  else open.clear();
+  remember();
+  if (layout.value.groups.length) await setLayout({ collapsed: expand ? layout.value.collapsed.filter((id) => !groupIds.value.has(id)) : [...new Set([...layout.value.collapsed, ...groupIds.value])] });
+}
+
 function toggle(id: string) {
   if (open.has(id)) open.delete(id);
   else open.add(id);
@@ -378,6 +388,9 @@ const SORTS: { id: SidebarLayout['sortBy']; label: string }[] = [
     </div>
     <div v-else class="flex items-center gap-1 px-4 pt-1 pb-2">
       <span class="label-caps flex-1">Collections</span>
+      <button v-if="foldable" class="btn btn-ghost btn-xs btn-square" :title="anyOpen ? 'Collapse all: only the group and collection names' : 'Expand all: every group and collection open'" :aria-label="anyOpen ? 'Collapse all' : 'Expand all'" @click="setAll(!anyOpen)">
+        <Icon :name="anyOpen ? 'collapseAll' : 'expandAll'" class="size-4" />
+      </button>
       <div class="dropdown dropdown-end">
         <button tabindex="0" class="btn btn-ghost btn-xs btn-square" :class="{ 'text-primary': sortBy !== 'default' }" :title="`Sort by: ${SORTS.find((x) => x.id === sortBy)?.label}`" aria-label="Sort collections" :disabled="!workspace"><Icon name="sort" class="size-4" /></button>
         <ul tabindex="0" class="dropdown-content menu z-30 mt-1 w-56 rounded-box border border-base-300/60 bg-base-100 p-1 shadow-lg">
