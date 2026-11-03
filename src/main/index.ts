@@ -35,7 +35,8 @@ import * as reports from './reports';
  * through a self-hosted DialCatz Den. Links it answers:
  *   dialcatz://open                                  bring the window up
  *   dialcatz://open?site=<DevCatz site id>           the DevCatz import for that site (asks before importing)
- *   dialcatz://open?docatz=<compose project>         the DoCatz import for that project (asks before importing)
+ *   dialcatz://open?docatz=<compose project>[&service=<service>]  the DoCatz import for that project, that service
+ *                                                    as baseUrl (asks before importing)
  *   dialcatz://connect?server=<url>&code=<code>       join a team server with a one-time invite code; the window
  *                                                    shows the server address and asks before anything is sent
  */
@@ -106,7 +107,8 @@ function handleLink(raw: string): void {
     if (u.hostname === 'open' && u.searchParams.get('docatz')) {
       // From DoCatz: show the import for that compose project (nothing happens without the user's click).
       const project = u.searchParams.get('docatz')!;
-      if (docatz.PROJECT_NAME.test(project)) send('app:docatz', project);
+      const service = u.searchParams.get('service') ?? '';
+      if (docatz.PROJECT_NAME.test(project)) send('app:docatz', { project, service: /^[a-z0-9][a-z0-9_.-]{0,62}$/.test(service) ? service : '' });
       return;
     }
     if (u.hostname === 'connect') {

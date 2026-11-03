@@ -158,7 +158,7 @@ const PRE_HINT = "dc.env.set('requestId', crypto.randomUUID())";
 const TESTS_HINT = "dc.test('answers in time', () => dc.expect(dc.response.time).toBeLessThan(2000))";
 const envChoice = (i: TreeItem) => (i.environmentId === undefined ? '' : i.environmentId === null ? '-' : i.environmentId);
 const importing = ref(false);
-const importTab = ref<{ tab: 'choose' | 'file' | 'postman' | 'devcatz' | 'docatz'; siteId?: string; project?: string }>({ tab: 'choose' });
+const importTab = ref<{ tab: 'choose' | 'file' | 'postman' | 'devcatz' | 'docatz'; siteId?: string; project?: string; service?: string }>({ tab: 'choose' });
 watch(importRequest, (r) => {
   if (!r) return;
   importRequest.value = null;
@@ -630,6 +630,6 @@ const SORTS: { id: SidebarLayout['sortBy']; label: string }[] = [
     </dialog>
     <CopyCollectionDialog v-if="copying" :collection="copying" @close="copying = null" />
     <RunnerDialog v-if="running" :root="running" @close="running = null" />
-    <ImportDialog v-if="importing" :tab="importTab.tab" :site-id="importTab.siteId" :project="importTab.project" @done="imported" @cancel="((importing = false), (importTab = { tab: 'choose' }))" />
+    <ImportDialog v-if="importing" :tab="importTab.tab" :site-id="importTab.siteId" :project="importTab.project" :service="importTab.service" @done="imported" @cancel="((importing = false), (importTab = { tab: 'choose' }))" />
   </div>
 </template>

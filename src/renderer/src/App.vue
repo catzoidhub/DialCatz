@@ -223,8 +223,8 @@ onMounted(async () => {
       notify('success', `Opened “${w.name}” from its repository`);
     }),
   );
-  // "Open in DialCatz" from DoCatz: the import on that compose project.
-  offs.push(api.onDoCatz((project) => (importRequest.value = { tab: 'docatz', project })));
+  // "Open in DialCatz" from DoCatz (an API container's page): the import on that project, that service as baseUrl.
+  offs.push(api.onDoCatz(({ project, service }) => (importRequest.value = { tab: 'docatz', project, service })));
   offs.push(api.onPresence((p) => (presence.value = { ...presence.value, [p.workspaceId]: p.presence })));
   offs.push(api.onUpdate((st) => (updateState.value = st)));
   updateState.value = await api.updateState();

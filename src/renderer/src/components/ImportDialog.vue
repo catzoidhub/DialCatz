@@ -16,7 +16,7 @@ import { openDownload } from '../download';
  * its form straight away.
  */
 type Mode = 'choose' | 'file' | 'postman' | 'devcatz' | 'docatz';
-const props = withDefaults(defineProps<{ tab?: Mode; siteId?: string; project?: string }>(), { tab: 'choose', siteId: '', project: '' });
+const props = withDefaults(defineProps<{ tab?: Mode; siteId?: string; project?: string; service?: string }>(), { tab: 'choose', siteId: '', project: '', service: '' });
 const emit = defineEmits<{ done: [collectionId: string | null]; cancel: [] }>();
 const api = window.dialcatz;
 const mode = ref(props.tab);
@@ -253,9 +253,10 @@ const dcWithEnvVars = ref(false);
 const dcWithRoutes = ref(true);
 const dcProject = computed(() => docatz.value?.projects.find((p) => p.name === dcName.value) ?? null);
 const dcNotInstalled = computed(() => docatz.value !== null && !docatz.value.installed);
-// Which service requests go to (baseUrl): an API service with an address first, as the main process picks it.
+// Which service requests go to (baseUrl): the one DoCatz's link names (on its project), else an API service with an
+// address first, as the main process picks it.
 const dcService = ref('');
-watch(dcProject, (p) => (dcService.value = (p?.services.find((s) => s.api && s.url) ?? p?.services.find((s) => s.url) ?? p?.services.find((s) => s.api) ?? p?.services[0])?.service ?? ''), { immediate: true });
+watch(dcProject, (p) => (dcService.value = (p?.services.find((s) => p.name === props.project && s.service === props.service) ?? p?.services.find((s) => s.api && s.url) ?? p?.services.find((s) => s.url) ?? p?.services.find((s) => s.api) ?? p?.services[0])?.service ?? ''), { immediate: true });
 const dcPicked = computed(() => dcProject.value?.services.find((s) => s.service === dcService.value) ?? null);
 const dcVar = (s: string) => `${s.replace(/[^A-Za-z0-9]+(.)?/g, (_, ch: string | undefined) => (ch ? ch.toUpperCase() : ''))}Url`;
 const dcUrls = computed(() => dcProject.value?.services.filter((s) => s.url) ?? []);
