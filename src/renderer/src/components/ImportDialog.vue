@@ -512,6 +512,7 @@ async function importProject() {
             <span class="flex flex-col"><span class="label-caps">Imported before<template v-if="dvGroups.length > 1"> · {{ g.key }}</template></span><span class="text-xs opacity-50">{{ dvInto[g.key] === 'new' ? 'A new collection, next to the one(s) already here' : 'Only routes it does not have yet are added — your saved requests stay as they are' }}</span></span>
             <select v-model="dvInto[g.key]" class="select select-sm w-72 max-w-[50%]">
               <option v-for="b in g.list" :key="b.collectionId" :value="b.collectionId">{{ earlierLabel(b, g.list) }}</option>
+              <option v-if="g.list.length > 1" value="all">Add new routes to all {{ g.list.length }}</option>
               <option value="new">New collection</option>
             </select>
           </div>
@@ -563,6 +564,7 @@ async function importProject() {
             <span class="flex flex-col"><span class="label-caps">Imported before<template v-if="dcGroups.length > 1"> · {{ g.key }}</template></span><span class="text-xs opacity-50">{{ dcInto[g.key] === 'new' ? 'A new collection, next to the one(s) already here' : 'Only routes it does not have yet are added — your saved requests stay as they are' }}</span></span>
             <select v-model="dcInto[g.key]" class="select select-sm w-72 max-w-[50%]">
               <option v-for="b in g.list" :key="b.collectionId" :value="b.collectionId">{{ earlierLabel(b, g.list) }}</option>
+              <option v-if="g.list.length > 1" value="all">Add new routes to all {{ g.list.length }}</option>
               <option value="new">New collection</option>
             </select>
           </div>

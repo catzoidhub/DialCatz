@@ -794,19 +794,27 @@ const shortSkip = (f: string) => f.replace(/^.*dialcatz-postman-[^\\/]+[\\/]/, '
  */
 function placeRoutes(id: string, w: Workspace, r: { root: TreeItem; items: TreeItem[] }, origin: string, envName: string, into?: string): { w: Workspace; collectionId: string; requests: number; merged: boolean; gone: number } {
   const envId = w.environments.find((e) => e.name === envName)?.id;
-  // `into`: the collection the user picked ('new': none). Without a pick, the first one imported from here.
-  const picked = into && into !== 'new' ? w.items.find((i) => i.kind === 'collection' && i.id === into) : undefined;
-  const existing = into === 'new' ? undefined : (picked ?? w.items.find((i) => i.kind === 'collection' && (i.origin === origin || (!i.origin && i.name === r.root.name && !!envId && i.environmentId === envId))));
-  if (!existing) {
+  const fromHere = w.items.filter((i) => i.kind === 'collection' && (i.origin === origin || (!i.origin && i.name === r.root.name && !!envId && i.environmentId === envId)));
+  // `into`: the collection the user picked, 'all' (every one imported from here) or 'new'; none: the first from here.
+  const picked = into && into !== 'new' && into !== 'all' ? w.items.filter((i) => i.kind === 'collection' && i.id === into) : [];
+  const targets = into === 'new' ? [] : into === 'all' ? fromHere : picked.length ? picked : fromHere.slice(0, 1);
+  if (!targets.length) {
     r.root.sort = w.items.filter((i) => i.kind === 'collection').length;
     r.root.origin = origin;
     return { w: ws.saveItems(id, [r.root, ...r.items]), collectionId: r.root.id, requests: r.items.filter((i) => i.kind === 'request').length, merged: false, gone: 0 };
   }
-  // New requests use the variable the collection's own requests use ({{baseUrl}}, or {{<service>Url}} from "All").
-  const own = w.items.find((i) => i.kind === 'request' && i.request && under(w.items, existing.id).has(i.id))?.request?.url.match(/^\{\{[^}]+\}\}/)?.[0];
-  if (own && own !== '{{baseUrl}}') for (const i of r.items) if (i.request) i.request = { ...i.request, url: i.request.url.replace(/^\{\{[^}]+\}\}/, own) };
-  const m = mergeRoutes(w.items, existing, r);
-  return { w: ws.saveItems(id, [...(existing.origin === origin ? [] : [{ ...existing, origin }]), ...m.save]), collectionId: existing.id, requests: m.added, merged: true, gone: m.gone };
+  let requests = 0;
+  let gone = 0;
+  for (const existing of targets) {
+    // New requests use the variable the collection's own requests use ({{baseUrl}}, or {{<service>Url}} from "All").
+    const own = w.items.find((i) => i.kind === 'request' && i.request && under(w.items, existing.id).has(i.id))?.request?.url.match(/^\{\{[^}]+\}\}/)?.[0];
+    const items = own && own !== '{{baseUrl}}' ? r.items.map((i) => (i.request ? { ...i, request: { ...i.request, url: i.request.url.replace(/^\{\{[^}]+\}\}/, own) } } : i)) : r.items;
+    const m = mergeRoutes(w.items, existing, { root: r.root, items });
+    w = ws.saveItems(id, [...(existing.origin === origin ? [] : [{ ...existing, origin }]), ...m.save]);
+    requests += m.added;
+    gone += m.gone;
+  }
+  return { w, collectionId: targets[0].id, requests, merged: true, gone };
 }
 
 const countRequests = (w: Workspace, collectionId: string) => [...under(w.items, collectionId)].filter((i) => w.items.find((x) => x.id === i)?.kind === 'request').length;

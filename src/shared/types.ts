@@ -978,8 +978,8 @@ export interface DialCatzApi {
    */
   devcatzWorkspace(siteId: string, create: boolean): Promise<Workspace | null>;
   /**
-   * `into`, per app dir / service: the collection imported before that gets the new routes, or 'new' for a new one;
-   * not given, the first one imported from there (else a new one).
+   * `into`, per app dir / service: the collection imported before that gets the new routes, 'all' (every one imported
+   * from there) or 'new' for a new one; not given, the first one imported from there (else a new one).
    */
   devcatzImport(workspaceId: string, siteId: string, what: { environment: boolean; envVars: boolean; routes: boolean; app?: string; into?: Record<string, string> }): Promise<{ workspace: Workspace; collectionId: string | null; requests: number; source: string | null; merged: boolean }>;
   /**
