@@ -9,9 +9,10 @@ import { envFileVariables, laravelTree, MAX_SPEC, OPENAPI_PATHS, parseSpec, serv
  * DoCatz → DialCatz (#79). DoCatz runs the user's compose projects on https://<service>.<project>.docatz.<tld> and
  * writes what it runs to bridge.json (schema 1, read-only for us): each container's project, service, state, URL,
  * compose folder and the framework it is built from. A project becomes an environment "DoCatz · <project>" (baseUrl
- * = its API service, <service>Url for each HTTP service) and its routes a collection: Laravel through
+ * = its API service, <service>Url for each API service) and its routes a collection: Laravel through
  * `php artisan route:list` inside the container (PHP is there, not on the computer), else an OpenAPI document — a
- * file in the compose folder, then one a service serves. Databases, caches and mail servers (`inner`) are left out.
+ * file in the compose folder, then one a service serves. Only API services are listed: databases, caches, front ends,
+ * plain images and background workers are left out (a project with none is not listed).
  * The project's .env values stay on this computer (environment values never sync).
  */
 
@@ -40,7 +41,7 @@ function bridge(): Bridge | null {
 
 /** Front ends: a service built from one of these is a web page, not the API requests go to. */
 const WEB = new Set(['nuxt', 'next', 'astro', 'vite', 'vite-vue', 'vite-react', 'vite-svelte', 'vue', 'react', 'svelte', 'sveltekit', 'remix', 'angular', 'gatsby', 'solid', 'qwik', 'static', 'wordpress', 'drupal', 'joomla', 'electron', 'leptos', 'yew', 'dioxus', 'sycamore']);
-const isApi = (framework: string | null, library: string | null) => !!framework && !WEB.has(framework) && !(framework === 'node' && !library);
+const isApi = (framework: string | null, library: string | null) => !!framework && !WEB.has(framework) && !(library && WEB.has(library)) && !(framework === 'node' && !library);
 
 /** The compose file in the folder: the plain names first, then any compose*.yml / docker-compose*.yml (prod, dev …). */
 function composeFile(dir: string | null): string | null {
@@ -71,19 +72,22 @@ export function projects(): DoCatzProject[] {
   const byName = new Map<string, DoCatzProject>();
   for (const c of bridge()?.containers ?? []) {
     if (!c.project || !PROJECT_NAME.test(c.project) || !c.service || c.inner) continue;
+    // Only what has routes to import: an API built from a framework (Laravel, NestJS, Go …). Front ends, plain images
+    // (mail, storage, admin tools) and background workers stay in DoCatz.
+    if (!isApi(c.framework ?? null, c.library ?? null) || WORKER.test(c.service)) continue;
     let p = byName.get(c.project);
     if (!p) byName.set(c.project, (p = { name: c.project, dir: null, composeFile: null, running: false, hasEnv: false, services: [] }));
     p.dir ??= c.dir ?? null;
     const running = c.state === 'running';
     p.running ||= running;
-    const s: DoCatzService = { service: c.service, container: c.name, running, url: c.url ? c.url.replace(/\/+$/, '') : null, framework: c.framework ?? null, library: c.library ?? null, api: isApi(c.framework ?? null, c.library ?? null) && !WORKER.test(c.service) };
+    const s: DoCatzService = { service: c.service, container: c.name, running, url: c.url ? c.url.replace(/\/+$/, '') : null, framework: c.framework ?? null, library: c.library ?? null, api: true };
     // One container per service (a scaled service lists more): the running one wins.
     const i = p.services.findIndex((x) => x.service === s.service);
     if (i < 0) p.services.push(s);
     else if (!p.services[i].running && running) p.services[i] = s;
   }
   return [...byName.values()]
-    .map((p) => ({ ...p, composeFile: composeFile(p.dir), hasEnv: existsSync(doCatzEnv(p.name)) || (!!p.dir && existsSync(join(p.dir, '.env'))), services: p.services.sort((a, b) => Number(b.api) - Number(a.api) || a.service.localeCompare(b.service)) }))
+    .map((p) => ({ ...p, composeFile: composeFile(p.dir), hasEnv: existsSync(doCatzEnv(p.name)) || (!!p.dir && existsSync(join(p.dir, '.env'))), services: p.services.sort((a, b) => a.service.localeCompare(b.service)) }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 

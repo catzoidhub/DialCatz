@@ -499,7 +499,7 @@ async function importProject() {
           <span class="flex-1">DoCatz is not installed on this computer. With it, your compose projects show up here with their services and routes.</span>
           <button class="btn btn-primary btn-sm shrink-0 gap-1.5" @click="openDownload('docatz', 'DoCatz')"><img :src="docatzLogo" alt="" class="size-4" />Get DoCatz</button>
         </div>
-        <div v-else-if="docatz && !docatz.projects.length" class="text-sm opacity-60">DoCatz has no compose projects with a web or API service yet.</div>
+        <div v-else-if="docatz && !docatz.projects.length" class="text-sm opacity-60">DoCatz has no compose projects with an API service yet (Laravel, NestJS, Go … — front ends and plain images have no routes to import).</div>
         <template v-else-if="docatz">
           <div class="opt-row">
             <span class="label-caps">Project</span>
