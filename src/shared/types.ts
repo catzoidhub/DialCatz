@@ -975,7 +975,8 @@ export interface DialCatzApi {
   devcatzImport(workspaceId: string, siteId: string, what: { environment: boolean; envVars: boolean; routes: boolean; app?: string }): Promise<{ workspace: Workspace; collectionId: string | null; requests: number; source: string | null }>;
   /** DoCatz: its compose projects; an environment and / or a collection of routes for one of them. */
   docatzProjects(): Promise<{ installed: boolean; engine: boolean; projects: DoCatzProject[] }>;
-  docatzImport(workspaceId: string, project: string, what: { environment: boolean; envVars: boolean; routes: boolean; service?: string }): Promise<{ workspace: Workspace; collectionId: string | null; requests: number; source: string | null }>;
+  /** `service` '*': every API service, a collection each; `skipped` names the ones whose routes could not be read. */
+  docatzImport(workspaceId: string, project: string, what: { environment: boolean; envVars: boolean; routes: boolean; service?: string }): Promise<{ workspace: Workspace; collectionId: string | null; requests: number; source: string | null; skipped: string[] }>;
   /** Shows the project in DoCatz (its compose file, ready to Up; nothing runs from the link). */
   docatzOpen(project: string): Promise<void>;
   /** Postman: pick its data export (zip), a folder or JSON files and read what is in it (null when cancelled). */

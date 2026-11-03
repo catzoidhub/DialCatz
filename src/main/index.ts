@@ -448,18 +448,26 @@ function api(): DialCatzApi {
       const p = docatz.project(String(name));
       // A stopped project has no addresses yet (DoCatz gives them while it runs): nothing useful to make.
       if (!p.running) throw new Error(`${p.name} is not running, so its services have no addresses yet. Start it in DoCatz, then import again.`);
-      const service = what.service ? String(what.service) : undefined;
+      // '*': every API service, a collection each (their requests go to {{<service>Url}}).
+      const all = what.service === '*' && p.services.length > 1;
+      const service = what.service && what.service !== '*' ? String(what.service) : undefined;
       let w = ws.load(id);
       let collectionId: string | null = null;
       let requests = 0;
       let source: string | null = null;
+      let skipped: string[] = [];
+      const collectionIds: string[] = [];
       if (what.routes) {
-        const r = await docatz.routes(p, service);
-        r.root.sort = w.items.filter((i) => i.kind === 'collection').length;
-        w = ws.saveItems(id, [r.root, ...r.items]);
-        collectionId = r.root.id;
-        requests = r.items.filter((i) => i.kind === 'request').length;
-        source = r.source;
+        const got = all ? await docatz.routesAll(p) : { collections: [await docatz.routes(p, service)], skipped: [] };
+        skipped = got.skipped;
+        for (const r of got.collections) {
+          r.root.sort = w.items.filter((i) => i.kind === 'collection').length;
+          w = ws.saveItems(id, [r.root, ...r.items]);
+          collectionIds.push(r.root.id);
+          requests += r.items.filter((i) => i.kind === 'request').length;
+        }
+        collectionId = collectionIds[0] ?? null;
+        source = got.collections.length > 1 ? `${got.collections.length} services` : (got.collections[0]?.source ?? null);
       }
       if (what.environment) {
         const envName = `DoCatz · ${p.name}`;
@@ -471,13 +479,13 @@ function api(): DialCatzApi {
         const merged = env ? [...vars, ...env.variables.filter((v) => !vars.some((x) => x.key === v.key))] : vars;
         w = ws.saveEnvironment(id, { id: env?.id ?? uid('e_'), name: envName, variables: merged, shared: env?.shared });
         const envId = w.environments.find((e) => e.name === envName)!.id;
-        // The imported collection uses the project's environment, so projects with the same variable names never mix.
-        const col = collectionId ? w.items.find((i) => i.id === collectionId) : null;
-        if (col) w = ws.saveItems(id, [{ ...col, environmentId: envId }]);
+        // The imported collections use the project's environment, so projects with the same variable names never mix.
+        const cols = w.items.filter((i) => collectionIds.includes(i.id));
+        if (cols.length) w = ws.saveItems(id, cols.map((c) => ({ ...c, environmentId: envId })));
         else if (!w.activeEnvironmentId) w = ws.setActiveEnvironment(id, envId);
       }
       if (w.serverId) void srv.sync(id).then(() => send('app:workspaces', null));
-      return { workspace: w, collectionId, requests, source };
+      return { workspace: w, collectionId, requests, source, skipped };
     },
     postmanReadExport: async (how) => {
       const r = await dialog.showOpenDialog(win!, {

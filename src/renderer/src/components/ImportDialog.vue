@@ -253,14 +253,18 @@ const dcWithEnvVars = ref(false);
 const dcWithRoutes = ref(true);
 const dcProject = computed(() => docatz.value?.projects.find((p) => p.name === dcName.value) ?? null);
 const dcNotInstalled = computed(() => docatz.value !== null && !docatz.value.installed);
-// Which service requests go to (baseUrl): the one DoCatz's link names (on its project), else an API service with an
-// address first, as the main process picks it.
+// Which service requests go to (baseUrl): the one DoCatz's link names (on its project); else, with more than one API
+// service, all of them ('*': a collection each, sending to its own {{<service>Url}}); else the only one.
 const dcService = ref('');
-watch(dcProject, (p) => (dcService.value = (p?.services.find((s) => p.name === props.project && s.service === props.service) ?? p?.services.find((s) => s.api && s.url) ?? p?.services.find((s) => s.url) ?? p?.services.find((s) => s.api) ?? p?.services[0])?.service ?? ''), { immediate: true });
+const dcDefault = (p: DoCatzProject | null) => p?.services.find((s) => s.url) ?? p?.services[0] ?? null;
+watch(dcProject, (p) => (dcService.value = p?.services.find((s) => p.name === props.project && s.service === props.service)?.service ?? ((p?.services.length ?? 0) > 1 ? '*' : (dcDefault(p)?.service ?? ''))), { immediate: true });
+const dcAll = computed(() => dcService.value === '*');
 const dcPicked = computed(() => dcProject.value?.services.find((s) => s.service === dcService.value) ?? null);
+const dcAllText = computed(() => `One collection per service (${dcProject.value?.services.map((s) => s.service).join(', ')}), each sending to its own ${dcProject.value?.services.map((s) => `{{${dcVar(s.service)}}}`).join(', ')}.`);
+const dcBase = computed(() => (dcAll.value ? dcDefault(dcProject.value) : dcPicked.value)?.url ?? '');
 const dcVar = (s: string) => `${s.replace(/[^A-Za-z0-9]+(.)?/g, (_, ch: string | undefined) => (ch ? ch.toUpperCase() : ''))}Url`;
 const dcUrls = computed(() => dcProject.value?.services.filter((s) => s.url) ?? []);
-const dcLaravel = computed(() => dcPicked.value?.framework === 'laravel');
+const dcLaravel = computed(() => !dcAll.value && dcPicked.value?.framework === 'laravel');
 const FW_NAMES: Record<string, string> = { nestjs: 'NestJS', laravel: 'Laravel', nuxt: 'Nuxt', next: 'Next.js', go: 'Go', gin: 'Gin', echo: 'Echo', fiber: 'Fiber', chi: 'chi', fastapi: 'FastAPI', django: 'Django', flask: 'Flask', express: 'Express', fastify: 'Fastify', hono: 'Hono', koa: 'Koa', rust: 'Rust', axum: 'Axum', actix: 'Actix', symfony: 'Symfony', php: 'PHP', python: 'Python', node: 'Node', wordpress: 'WordPress' };
 const fwName = (s: { framework: string | null; library: string | null }) => (s.library ? (FW_NAMES[s.library] ?? s.library) : s.framework ? (FW_NAMES[s.framework] ?? s.framework) : '');
 async function loadDoCatz() {
@@ -275,6 +279,7 @@ async function importProject() {
   if (!r) return;
   use(r.workspace);
   notify('success', [dcWithEnv.value ? `Environment “DoCatz · ${p.name}”` : '', r.collectionId ? `${r.requests} route(s) from ${r.source}` : ''].filter(Boolean).join(' and ') + ' added');
+  if (r.skipped.length) notify('warning', `Not imported — ${r.skipped.join(' · ')}`);
   emit('done', r.collectionId);
 }
 </script>
@@ -516,11 +521,12 @@ async function importProject() {
           <div v-if="(dcProject?.services.length ?? 0) > 1" class="opt-row">
             <span class="flex flex-col"><span class="label-caps">Service</span><span class="text-xs opacity-50">Where requests go (baseUrl)</span></span>
             <div class="seg seg-xs seg-choice">
+              <button class="seg-item normal-case" :class="{ 'is-active': dcAll }" title="Every API service, a collection each" @click="dcService = '*'">All</button>
               <button v-for="s in dcProject!.services" :key="s.service" class="seg-item normal-case" :class="{ 'is-active': dcService === s.service }" :title="s.url ?? 'no address'" @click="dcService = s.service">{{ s.service }}<span v-if="fwName(s)" class="opacity-50"> {{ fwName(s) }}</span></button>
             </div>
           </div>
           <div class="opt-row">
-            <span class="flex flex-col"><span class="label-caps">Environment</span><span class="text-xs opacity-50">“DoCatz · {{ dcProject?.name }}”<template v-if="dcPicked?.url"> with baseUrl = {{ dcPicked.url }}</template><template v-if="dcUrls.length"> and {{ dcUrls.map((s) => dcVar(s.service)).join(', ') }}</template></span></span>
+            <span class="flex flex-col"><span class="label-caps">Environment</span><span class="text-xs opacity-50">“DoCatz · {{ dcProject?.name }}”<template v-if="dcBase"> with baseUrl = {{ dcBase }}</template><template v-if="dcUrls.length"> and {{ dcUrls.map((s) => dcVar(s.service)).join(', ') }}</template></span></span>
             <input v-model="dcWithEnv" type="checkbox" class="toggle toggle-sm toggle-primary" />
           </div>
           <div v-if="dcWithEnv" class="opt-row">
@@ -528,7 +534,7 @@ async function importProject() {
             <input v-model="dcWithEnvVars" type="checkbox" class="toggle toggle-sm toggle-primary" :disabled="!dcProject?.hasEnv" />
           </div>
           <div class="opt-row">
-            <span class="flex flex-col"><span class="label-caps">Routes as a collection</span><span class="text-xs opacity-50">{{ dcLaravel ? `Runs php artisan route:list inside the ${dcPicked?.service} container (its code runs to list them).` : dcProject?.running ? `From an OpenAPI file in the compose folder, or the one ${dcPicked?.url ?? 'the service'} serves.` : 'From an OpenAPI file in the compose folder — or start the project in DoCatz first.' }}</span></span>
+            <span class="flex flex-col"><span class="label-caps">{{ dcAll ? 'Routes as collections' : 'Routes as a collection' }}</span><span class="text-xs opacity-50">{{ dcAll ? dcAllText : dcLaravel ? `Runs php artisan route:list inside the ${dcPicked?.service} container (its code runs to list them).` : dcProject?.running ? `From an OpenAPI file in the compose folder, or the one ${dcPicked?.url ?? 'the service'} serves.` : 'From an OpenAPI file in the compose folder — or start the project in DoCatz first.' }}</span></span>
             <input v-model="dcWithRoutes" type="checkbox" class="toggle toggle-sm toggle-primary" />
           </div>
         </template>

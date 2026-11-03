@@ -195,6 +195,28 @@ export async function routes(p: DoCatzProject, service?: string): Promise<{ root
   );
 }
 
+/**
+ * Every API service's routes, one collection each (the "All services" choice). Each collection's requests go to its own
+ * service — {{baseUrl}} becomes {{<service>Url}} — so they share the project's one environment. A service whose routes
+ * cannot be read (stopped, no OpenAPI document) is left out and named in `skipped`; none at all is an error.
+ */
+export async function routesAll(p: DoCatzProject): Promise<{ collections: { root: TreeItem; items: TreeItem[]; source: string; service: string }[]; skipped: string[] }> {
+  const collections: { root: TreeItem; items: TreeItem[]; source: string; service: string }[] = [];
+  const skipped: string[] = [];
+  for (const s of p.services) {
+    try {
+      const r = await routes(p, s.service);
+      const to = `{{${serviceVar(s.service)}}}`;
+      for (const i of r.items) if (i.request) i.request = { ...i.request, url: i.request.url.split('{{baseUrl}}').join(to) };
+      collections.push({ ...r, service: s.service });
+    } catch (e) {
+      skipped.push(`${s.service}: ${(e as Error).message}`);
+    }
+  }
+  if (!collections.length) throw new Error(skipped.join(' — '));
+  return { collections, skipped };
+}
+
 /** The DoCatz link that shows the project: its compose file (ready to Up, nothing runs), else DoCatz's window. */
 export function link(p: DoCatzProject): string {
   return p.composeFile ? `docatz://compose?path=${encodeURIComponent(p.composeFile)}` : 'docatz://open';
