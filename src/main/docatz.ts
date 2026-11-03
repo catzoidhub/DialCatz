@@ -41,7 +41,7 @@ function bridge(): Bridge | null {
 }
 
 /** Front ends: a service built from one of these is a web page, not the API requests go to. */
-const WEB = new Set(['nuxt', 'next', 'astro', 'vite', 'vite-vue', 'vite-react', 'vite-svelte', 'vue', 'react', 'svelte', 'sveltekit', 'remix', 'angular', 'gatsby', 'solid', 'qwik', 'static', 'wordpress', 'drupal', 'joomla', 'electron', 'leptos', 'yew', 'dioxus', 'sycamore']);
+const WEB = new Set(['nuxt', 'next', 'astro', 'vite', 'vite-vue', 'vite-react', 'vite-svelte', 'vue', 'react', 'svelte', 'sveltekit', 'remix', 'angular', 'gatsby', 'solid', 'qwik', 'static', 'wordpress', 'drupal', 'joomla', 'electron', 'leptos', 'yew', 'dioxus', 'sycamore', 'perseus']);
 const isApi = (framework: string | null, library: string | null) => !!framework && !WEB.has(framework) && !(library && WEB.has(library)) && !(framework === 'node' && !library);
 
 /** The compose file in the folder: the plain names first, then any compose*.yml / docker-compose*.yml (prod, dev …). */
