@@ -78,8 +78,10 @@ function createWindow(): void {
     webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false, contextIsolation: true, plugins: true },
   });
   const w = win;
+  windowListens = false;
   w.once('ready-to-show', () => w.show());
-  w.on('closed', () => (win = null));
+  w.on('closed', () => ((win = null), (windowListens = false)));
+  w.webContents.on('did-start-loading', () => (windowListens = false));
   // Links in responses / docs open in the browser, never inside the app window.
   w.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
@@ -94,6 +96,17 @@ function createWindow(): void {
 
 const send = (channel: string, payload: unknown) => win?.webContents.send(channel, payload);
 
+/**
+ * Links from DevCatz / DoCatz that arrive before the window listens (the link launched DialCatz, or reopened its
+ * window) wait here; the window asks for them once its listeners are set (linksReady), and a reload starts over.
+ */
+let windowListens = false;
+const waitingLinks: [string, unknown][] = [];
+function sendLink(channel: string, payload: unknown): void {
+  if (win && windowListens) send(channel, payload);
+  else waitingLinks.push([channel, payload]);
+}
+
 function handleLink(raw: string): void {
   createWindow();
   try {
@@ -101,14 +114,14 @@ function handleLink(raw: string): void {
     if (u.hostname === 'open' && u.searchParams.get('site')) {
       // From DevCatz: show the import for that site (nothing happens without the user's click).
       const site = u.searchParams.get('site')!;
-      if (/^[\w-]{1,64}$/.test(site)) send('app:devcatz', site);
+      if (/^[\w-]{1,64}$/.test(site)) sendLink('app:devcatz', site);
       return;
     }
     if (u.hostname === 'open' && u.searchParams.get('docatz')) {
       // From DoCatz: show the import for that compose project (nothing happens without the user's click).
       const project = u.searchParams.get('docatz')!;
       const service = u.searchParams.get('service') ?? '';
-      if (docatz.PROJECT_NAME.test(project)) send('app:docatz', { project, service: /^[a-z0-9][a-z0-9_.-]{0,62}$/.test(service) ? service : '' });
+      if (docatz.PROJECT_NAME.test(project)) sendLink('app:docatz', { project, service: /^[a-z0-9][a-z0-9_.-]{0,62}$/.test(service) ? service : '' });
       return;
     }
     if (u.hostname === 'connect') {
@@ -953,6 +966,11 @@ if (primary) app.whenReady().then(() => {
   for (const m of API_METHODS) ipcMain.handle(`dialcatz:${m}`, (_e, ...args) => impl[m](...args));
   ipcMain.handle('dialcatz:pendingConnect', () => pendingConnect);
   ipcMain.handle('dialcatz:dismissConnect', () => (pendingConnect = null));
+  ipcMain.handle('dialcatz:linksReady', (e) => {
+    if (e.sender !== win?.webContents) return;
+    windowListens = true;
+    for (const [channel, payload] of waitingLinks.splice(0)) send(channel, payload);
+  });
   applySettings((s) => send('app:settings', s));
   sockets.onEvent((e) => send('app:ws', e));
   // Git accounts connected or removed in another Catzoid app; avatars that arrived.

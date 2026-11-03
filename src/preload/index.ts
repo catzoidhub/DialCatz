@@ -21,6 +21,8 @@ const bridge = {
   /** A dialcatz://connect link waiting for the user's yes (also asked once at start, for a link that launched the app). */
   pendingConnect: () => ipcRenderer.invoke('dialcatz:pendingConnect') as Promise<ConnectRequest | null>,
   dismissConnect: () => ipcRenderer.invoke('dialcatz:dismissConnect') as Promise<void>,
+  /** The window listens now: links from DevCatz / DoCatz that came before it (one that launched the app) arrive. */
+  linksReady: () => ipcRenderer.invoke('dialcatz:linksReady') as Promise<void>,
   onConnect: (cb: (r: ConnectRequest) => void) => on('app:connect', cb),
   /** Menu commands (newRequest, save, send, import …). */
   onCommand: (cb: (command: string) => void) => on('app:command', cb),

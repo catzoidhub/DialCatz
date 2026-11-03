@@ -165,7 +165,7 @@ watch(importRequest, (r) => {
   section.value = 'requests';
   importTab.value = r;
   importing.value = true;
-});
+}, { immediate: true });
 const running = ref<TreeItem | null>(null);
 const copying = ref<TreeItem | null>(null);
 

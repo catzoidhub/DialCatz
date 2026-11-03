@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { activeTab, activeTabId, notify, selectWorkspace, aiOn, askOpen, connectRequest as connect, goSection, importRequest, loadHistory, onWsEvent, presence, loadSettings, loadWorkspaces, reloadWorkspace, restoreTabs, section, sendTab, settings, settingsTab, syncTabsWithWorkspace, updateState, updateOpen, reportOpen, uninstallOpen, tabs, toast, workspace, type Section } from './state';
 import { backIndex, backList, canBack, canForward, forwardList, goBack, goForward, goTo, navApply, navPrune, navVisit, type NavEntry } from './nav';
 import PopMenu from './components/PopMenu.vue';
@@ -235,6 +235,9 @@ onMounted(async () => {
   const rp = await api.reportPrefs();
   askCrash.value = rp.askCrash && !rp.crashReports;
   connect.value = await api.pendingConnect();
+  // Links from DevCatz / DoCatz that launched the app (or came while the window loaded) arrive once the screen is up.
+  await nextTick();
+  void api.linksReady();
 });
 onBeforeUnmount(() => offs.forEach((f) => f()));
 </script>
