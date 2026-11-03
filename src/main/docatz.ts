@@ -11,8 +11,9 @@ import { envFileVariables, laravelTree, MAX_SPEC, OPENAPI_PATHS, parseSpec, serv
  * compose folder and the framework it is built from. A project becomes an environment "DoCatz · <project>" (baseUrl
  * = its API service, <service>Url for each API service) and its routes a collection: Laravel through
  * `php artisan route:list` inside the container (PHP is there, not on the computer), else an OpenAPI document — a
- * file in the compose folder, then one a service serves. Only API services are listed: databases, caches, front ends,
- * plain images and background workers are left out (a project with none is not listed).
+ * file in the compose folder, then one a service serves. Only API services are listed (built from a framework, or
+ * with an OpenAPI file in their own folder): databases, caches, front ends, plain images and background workers are
+ * left out, and a project with none is not listed.
  * The project's .env values stay on this computer (environment values never sync).
  */
 
@@ -72,9 +73,10 @@ export function projects(): DoCatzProject[] {
   const byName = new Map<string, DoCatzProject>();
   for (const c of bridge()?.containers ?? []) {
     if (!c.project || !PROJECT_NAME.test(c.project) || !c.service || c.inner) continue;
-    // Only what has routes to import: an API built from a framework (Laravel, NestJS, Go …). Front ends, plain images
-    // (mail, storage, admin tools) and background workers stay in DoCatz.
-    if (!isApi(c.framework ?? null, c.library ?? null) || WORKER.test(c.service)) continue;
+    // Only what has routes to import: an API built from a framework (Laravel, NestJS, Go …), or any service with an
+    // OpenAPI file in its own folder (openapi.yaml, swagger.json …). Front ends, plain images (mail, storage, admin
+    // tools) and background workers stay in DoCatz.
+    if (WORKER.test(c.service) || !(isApi(c.framework ?? null, c.library ?? null) || hasOwnSpec(c.dir ?? null, c.service))) continue;
     let p = byName.get(c.project);
     if (!p) byName.set(c.project, (p = { name: c.project, dir: null, composeFile: null, running: false, hasEnv: false, services: [] }));
     p.dir ??= c.dir ?? null;
@@ -128,18 +130,25 @@ function docker(args: string[], timeout = 90_000): Promise<string> {
   );
 }
 
-/** OpenAPI files lying in the compose folder: top level, the usual docs folders, and each app of a monorepo (apps/*). */
+const SPEC_FILES = ['openapi.json', 'openapi.yaml', 'openapi.yml', 'swagger.json', 'swagger.yaml', 'swagger.yml'];
+/** A service's own folders in the compose folder (<service>, apps/<service>, services/<service>) and their docs/. */
+const ownFolders = (service: string) => [service, join('apps', service), join('services', service)].flatMap((f) => [f, join(f, 'docs')]);
+/** An OpenAPI file in one of the service's own folders (an image DoCatz cannot name, but with routes to import). */
+const hasOwnSpec = (dir: string | null, service: string) => !!dir && ownFolders(service).some((f) => SPEC_FILES.some((n) => existsSync(join(dir, f, n))));
+
+/** OpenAPI files lying in the compose folder: the service's own folders first, then the top level and the usual docs
+ * folders, then each app of a monorepo (apps/*). */
 function fileSpec(dir: string | null, service?: string): { api: NonNullable<ReturnType<typeof parseSpec>>; from: string } | null {
   if (!dir) return null;
   let apps: string[] = [];
   try {
-    apps = readdirSync(join(dir, 'apps'), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort((a, b) => Number(b === service) - Number(a === service));
+    apps = readdirSync(join(dir, 'apps'), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
   } catch {
     /* not a monorepo */
   }
-  const subs = ['', 'docs', 'api', 'openapi', 'swagger', ...(service ? [service, join(service, 'docs')] : []), ...apps.flatMap((a) => [join('apps', a), join('apps', a, 'docs')])];
+  const subs = [...(service ? ownFolders(service) : []), '', 'docs', 'api', 'openapi', 'swagger', ...apps.flatMap((a) => [join('apps', a), join('apps', a, 'docs')])];
   for (const sub of [...new Set(subs)])
-    for (const f of ['openapi.json', 'openapi.yaml', 'openapi.yml', 'swagger.json', 'swagger.yaml', 'swagger.yml']) {
+    for (const f of SPEC_FILES) {
       const file = join(dir, sub, f);
       try {
         if (!existsSync(file) || statSync(file).size > MAX_SPEC) continue;
