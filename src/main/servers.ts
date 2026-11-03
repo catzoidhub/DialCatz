@@ -219,7 +219,7 @@ function ensureLocalWorkspaces(conn: ServerConnection): void {
 
 
 function itemToChange(i: TreeItem): Change {
-  return { id: i.id, kind: i.kind, parentId: i.parentId, name: i.name, sort: i.sort, data: { request: stripLocalFiles(i.request), auth: i.auth, description: i.description, ...(i.insecure ? { insecure: true } : {}), ...(i.environmentId !== undefined ? { environmentId: i.environmentId } : {}), ...(i.preRequest ? { preRequest: i.preRequest } : {}), ...(i.tests ? { tests: i.tests } : {}) }, deleted: false, baseRevision: i.rev ?? 0 };
+  return { id: i.id, kind: i.kind, parentId: i.parentId, name: i.name, sort: i.sort, data: { request: stripLocalFiles(i.request), auth: i.auth, description: i.description, ...(i.insecure ? { insecure: true } : {}), ...(i.environmentId !== undefined ? { environmentId: i.environmentId } : {}), ...(i.origin ? { origin: i.origin } : {}), ...(i.preRequest ? { preRequest: i.preRequest } : {}), ...(i.tests ? { tests: i.tests } : {}) }, deleted: false, baseRevision: i.rev ?? 0 };
 }
 function envToChange(e: Environment): Change {
   return { id: e.id, kind: 'environment', parentId: null, name: e.name, sort: 0, data: { variables: e.variables.map((v) => ({ key: v.key, enabled: v.enabled, secret: v.secret })), ...(e.shared ? { shared: e.shared } : {}) }, deleted: false, baseRevision: e.rev ?? 0 };
@@ -261,6 +261,7 @@ function applyRemote(w: Workspace, r: RemoteItem): void {
     ...(typeof r.data.preRequest === 'string' && r.data.preRequest ? { preRequest: r.data.preRequest } : {}),
     ...(typeof r.data.tests === 'string' && r.data.tests ? { tests: r.data.tests } : {}),
     ...(typeof r.data.environmentId === 'string' || r.data.environmentId === null ? { environmentId: r.data.environmentId as string | null } : {}),
+    ...(typeof r.data.origin === 'string' && r.data.origin ? { origin: r.data.origin } : {}),
     // "Check in DBCatz" settings belong to this computer: keep them.
     ...(i >= 0 && w.items[i].database ? { database: w.items[i].database } : {}),
     ...(i >= 0 && w.items[i].dbTable ? { dbTable: w.items[i].dbTable } : {}),

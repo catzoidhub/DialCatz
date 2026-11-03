@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { API_METHODS, uid, type ConnectRequest, type PostmanChoice, type DialCatzApi, type HistoryEntry, type TreeItem, type WireRequest } from '@shared/types';
+import { API_METHODS, uid, type ConnectRequest, type DevCatzSite, type DoCatzProject, type Workspace, type PostmanChoice, type DialCatzApi, type HistoryEntry, type TreeItem, type WireRequest } from '@shared/types';
 import { dataDir, store } from './store';
 import { applySettings, setAiKey, setSettings, settings } from './settings';
 import * as http from './http';
@@ -29,6 +29,7 @@ import { siteBase } from './shared';
 import * as updates from './updates';
 import * as uninstall from './uninstall';
 import * as reports from './reports';
+import { mergeRoutes } from './routemerge';
 
 /**
  * DialCatz — an API client: collections, environments and history on this computer, team workspaces synced
@@ -425,35 +426,37 @@ function api(): DialCatzApi {
     devcatzImport: async (id, siteId, what) => {
       const site = devcatz.site(String(siteId));
       let w = ws.load(id);
+      const envName = `DevCatz · ${site.name}`;
       let collectionId: string | null = null;
       let requests = 0;
       let source: string | null = null;
+      let merged = false;
       if (what.routes) {
         const r = await devcatz.routes(site, what.app);
-        r.root.sort = w.items.filter((i) => i.kind === 'collection').length;
-        w = ws.saveItems(id, [r.root, ...r.items]);
-        collectionId = r.root.id;
-        requests = r.items.filter((i) => i.kind === 'request').length;
+        // Imported before: the new routes join that collection, the user's requests stay as they are.
+        const placed = placeRoutes(id, w, r, `devcatz:${site.id}:${devcatz.pickApp(site, what.app)?.dir ?? ''}`, envName, what.asNew);
+        ({ w, collectionId, requests, merged } = placed);
         source = r.source;
       }
-      if (what.environment) {
-        const name = `DevCatz · ${site.name}`;
-        const env = w.environments.find((e) => e.name === name);
-        const extra = what.envVars ? devcatz.envVariables(site) : [];
-        const base = devcatz.baseUrl(site, what.app);
-        const urls = [{ key: 'baseUrl', value: base, enabled: true, secret: false }, ...(base !== site.url ? [{ key: 'siteUrl', value: site.url, enabled: true, secret: false }] : [])];
-        const vars = [...urls, ...extra.filter((v) => !urls.some((u) => u.key === v.key))];
-        // Again for the same site: the values are refreshed, variables added by hand stay.
-        const merged = env ? [...vars, ...env.variables.filter((v) => !vars.some((x) => x.key === v.key) && !(v.key === 'siteUrl' && base === site.url))] : vars;
-        w = ws.saveEnvironment(id, { id: env?.id ?? uid('e_'), name, variables: merged, shared: env?.shared });
-        const envId = w.environments.find((e) => e.name === name)!.id;
-        // The imported collection uses the site's environment, so sites with the same variable names never mix.
-        const col = collectionId ? w.items.find((i) => i.id === collectionId) : null;
-        if (col) w = ws.saveItems(id, [{ ...col, environmentId: envId }]);
-        else if (!w.activeEnvironmentId) w = ws.setActiveEnvironment(id, envId);
-      }
+      if (what.environment) w = linkEnvironment(id, devcatzEnvironment(id, w, site, what.app, what.envVars), envName, collectionId ? [collectionId] : []);
       if (w.serverId) void srv.sync(id).then(() => send('app:workspaces', null));
-      return { workspace: w, collectionId, requests, source };
+      return { workspace: w, collectionId, requests, source, merged };
+    },
+    importedBefore: async (id, from, key) => {
+      const w = ws.load(id);
+      if (from === 'docatz') {
+        const p = docatz.projects().find((x) => x.name === key);
+        if (!p) return [];
+        // Before origins were kept: "<project>" (one service) or "<project> · <service>".
+        return importedFrom(w, `docatz:${p.name}:`, `DoCatz · ${p.name}`, (n) => (n === p.name ? (docatz.pickService(p)?.service ?? '') : n.startsWith(`${p.name} · `) ? n.slice(p.name.length + 3) : null)).map((x) => ({ collectionId: x.col.id, name: x.col.name, key: x.key }));
+      }
+      const site = devcatz.sites().find((x) => x.id === key);
+      if (!site) return [];
+      return importedFrom(w, `devcatz:${site.id}:`, `DevCatz · ${site.name}`, (n) => {
+        if (n === site.name) return devcatz.pickApp(site)?.dir ?? '';
+        const label = n.startsWith(`${site.name} · `) ? n.slice(site.name.length + 3) : null;
+        return label === null ? null : (site.apps.find((a) => devcatz.appLabel(a) === label)?.dir ?? null);
+      }).map((x) => ({ collectionId: x.col.id, name: x.col.name, key: x.key }));
     },
     docatzProjects: async () => ({ installed: docatz.installed(), engine: docatz.engineRunning(), projects: docatz.projects() }),
     docatzOpen: async (name) => void (await shell.openExternal(docatz.link(docatz.project(String(name))))),
@@ -465,40 +468,28 @@ function api(): DialCatzApi {
       const all = what.service === '*' && p.services.length > 1;
       const service = what.service && what.service !== '*' ? String(what.service) : undefined;
       let w = ws.load(id);
-      let collectionId: string | null = null;
+      const envName = `DoCatz · ${p.name}`;
       let requests = 0;
       let source: string | null = null;
       let skipped: string[] = [];
+      let merged = false;
       const collectionIds: string[] = [];
       if (what.routes) {
-        const got = all ? await docatz.routesAll(p) : { collections: [await docatz.routes(p, service)], skipped: [] };
+        const got = all ? await docatz.routesAll(p) : { collections: [{ ...(await docatz.routes(p, service)), service: docatz.pickService(p, service)?.service ?? '' }], skipped: [] };
         skipped = got.skipped;
+        // Imported before: the new routes join that collection, the user's requests stay as they are.
         for (const r of got.collections) {
-          r.root.sort = w.items.filter((i) => i.kind === 'collection').length;
-          w = ws.saveItems(id, [r.root, ...r.items]);
-          collectionIds.push(r.root.id);
-          requests += r.items.filter((i) => i.kind === 'request').length;
+          const placed = placeRoutes(id, w, r, `docatz:${p.name}:${r.service}`, envName, what.asNew);
+          w = placed.w;
+          collectionIds.push(placed.collectionId);
+          requests += placed.requests;
+          merged ||= placed.merged;
         }
-        collectionId = collectionIds[0] ?? null;
         source = got.collections.length > 1 ? `${got.collections.length} services` : (got.collections[0]?.source ?? null);
       }
-      if (what.environment) {
-        const envName = `DoCatz · ${p.name}`;
-        const env = w.environments.find((e) => e.name === envName);
-        const urls = docatz.urlVariables(p, service);
-        const extra = what.envVars ? docatz.envVariables(p) : [];
-        const vars = [...urls, ...extra.filter((v) => !urls.some((u) => u.key === v.key))];
-        // Again for the same project: the values are refreshed, variables added by hand stay.
-        const merged = env ? [...vars, ...env.variables.filter((v) => !vars.some((x) => x.key === v.key))] : vars;
-        w = ws.saveEnvironment(id, { id: env?.id ?? uid('e_'), name: envName, variables: merged, shared: env?.shared });
-        const envId = w.environments.find((e) => e.name === envName)!.id;
-        // The imported collections use the project's environment, so projects with the same variable names never mix.
-        const cols = w.items.filter((i) => collectionIds.includes(i.id));
-        if (cols.length) w = ws.saveItems(id, cols.map((c) => ({ ...c, environmentId: envId })));
-        else if (!w.activeEnvironmentId) w = ws.setActiveEnvironment(id, envId);
-      }
+      if (what.environment) w = linkEnvironment(id, docatzEnvironment(id, w, p, service, what.envVars), envName, collectionIds);
       if (w.serverId) void srv.sync(id).then(() => send('app:workspaces', null));
-      return { workspace: w, collectionId, requests, source, skipped };
+      return { workspace: w, collectionId: collectionIds[0] ?? null, requests, source, skipped, merged };
     },
     postmanReadExport: async (how) => {
       const r = await dialog.showOpenDialog(win!, {
@@ -796,6 +787,84 @@ function isVariablesFile(text: string): boolean {
 
 /** A skipped file without the temporary unzip folder in front. */
 const shortSkip = (f: string) => f.replace(/^.*dialcatz-postman-[^\\/]+[\\/]/, '');
+
+/**
+ * An imported collection of routes into the workspace: merged into the one an earlier import made (same `origin`, or
+ * — imports from before origins were kept — no origin, the same name and the same environment), else added as new.
+ */
+function placeRoutes(id: string, w: Workspace, r: { root: TreeItem; items: TreeItem[] }, origin: string, envName: string, asNew = false): { w: Workspace; collectionId: string; requests: number; merged: boolean; gone: number } {
+  const envId = w.environments.find((e) => e.name === envName)?.id;
+  const existing = asNew ? undefined : w.items.find((i) => i.kind === 'collection' && (i.origin === origin || (!i.origin && i.name === r.root.name && !!envId && i.environmentId === envId)));
+  if (!existing) {
+    r.root.sort = w.items.filter((i) => i.kind === 'collection').length;
+    r.root.origin = origin;
+    return { w: ws.saveItems(id, [r.root, ...r.items]), collectionId: r.root.id, requests: r.items.filter((i) => i.kind === 'request').length, merged: false, gone: 0 };
+  }
+  // New requests use the variable the collection's own requests use ({{baseUrl}}, or {{<service>Url}} from "All").
+  const own = w.items.find((i) => i.kind === 'request' && i.request && under(w.items, existing.id).has(i.id))?.request?.url.match(/^\{\{[^}]+\}\}/)?.[0];
+  if (own && own !== '{{baseUrl}}') for (const i of r.items) if (i.request) i.request = { ...i.request, url: i.request.url.replace(/^\{\{[^}]+\}\}/, own) };
+  const m = mergeRoutes(w.items, existing, r);
+  return { w: ws.saveItems(id, [...(existing.origin === origin ? [] : [{ ...existing, origin }]), ...m.save]), collectionId: existing.id, requests: m.added, merged: true, gone: m.gone };
+}
+
+/** The ids of a collection and everything in it. */
+function under(items: TreeItem[], rootId: string): Set<string> {
+  const ids = new Set([rootId]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const i of items) if (i.parentId && ids.has(i.parentId) && !ids.has(i.id)) (ids.add(i.id), (grew = true));
+  }
+  return ids;
+}
+
+/** The DoCatz project's environment: URLs refreshed (and its .env when asked), variables added by hand kept. */
+function docatzEnvironment(id: string, w: Workspace, p: DoCatzProject, service: string | undefined, envVars: boolean): Workspace {
+  const envName = `DoCatz · ${p.name}`;
+  const env = w.environments.find((e) => e.name === envName);
+  const urls = docatz.urlVariables(p, service);
+  const extra = envVars ? docatz.envVariables(p) : [];
+  const vars = [...urls, ...extra.filter((v) => !urls.some((u) => u.key === v.key))];
+  const merged = env ? [...vars, ...env.variables.filter((v) => !vars.some((x) => x.key === v.key))] : vars;
+  return ws.saveEnvironment(id, { id: env?.id ?? uid('e_'), name: envName, variables: merged, shared: env?.shared });
+}
+
+/** The DevCatz site's environment: baseUrl (and siteUrl) refreshed (and its .env when asked), hand-made ones kept. */
+function devcatzEnvironment(id: string, w: Workspace, site: DevCatzSite, app: string | undefined, envVars: boolean): Workspace {
+  const name = `DevCatz · ${site.name}`;
+  const env = w.environments.find((e) => e.name === name);
+  const extra = envVars ? devcatz.envVariables(site) : [];
+  const base = devcatz.baseUrl(site, app);
+  const urls = [{ key: 'baseUrl', value: base, enabled: true, secret: false }, ...(base !== site.url ? [{ key: 'siteUrl', value: site.url, enabled: true, secret: false }] : [])];
+  const vars = [...urls, ...extra.filter((v) => !urls.some((u) => u.key === v.key))];
+  const merged = env ? [...vars, ...env.variables.filter((v) => !vars.some((x) => x.key === v.key) && !(v.key === 'siteUrl' && base === site.url))] : vars;
+  return ws.saveEnvironment(id, { id: env?.id ?? uid('e_'), name, variables: merged, shared: env?.shared });
+}
+
+/** Links the imported collections to the environment (so sites / projects with the same variable names never mix). */
+function linkEnvironment(id: string, w: Workspace, envName: string, collectionIds: string[]): Workspace {
+  const envId = w.environments.find((e) => e.name === envName)!.id;
+  const cols = w.items.filter((i) => collectionIds.includes(i.id) && i.environmentId !== envId);
+  if (cols.length) return ws.saveItems(id, cols.map((c) => ({ ...c, environmentId: envId })));
+  return !collectionIds.length && !w.activeEnvironmentId ? ws.setActiveEnvironment(id, envId) : w;
+}
+
+/**
+ * The collections an earlier import made from this origin prefix (`docatz:<project>:`, `devcatz:<site>:`), with the
+ * part after the prefix (service / app dir); `legacy` names one made before origins were kept (by its name).
+ */
+function importedFrom(w: Workspace, prefix: string, envName: string, legacy: (name: string) => string | null): { col: TreeItem; key: string }[] {
+  const envId = w.environments.find((e) => e.name === envName)?.id;
+  const out: { col: TreeItem; key: string }[] = [];
+  for (const c of w.items) {
+    if (c.kind !== 'collection') continue;
+    if (c.origin?.startsWith(prefix)) out.push({ col: c, key: c.origin.slice(prefix.length) });
+    else if (!c.origin && envId && c.environmentId === envId) {
+      const key = legacy(c.name);
+      if (key !== null) out.push({ col: c, key });
+    }
+  }
+  return out;
+}
 
 /** Saves what was found in Postman (export or API) into the workspace: collections, environments, globals. */
 function applyPostman(id: string, found: postman.PostmanFound) {
