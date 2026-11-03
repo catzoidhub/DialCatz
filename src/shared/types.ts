@@ -977,17 +977,20 @@ export interface DialCatzApi {
    * opened, or made when `create` (named after the site). Null when there is none and `create` is false.
    */
   devcatzWorkspace(siteId: string, create: boolean): Promise<Workspace | null>;
-  /** `asNew`: a new collection even when this site's routes were imported before (else the new routes join that one). */
-  devcatzImport(workspaceId: string, siteId: string, what: { environment: boolean; envVars: boolean; routes: boolean; app?: string; asNew?: boolean }): Promise<{ workspace: Workspace; collectionId: string | null; requests: number; source: string | null; merged: boolean }>;
+  /**
+   * `into`, per app dir / service: the collection imported before that gets the new routes, or 'new' for a new one;
+   * not given, the first one imported from there (else a new one).
+   */
+  devcatzImport(workspaceId: string, siteId: string, what: { environment: boolean; envVars: boolean; routes: boolean; app?: string; into?: Record<string, string> }): Promise<{ workspace: Workspace; collectionId: string | null; requests: number; source: string | null; merged: boolean }>;
   /**
    * Collections of this workspace an earlier import made from a DoCatz project / DevCatz site, with the service / app
    * dir each came from: importing again can add the new routes to them.
    */
-  importedBefore(workspaceId: string, from: 'docatz' | 'devcatz', key: string): Promise<{ collectionId: string; name: string; key: string }[]>;
+  importedBefore(workspaceId: string, from: 'docatz' | 'devcatz', key: string): Promise<{ collectionId: string; name: string; key: string; requests: number }[]>;
   /** DoCatz: its compose projects; an environment and / or a collection of routes for one of them. */
   docatzProjects(): Promise<{ installed: boolean; engine: boolean; projects: DoCatzProject[] }>;
   /** `service` '*': every API service, a collection each; `skipped` names the ones whose routes could not be read. */
-  docatzImport(workspaceId: string, project: string, what: { environment: boolean; envVars: boolean; routes: boolean; service?: string; asNew?: boolean }): Promise<{ workspace: Workspace; collectionId: string | null; requests: number; source: string | null; skipped: string[]; merged: boolean }>;
+  docatzImport(workspaceId: string, project: string, what: { environment: boolean; envVars: boolean; routes: boolean; service?: string; into?: Record<string, string> }): Promise<{ workspace: Workspace; collectionId: string | null; requests: number; source: string | null; skipped: string[]; merged: boolean }>;
   /** Shows the project in DoCatz (its compose file, ready to Up; nothing runs from the link). */
   docatzOpen(project: string): Promise<void>;
   /** Postman: pick its data export (zip), a folder or JSON files and read what is in it (null when cancelled). */

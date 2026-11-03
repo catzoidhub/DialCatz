@@ -217,11 +217,16 @@ onMounted(async () => {
   if (!siteId.value) siteId.value = devcatz.value.sites[0]?.id ?? '';
 });
 const FW: Record<DevCatzSite['framework'], string> = { laravel: 'Laravel', nestjs: 'NestJS', node: 'Node', web: 'Web app', go: 'Go', python: 'Python', other: 'Other' };
-// Imported before into this workspace: the new routes join that collection (the user's requests stay), or a new one.
-const dvBefore = ref<{ collectionId: string; name: string; key: string }[]>([]);
-const dvAsNew = ref(false);
-watch([siteId, () => workspace.value?.id], async ([s, w]) => (dvBefore.value = s && w ? await api.importedBefore(w, 'devcatz', s).catch(() => []) : []), { immediate: true });
-const dvEarlier = computed(() => dvBefore.value.filter((b) => b.key === (app.value?.dir ?? b.key)));
+// Imported before into this workspace: per app / service, the collection the new routes join (the user's requests
+// there stay as they are) or a new one. Imported more than once (a new collection was chosen), the user picks which.
+type Earlier = { collectionId: string; name: string; key: string; requests: number };
+const firstOf = (list: Earlier[]) => Object.fromEntries([...new Set(list.map((b) => b.key))].map((k) => [k, list.find((b) => b.key === k)!.collectionId]));
+const groupsOf = (list: Earlier[]) => [...new Set(list.map((b) => b.key))].map((key) => ({ key, list: list.filter((b) => b.key === key) }));
+const earlierLabel = (b: Earlier, list: Earlier[]) => `Add new routes to “${b.name}”${list.filter((x) => x.name === b.name).length > 1 ? ` (${b.requests} requests)` : ''}`;
+const dvBefore = ref<Earlier[]>([]);
+const dvInto = ref<Record<string, string>>({});
+watch([siteId, () => workspace.value?.id], async ([s, w]) => ((dvBefore.value = s && w ? await api.importedBefore(w, 'devcatz', s).catch(() => []) : []), (dvInto.value = firstOf(dvBefore.value))), { immediate: true });
+const dvGroups = computed(() => groupsOf(dvBefore.value.filter((b) => b.key === (app.value?.dir ?? b.key))));
 // Git sharing: the site's requests can live in its own repository (`<site folder>/dialcatz`, a folder workspace).
 const inRepo = ref(false);
 watch(site, (x) => (inRepo.value = !!x?.workspace), { immediate: true });
@@ -242,7 +247,7 @@ async function openSiteWorkspace() {
 }
 async function importSite() {
   if (inRepo.value && !(await toSiteWorkspace(true))) return;
-  const r = await guard(() => api.devcatzImport(workspace.value!.id, siteId.value, { environment: withEnv.value, envVars: withEnv.value && withEnvVars.value, routes: withRoutes.value, app: app.value?.dir, asNew: dvAsNew.value }));
+  const r = await guard(() => api.devcatzImport(workspace.value!.id, siteId.value, { environment: withEnv.value, envVars: withEnv.value && withEnvVars.value, routes: withRoutes.value, app: app.value?.dir, into: { ...dvInto.value } }));
   if (!r) return;
   use(r.workspace);
   notify('success', importedText(r, withEnv.value ? `DevCatz · ${site.value?.name}` : ''));
@@ -272,10 +277,10 @@ const dcUrls = computed(() => dcProject.value?.services.filter((s) => s.url) ?? 
 const dcLaravel = computed(() => !dcAll.value && dcPicked.value?.framework === 'laravel');
 const FW_NAMES: Record<string, string> = { nestjs: 'NestJS', laravel: 'Laravel', nuxt: 'Nuxt', next: 'Next.js', go: 'Go', gin: 'Gin', echo: 'Echo', fiber: 'Fiber', chi: 'chi', fastapi: 'FastAPI', django: 'Django', flask: 'Flask', express: 'Express', fastify: 'Fastify', hono: 'Hono', koa: 'Koa', rust: 'Rust', axum: 'Axum', actix: 'Actix', symfony: 'Symfony', php: 'PHP', python: 'Python', node: 'Node', wordpress: 'WordPress' };
 const fwName = (s: { framework: string | null; library: string | null }) => (s.library ? (FW_NAMES[s.library] ?? s.library) : s.framework ? (FW_NAMES[s.framework] ?? s.framework) : '');
-const dcBefore = ref<{ collectionId: string; name: string; key: string }[]>([]);
-const dcAsNew = ref(false);
-watch([dcName, () => workspace.value?.id], async ([n, w]) => (dcBefore.value = n && w ? await api.importedBefore(w, 'docatz', n).catch(() => []) : []), { immediate: true });
-const dcEarlier = computed(() => dcBefore.value.filter((b) => dcAll.value || b.key === dcService.value));
+const dcBefore = ref<Earlier[]>([]);
+const dcInto = ref<Record<string, string>>({});
+watch([dcName, () => workspace.value?.id], async ([n, w]) => ((dcBefore.value = n && w ? await api.importedBefore(w, 'docatz', n).catch(() => []) : []), (dcInto.value = firstOf(dcBefore.value))), { immediate: true });
+const dcGroups = computed(() => groupsOf(dcBefore.value.filter((b) => dcAll.value || b.key === dcService.value)));
 /** What an import did: new collections, or new routes added to the ones imported before (with the environment). */
 function importedText(r: { requests: number; source: string | null; collectionId: string | null; merged: boolean }, env: string): string {
   const routes = !r.collectionId ? '' : r.merged ? (r.requests ? `${r.requests} new route(s) added` : 'No new routes — every route was already there') : `${r.requests} route(s) from ${r.source}`;
@@ -289,7 +294,7 @@ onMounted(loadDoCatz);
 async function importProject() {
   const p = dcProject.value;
   if (!p) return;
-  const r = await guard(() => api.docatzImport(workspace.value!.id, p.name, { environment: dcWithEnv.value, envVars: dcWithEnv.value && dcWithEnvVars.value, routes: dcWithRoutes.value, service: dcService.value || undefined, asNew: dcAsNew.value }));
+  const r = await guard(() => api.docatzImport(workspace.value!.id, p.name, { environment: dcWithEnv.value, envVars: dcWithEnv.value && dcWithEnvVars.value, routes: dcWithRoutes.value, service: dcService.value || undefined, into: { ...dcInto.value } }));
   if (!r) return;
   use(r.workspace);
   notify('success', importedText(r, dcWithEnv.value ? `DoCatz · ${p.name}` : ''));
@@ -503,12 +508,12 @@ async function importProject() {
             <span class="flex flex-col"><span class="label-caps">Save in the site's repository</span><span class="text-xs opacity-50">{{ inRepo ? `As files in ${repoFolder} — commit them to share with your team (Git panel)` : `Into “${workspace?.name}”, on this computer` }}</span></span>
             <input v-model="inRepo" type="checkbox" class="toggle toggle-sm toggle-primary" />
           </div>
-          <div v-if="dvEarlier.length && withRoutes" class="opt-row">
-            <span class="flex flex-col"><span class="label-caps">Imported before</span><span class="text-xs opacity-50">{{ dvAsNew ? 'A new collection next to' : 'New routes join' }} {{ dvEarlier.map((b) => `“${b.name}”`).join(', ') }}{{ dvAsNew ? '' : ' — your saved requests stay as they are' }}</span></span>
-            <div class="seg seg-xs seg-choice">
-              <button class="seg-item normal-case" :class="{ 'is-active': !dvAsNew }" @click="dvAsNew = false">Add new routes</button>
-              <button class="seg-item normal-case" :class="{ 'is-active': dvAsNew }" @click="dvAsNew = true">New collection</button>
-            </div>
+          <div v-for="g in dvGroups" v-show="withRoutes" :key="g.key" class="opt-row">
+            <span class="flex flex-col"><span class="label-caps">Imported before<template v-if="dvGroups.length > 1"> · {{ g.key }}</template></span><span class="text-xs opacity-50">{{ dvInto[g.key] === 'new' ? 'A new collection, next to the one(s) already here' : 'Only routes it does not have yet are added — your saved requests stay as they are' }}</span></span>
+            <select v-model="dvInto[g.key]" class="select select-sm w-72 max-w-[50%]">
+              <option v-for="b in g.list" :key="b.collectionId" :value="b.collectionId">{{ earlierLabel(b, g.list) }}</option>
+              <option value="new">New collection</option>
+            </select>
           </div>
           <div class="opt-row">
             <span class="flex flex-col"><span class="label-caps">Routes as a collection</span><span class="text-xs opacity-50">{{ isLaravel ? 'Runs php artisan route:list in the project (its code runs to list them).' : specs.length ? `From ${specs.map((o) => (o.file ? fileName(o.file) : o.url)).join(', ')} (found by DevCatz).` : site?.running ? `From the OpenAPI document ${base} serves.` : 'DevCatz found no OpenAPI file, and the site is not running — start it in DevCatz first.' }}</span></span>
@@ -554,12 +559,12 @@ async function importProject() {
             <span class="flex flex-col"><span class="label-caps">Add its .env variables</span><span class="text-xs opacity-50">{{ dcProject?.hasEnv ? 'The project’s .env in DoCatz. Keys, passwords and tokens are marked secret; values stay on this computer.' : 'This project has no .env.' }}</span></span>
             <input v-model="dcWithEnvVars" type="checkbox" class="toggle toggle-sm toggle-primary" :disabled="!dcProject?.hasEnv" />
           </div>
-          <div v-if="dcEarlier.length && dcWithRoutes" class="opt-row">
-            <span class="flex flex-col"><span class="label-caps">Imported before</span><span class="text-xs opacity-50">{{ dcAsNew ? 'A new collection next to' : 'New routes join' }} {{ dcEarlier.map((b) => `“${b.name}”`).join(', ') }}{{ dcAsNew ? '' : ' — your saved requests stay as they are' }}</span></span>
-            <div class="seg seg-xs seg-choice">
-              <button class="seg-item normal-case" :class="{ 'is-active': !dcAsNew }" @click="dcAsNew = false">Add new routes</button>
-              <button class="seg-item normal-case" :class="{ 'is-active': dcAsNew }" @click="dcAsNew = true">New collection</button>
-            </div>
+          <div v-for="g in dcGroups" v-show="dcWithRoutes" :key="g.key" class="opt-row">
+            <span class="flex flex-col"><span class="label-caps">Imported before<template v-if="dcGroups.length > 1"> · {{ g.key }}</template></span><span class="text-xs opacity-50">{{ dcInto[g.key] === 'new' ? 'A new collection, next to the one(s) already here' : 'Only routes it does not have yet are added — your saved requests stay as they are' }}</span></span>
+            <select v-model="dcInto[g.key]" class="select select-sm w-72 max-w-[50%]">
+              <option v-for="b in g.list" :key="b.collectionId" :value="b.collectionId">{{ earlierLabel(b, g.list) }}</option>
+              <option value="new">New collection</option>
+            </select>
           </div>
           <div class="opt-row">
             <span class="flex flex-col"><span class="label-caps">{{ dcAll ? 'Routes as collections' : 'Routes as a collection' }}</span><span class="text-xs opacity-50">{{ dcAll ? dcAllText : dcLaravel ? `Runs php artisan route:list inside the ${dcPicked?.service} container (its code runs to list them).` : dcProject?.running ? `From an OpenAPI file in the compose folder, or the one ${dcPicked?.url ?? 'the service'} serves.` : 'From an OpenAPI file in the compose folder — or start the project in DoCatz first.' }}</span></span>

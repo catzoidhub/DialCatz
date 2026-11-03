@@ -434,7 +434,7 @@ function api(): DialCatzApi {
       if (what.routes) {
         const r = await devcatz.routes(site, what.app);
         // Imported before: the new routes join that collection, the user's requests stay as they are.
-        const placed = placeRoutes(id, w, r, `devcatz:${site.id}:${devcatz.pickApp(site, what.app)?.dir ?? ''}`, envName, what.asNew);
+        const placed = placeRoutes(id, w, r, `devcatz:${site.id}:${devcatz.pickApp(site, what.app)?.dir ?? ''}`, envName, what.into?.[devcatz.pickApp(site, what.app)?.dir ?? ''] ?? undefined);
         ({ w, collectionId, requests, merged } = placed);
         source = r.source;
       }
@@ -448,7 +448,7 @@ function api(): DialCatzApi {
         const p = docatz.projects().find((x) => x.name === key);
         if (!p) return [];
         // Before origins were kept: "<project>" (one service) or "<project> · <service>".
-        return importedFrom(w, `docatz:${p.name}:`, `DoCatz · ${p.name}`, (n) => (n === p.name ? (docatz.pickService(p)?.service ?? '') : n.startsWith(`${p.name} · `) ? n.slice(p.name.length + 3) : null)).map((x) => ({ collectionId: x.col.id, name: x.col.name, key: x.key }));
+        return importedFrom(w, `docatz:${p.name}:`, `DoCatz · ${p.name}`, (n) => (n === p.name ? (docatz.pickService(p)?.service ?? '') : n.startsWith(`${p.name} · `) ? n.slice(p.name.length + 3) : null)).map((x) => ({ collectionId: x.col.id, name: x.col.name, key: x.key, requests: countRequests(w, x.col.id) }));
       }
       const site = devcatz.sites().find((x) => x.id === key);
       if (!site) return [];
@@ -456,7 +456,7 @@ function api(): DialCatzApi {
         if (n === site.name) return devcatz.pickApp(site)?.dir ?? '';
         const label = n.startsWith(`${site.name} · `) ? n.slice(site.name.length + 3) : null;
         return label === null ? null : (site.apps.find((a) => devcatz.appLabel(a) === label)?.dir ?? null);
-      }).map((x) => ({ collectionId: x.col.id, name: x.col.name, key: x.key }));
+      }).map((x) => ({ collectionId: x.col.id, name: x.col.name, key: x.key, requests: countRequests(w, x.col.id) }));
     },
     docatzProjects: async () => ({ installed: docatz.installed(), engine: docatz.engineRunning(), projects: docatz.projects() }),
     docatzOpen: async (name) => void (await shell.openExternal(docatz.link(docatz.project(String(name))))),
@@ -479,7 +479,7 @@ function api(): DialCatzApi {
         skipped = got.skipped;
         // Imported before: the new routes join that collection, the user's requests stay as they are.
         for (const r of got.collections) {
-          const placed = placeRoutes(id, w, r, `docatz:${p.name}:${r.service}`, envName, what.asNew);
+          const placed = placeRoutes(id, w, r, `docatz:${p.name}:${r.service}`, envName, what.into?.[r.service] ?? undefined);
           w = placed.w;
           collectionIds.push(placed.collectionId);
           requests += placed.requests;
@@ -792,9 +792,11 @@ const shortSkip = (f: string) => f.replace(/^.*dialcatz-postman-[^\\/]+[\\/]/, '
  * An imported collection of routes into the workspace: merged into the one an earlier import made (same `origin`, or
  * — imports from before origins were kept — no origin, the same name and the same environment), else added as new.
  */
-function placeRoutes(id: string, w: Workspace, r: { root: TreeItem; items: TreeItem[] }, origin: string, envName: string, asNew = false): { w: Workspace; collectionId: string; requests: number; merged: boolean; gone: number } {
+function placeRoutes(id: string, w: Workspace, r: { root: TreeItem; items: TreeItem[] }, origin: string, envName: string, into?: string): { w: Workspace; collectionId: string; requests: number; merged: boolean; gone: number } {
   const envId = w.environments.find((e) => e.name === envName)?.id;
-  const existing = asNew ? undefined : w.items.find((i) => i.kind === 'collection' && (i.origin === origin || (!i.origin && i.name === r.root.name && !!envId && i.environmentId === envId)));
+  // `into`: the collection the user picked ('new': none). Without a pick, the first one imported from here.
+  const picked = into && into !== 'new' ? w.items.find((i) => i.kind === 'collection' && i.id === into) : undefined;
+  const existing = into === 'new' ? undefined : (picked ?? w.items.find((i) => i.kind === 'collection' && (i.origin === origin || (!i.origin && i.name === r.root.name && !!envId && i.environmentId === envId))));
   if (!existing) {
     r.root.sort = w.items.filter((i) => i.kind === 'collection').length;
     r.root.origin = origin;
@@ -806,6 +808,8 @@ function placeRoutes(id: string, w: Workspace, r: { root: TreeItem; items: TreeI
   const m = mergeRoutes(w.items, existing, r);
   return { w: ws.saveItems(id, [...(existing.origin === origin ? [] : [{ ...existing, origin }]), ...m.save]), collectionId: existing.id, requests: m.added, merged: true, gone: m.gone };
 }
+
+const countRequests = (w: Workspace, collectionId: string) => [...under(w.items, collectionId)].filter((i) => w.items.find((x) => x.id === i)?.kind === 'request').length;
 
 /** The ids of a collection and everything in it. */
 function under(items: TreeItem[], rootId: string): Set<string> {
