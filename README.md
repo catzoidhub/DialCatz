@@ -60,6 +60,16 @@ open the installer: choose **More info → Run anyway**. The installer is built 
 so what you run is this source. Stars, issues and pull requests help DialCatz qualify for free signing later. Policy:
 [catzoid.com/legal/code-signing](https://catzoid.com/legal/code-signing).
 
+## How it is made
+
+DialCatz is made by a small team of three developers, and its code is written together with
+[Claude by Anthropic](https://www.anthropic.com/claude), an AI assistant. The team decides what the cat does, designs
+it, tries every feature on a real computer and reviews every change before it ships — Claude writes and explains the
+code with them. Every commit Claude helped with says so (`Co-Authored-By: Claude`), so you can read, test or question
+any of it. Found something that looks wrong? Open an issue — a person reads every report.
+
+Catzoid is an independent project; it is not made, sponsored or endorsed by Anthropic.
+
 ## Licence
 
 DialCatz is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License
