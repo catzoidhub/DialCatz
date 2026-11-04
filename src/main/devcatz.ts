@@ -2,10 +2,11 @@ import { execFile } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, delimiter, join } from 'node:path';
-import { newRequest, uid, type DevCatzApp, type DevCatzOpenApi, type DevCatzSite, type EnvVariable, type HttpMethod, type TreeItem } from '@shared/types';
+import { uid, type DevCatzApp, type DevCatzOpenApi, type DevCatzSite, type EnvVariable, type TreeItem } from '@shared/types';
 import { send } from './http';
 import { exePath } from './platform';
 import { importText } from './importers';
+import { laravelTree } from './routetree';
 
 /**
  * DevCatz → DialCatz. DevCatz runs the user's local sites on https://<site>.localhost and writes what it runs to
@@ -171,48 +172,6 @@ async function laravelRoutes(cwd: string, collectionId: string): Promise<TreeIte
   return laravelTree(out, collectionId);
 }
 
-/** `artisan route:list --json` output as requests (also used for DoCatz, where artisan runs in the container). */
-export function laravelTree(out: string, collectionId: string): TreeItem[] {
-  const routes = JSON.parse(out.slice(out.indexOf('['))) as { method: string; uri: string; name: string | null; action: string; middleware?: string[] }[];
-  const kept = routes.filter((r) => !/^(_ignition|sanctum\/csrf-cookie|telescope|horizon|_debugbar|livewire|up$|storage\/)/.test(r.uri));
-  const isApi = (r: (typeof kept)[number]) => (r.middleware ?? []).includes('api') || r.uri === 'api' || r.uri.startsWith('api/');
-  const items: TreeItem[] = [];
-  const folder = (name: string, parentId: string, sort: number): TreeItem => {
-    const f: TreeItem = { id: uid('f_'), kind: 'folder', parentId, name, sort, auth: { mode: 'inherit' } };
-    items.push(f);
-    return f;
-  };
-  let n = 0;
-  const parts = [['api', kept.filter(isApi)], ['web', kept.filter((r) => !isApi(r))]] as const;
-  const split = parts.every(([, list]) => list.length);
-  for (const [kind, list] of parts) {
-    if (!list.length) continue;
-    const top = split ? folder(kind, collectionId, kind === 'api' ? 0 : 1) : { id: collectionId };
-    const groups = new Map<string, TreeItem>();
-    for (const r of list) {
-      const method = (r.method.split('|').find((m) => m !== 'HEAD') ?? 'GET') as HttpMethod;
-      const segs = r.uri.replace(/^\//, '').split('/');
-      const group = (kind === 'api' && segs[0] === 'api' ? segs[1] : segs[0]) || '/';
-      if (!groups.has(group)) groups.set(group, folder(group === '/' ? 'root' : group, top.id, groups.size));
-      items.push({
-        id: uid('r_'),
-        kind: 'request',
-        parentId: groups.get(group)!.id,
-        name: r.name || `${method} /${r.uri.replace(/^\//, '')}`,
-        sort: n++,
-        request: {
-          ...newRequest(),
-          method,
-          url: `{{baseUrl}}/${r.uri.replace(/^\//, '').replace(/\{(\w+)\??\}/g, ':$1')}`,
-          headers: kind === 'api' ? [{ key: 'Accept', value: 'application/json', enabled: true }] : [],
-          ...(['POST', 'PUT', 'PATCH'].includes(method) ? { body: { mode: 'json' as const, raw: '{\n  \n}', fields: [] } } : {}),
-        },
-        description: r.action,
-      });
-    }
-  }
-  return items;
-}
 
 // NestJS serves its document next to the Swagger UI: <path>-json (/api-json, /docs-json, /api/docs-json).
 export const OPENAPI_PATHS = ['/openapi.json', '/swagger.json', '/api/openapi.json', '/docs/openapi.json', '/api-docs', '/v3/api-docs', '/swagger/v1/swagger.json', '/api/docs.json', '/openapi.yaml', '/api-json', '/docs-json', '/api/docs-json', '/swagger/doc.json'];

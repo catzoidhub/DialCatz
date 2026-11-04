@@ -3,14 +3,15 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { uid, type DoCatzProject, type DoCatzService, type EnvVariable, type TreeItem } from '@shared/types';
-import { envFileVariables, laravelTree, MAX_SPEC, OPENAPI_PATHS, parseSpec, servedOpenApi } from './devcatz';
+import { envFileVariables, MAX_SPEC, OPENAPI_PATHS, parseSpec, servedOpenApi } from './devcatz';
+import { goravelCommand, laravelTree, parseGoravelRoutes, routesTree } from './routetree';
 
 /**
  * DoCatz → DialCatz (#79). DoCatz runs the user's compose projects on https://<service>.<project>.docatz.<tld> and
  * writes what it runs to bridge.json (schema 1, read-only for us): each container's project, service, state, URL,
  * compose folder and the framework it is built from. A project becomes an environment "DoCatz · <project>" (baseUrl
- * = its API service, <service>Url for each API service) and its routes a collection: Laravel through
- * `php artisan route:list` inside the container (PHP is there, not on the computer), else an OpenAPI document — a
+ * = its API service, <service>Url for each API service) and its routes a collection: Laravel and Goravel through
+ * `artisan route:list` inside the container (their tools are there, not on the computer), else an OpenAPI document — a
  * file in the compose folder, then one a service serves. Only API services are listed (built from a framework, or
  * with an OpenAPI file in their own folder): databases, caches, front ends, plain images and background workers are
  * left out, and a project with none is not listed.
@@ -185,6 +186,17 @@ export async function routes(p: DoCatzProject, service?: string): Promise<{ root
     const root: TreeItem = { id: uid('c_'), kind: 'collection', parentId: null, name, sort: 0, auth: { mode: 'none' }, description: note };
     const out = await docker(['exec', s.container, 'php', 'artisan', 'route:list', '--json']);
     return { root, items: laravelTree(out, root.id), source: 'artisan route:list' };
+  }
+  if (s?.library === 'goravel') {
+    if (!s.running) throw new Error(`${s.service} is not running, and its routes are listed inside its container. Start ${p.name} in DoCatz, then import again.`);
+    // The built program differs per image; one running from source compiles first, which takes a while.
+    const [entrypoint, cmd] = (await docker(['inspect', '-f', '{{json .Config.Entrypoint}} {{json .Config.Cmd}}', s.container])).trim().split(' ').map((x) => JSON.parse(x) as string[] | null);
+    const command = goravelCommand(entrypoint, cmd);
+    const out = await docker(['exec', s.container, ...command], command[0] === 'go' ? 300_000 : 90_000);
+    const listed = parseGoravelRoutes(out);
+    if (!listed.length) throw new Error(`${s.service} listed no routes through ${command.slice(0, 2).join(' ')} … artisan route:list.`);
+    const root: TreeItem = { id: uid('c_'), kind: 'collection', parentId: null, name, sort: 0, auth: { mode: 'none' }, description: note };
+    return { root, items: routesTree(listed, root.id), source: 'artisan route:list' };
   }
   const found = fileSpec(p.dir, s?.service) ?? (await servedOpenApi([s?.url, ...p.services.filter((x) => x.api).map((x) => x.url)], `docatz-${p.name}`, docsLogin(p)));
   if (found) return { root: { ...found.api.root, name, description: `${found.api.root.description ?? ''}\n\n${note}`.trim() }, items: found.api.items, source: `OpenAPI (${found.from})` };
