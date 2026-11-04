@@ -2242,12 +2242,12 @@ html.is-win .win-top {
   padding-top: 2.75rem;
 }
 
-/* MCatzP has an update: its own colours, the ones of its arrow in the pairing dialog. */
+/* MCatzP has an update: purple into DialCatz's green. */
 .mcatzp-pill {
   display: inline-block;
   margin-left: 0.375rem;
   border-radius: 999px;
-  background: linear-gradient(90deg, #ff8dbe, #8e7bff);
+  background: linear-gradient(90deg, #8e7bff, #4ecbb4);
   color: #1b1330;
   font-size: 0.625rem;
   font-weight: 700;
@@ -2259,11 +2259,11 @@ html.is-win .win-top {
   width: 0.625rem;
   height: 0.625rem;
   border-radius: 999px;
-  background: linear-gradient(135deg, #ff8dbe, #8e7bff);
+  background: linear-gradient(135deg, #8e7bff, #4ecbb4);
 }
 .btn.mcatzp-update {
   border: 0;
-  background: linear-gradient(90deg, #ff8dbe, #8e7bff);
+  background: linear-gradient(90deg, #8e7bff, #4ecbb4);
   color: #1b1330;
   font-weight: 700;
 }
