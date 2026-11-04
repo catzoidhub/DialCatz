@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { API_METHODS, type ConnectRequest, type DialCatzApi, type DialCatzSettings, type GitState, type PresenceEntry, type UpdateState, type WsEvent } from '@shared/types';
+import { API_METHODS, type ConnectRequest, type DialCatzApi, type DialCatzSettings, type GitState, type PresenceEntry, type UpdateState, type WsEvent, type McatzpAsk, type McatzpInstallProgress } from '@shared/types';
 
 const api = Object.fromEntries(API_METHODS.map((m) => [m, (...args: unknown[]) => ipcRenderer.invoke(`dialcatz:${m}`, ...args)])) as unknown as DialCatzApi;
 
@@ -37,6 +37,12 @@ const bridge = {
   onDevCatz: (cb: (siteId: string) => void) => on('app:devcatz', cb),
   /** dialcatz://open?docatz=<compose project>[&service=<service>] from DoCatz ('' when no service is named). */
   onDoCatz: (cb: (link: { project: string; service: string }) => void) => on('app:docatz', cb),
+  /** A question from an MCP client waiting for the user (null: none left). */
+  onMcatzpAsk: (cb: (ask: McatzpAsk | null) => void) => on('app:mcatzpAsk', cb),
+  /** The main process asks for what only the window holds; answered with mcatzpWindowReply. */
+  onMcatzpRead: (cb: (req: { id: string; what: 'tabs' | 'response'; tab: string | null }) => void) => on('app:mcatzpRead', cb),
+  /** Install MCatzP running in Settings. */
+  onMcatzpInstalling: (cb: (p: McatzpInstallProgress | null) => void) => on('app:mcatzpInstalling', cb),
   /** Who has which request open in a team workspace. */
   onPresence: (cb: (p: { workspaceId: string; presence: PresenceEntry[] }) => void) => on('app:presence', cb),
   /** The update check / download moved on (Catzoid #54). */

@@ -429,8 +429,106 @@ export interface DialCatzSettings {
   theme: Theme;
   ai: AiSettings;
   requests: RequestDefaults;
+  mcatzp: McatzpSettings;
 }
-export type DialCatzSettingsPatch = { theme?: Theme; ai?: Partial<Omit<AiSettings, 'keys'>>; requests?: Partial<RequestDefaults> };
+export type DialCatzSettingsPatch = { theme?: Theme; ai?: Partial<Omit<AiSettings, 'keys'>>; requests?: Partial<RequestDefaults>; mcatzp?: Partial<Omit<McatzpSettings, 'clients'>> };
+
+/** Settings → MCatzP: the local channel an AI client reaches DialCatz through. DialCatz's own, per computer. */
+export interface McatzpSettings {
+  /** The switch. Off by default. */
+  on: boolean;
+  /** Every workspace is shared, new ones too. */
+  all: boolean;
+  /** Workspaces shared one by one (ids). */
+  workspaces: string[];
+  /** Variable values go out too, secret ones masked. Off: only their names. */
+  values: boolean;
+  /** History and responses go out too (they can hold personal data). Off: only the saved requests. */
+  responses: boolean;
+  /** Git repositories (status, history, diffs). Off by default: they are not tied to a shared workspace. */
+  git: boolean;
+  /** Approved clients, until Revoke. Set by the main process only. */
+  clients: { name: string; approvedAt: string }[];
+}
+
+export interface McatzpActivity {
+  time: string;
+  client: string;
+  method: string;
+  action?: string;
+  tier?: 'read' | 'change' | 'destructive';
+  outcome: 'ok' | 'refused' | 'declined' | 'failed';
+  reason?: string;
+}
+
+/** `pair`: may this client connect at all? */
+export type McatzpAsk = { id: string; kind: 'pair'; client: string; version: string | null };
+
+/** The MCatzP program on this computer and what the site offers it (Settings → MCatzP). */
+export interface McatzpSetup {
+  path: string | null;
+  version: string | null;
+  /** `catzoid`: installed from here, updated from here. Others update their own way (Homebrew, npm). */
+  source: 'catzoid' | 'homebrew' | 'other' | null;
+  latest: string | null;
+  /** The site has no build for this computer. */
+  noBuild: boolean;
+  /** The site could not be asked. */
+  error: string | null;
+  /** The site was asked; until then latest and noBuild say nothing. */
+  checked: boolean;
+}
+/** An AI assistant MCatzP can be added to. */
+export interface McatzpTarget {
+  id: 'claude-code' | 'zcode' | 'claude-desktop' | 'cursor' | 'windsurf' | 'vscode' | 'cline' | 'gemini' | 'codex' | 'opencode' | 'copilot' | 'kiro' | 'antigravity' | 'qwen' | 'lmstudio' | 'roo' | 'amp' | 'warp';
+  label: string;
+  /** It is on this computer. */
+  found: boolean;
+  /** What its mcatzp entry runs; null when it has none. */
+  command: string | null;
+  /** The entry runs the copy in use. */
+  current: boolean;
+  /** The account signed in to it, when the assistant keeps that on this computer. */
+  account?: string;
+}
+export interface McatzpInstallProgress {
+  phase: 'download' | 'install';
+  received: number;
+  total: number;
+}
+
+/** A tab as the window holds it, for a client: what the Requests section shows, secrets masked in the main process. */
+export interface McatzpTab {
+  id: string;
+  workspaceId: string;
+  name: string;
+  method: string;
+  url: string;
+  dirty: boolean;
+  sending: boolean;
+  active: boolean;
+  kind: 'http' | 'websocket';
+  status: number | null;
+  error: string | null;
+  timeMs: number | null;
+  sentAt: string | null;
+}
+/** A tab's last response, or a WebSocket tab's log. */
+export interface McatzpTabResponse extends McatzpTab {
+  statusText: string | null;
+  headers: [string, string][];
+  body: string;
+  binary: boolean;
+  contentType: string | null;
+  size: number | null;
+  truncated: boolean;
+  sent: { method: string; url: string; headers: [string, string][] } | null;
+  tests: { name: string; passed: boolean; error?: string }[];
+  /** What the request's scripts logged, and why one failed. */
+  scriptLogs: string[];
+  scriptError: string | null;
+  log: { dir: string; text: string; at: number }[];
+}
 
 /** A local site DevCatz runs (read from DevCatz). */
 /** One app of a DevCatz site (a monorepo has several: web, api …), from DevCatz's bridge.json. */
@@ -1089,6 +1187,25 @@ export interface DialCatzApi {
   reportError(message: string, stack: string): Promise<void>;
   reportPrefs(): Promise<ReportPrefs>;
   setReportPrefs(patch: Partial<ReportPrefs>): Promise<ReportPrefs>;
+
+  // ---- Settings → MCatzP. Never tools: a client does not approve, install or reach for itself.
+  mcatzpActivity(): Promise<McatzpActivity[]>;
+  mcatzpClearActivity(): Promise<void>;
+  /** Forgets the client and closes every connection (a new token), so it has to ask again. */
+  mcatzpRevoke(name: string): Promise<void>;
+  /** The program on this computer; `askSite` false answers at once, without the site's latest version. */
+  mcatzpSetup(askSite?: boolean): Promise<McatzpSetup>;
+  /** Progress on onMcatzpInstalling. */
+  mcatzpInstall(): Promise<McatzpSetup>;
+  mcatzpInstallCancel(): Promise<void>;
+  mcatzpTargets(): Promise<McatzpTarget[]>;
+  mcatzpAddToClient(id: McatzpTarget['id']): Promise<McatzpTarget[]>;
+  mcatzpRemoveFromClient(id: McatzpTarget['id']): Promise<McatzpTarget[]>;
+  /** A question waiting for the user, for a window that just opened. */
+  mcatzpPending(): Promise<McatzpAsk | null>;
+  mcatzpAnswer(id: string, answer: 'deny' | 'once' | 'session'): Promise<void>;
+  /** The window's answer to onMcatzpRead. */
+  mcatzpWindowReply(id: string, data: unknown): Promise<void>;
 }
 
 export const API_METHODS = [
@@ -1102,7 +1219,7 @@ export const API_METHODS = [
   'servers', 'probeServer', 'connectWithToken', 'connectWithCode', 'refreshServer', 'disconnectServer', 'subscribeWorkspace', 'setPresence', 'presence', 'syncWorkspace', 'resolveConflict',
   'openUrl', 'exportWorkspace', 'exportEnvironment', 'importEnvironments', 'dbcatzInfo', 'dbcatzOpen', 'saveDbTarget', 'copyText', 'hostName',
   'updateState', 'updateCheck', 'updateDownload', 'updateCancel', 'updateInstall', 'updateSkip', 'updatePrefs', 'setUpdatePrefs',
-  'uninstallPlan', 'uninstall', 'reportPreview', 'reportSend', 'captureWindow', 'reportError', 'reportPrefs', 'setReportPrefs',
+  'uninstallPlan', 'uninstall', 'reportPreview', 'reportSend', 'captureWindow', 'reportError', 'reportPrefs', 'setReportPrefs', 'mcatzpActivity', 'mcatzpClearActivity', 'mcatzpRevoke', 'mcatzpSetup', 'mcatzpInstall', 'mcatzpInstallCancel', 'mcatzpTargets', 'mcatzpAddToClient', 'mcatzpRemoveFromClient', 'mcatzpPending', 'mcatzpAnswer', 'mcatzpWindowReply',
 ] as const satisfies readonly (keyof DialCatzApi)[];
 
 // ------------------------------------------------------------------ helpers used on both sides

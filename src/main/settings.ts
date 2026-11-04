@@ -1,5 +1,5 @@
 import { nativeTheme } from 'electron';
-import { AI_FEATURES, AI_PROVIDERS, type AiFeature, type AiProvider, type DialCatzSettings, type DialCatzSettingsPatch, type RequestDefaults, type Theme } from '@shared/types';
+import { AI_FEATURES, AI_PROVIDERS, type AiFeature, type AiProvider, type DialCatzSettings, type DialCatzSettingsPatch, type McatzpSettings, type RequestDefaults, type Theme } from '@shared/types';
 import { AUTO_HEADERS } from '@shared/request';
 import { store } from './store';
 import { readShared, setSharedKey, sharedKey, watchShared, writeShared } from './shared';
@@ -19,6 +19,12 @@ const REQUEST_DEFAULTS: RequestDefaults = { timeoutMs: 30_000, followRedirects: 
 
 type Stored = Omit<DialCatzSettings, 'ai'> & { ai: Omit<DialCatzSettings['ai'], 'keys'> };
 
+const ids = (a: unknown) => (Array.isArray(a) ? [...new Set(a.filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length < 300))] : []);
+function mcatzpOf(m: Partial<McatzpSettings> | undefined): McatzpSettings {
+  const clients = Array.isArray(m?.clients) ? m.clients.filter((c) => typeof c?.name === 'string' && typeof c?.approvedAt === 'string') : [];
+  return { on: m?.on === true, all: m?.all === true, workspaces: ids(m?.workspaces), values: m?.values !== false, responses: m?.responses !== false, git: m?.git === true, clients };
+}
+
 function local(): Stored {
   const s = store.extra<Partial<Stored>>(KEY) ?? {};
   const ai = s.ai ?? ({} as Partial<Stored['ai']>);
@@ -27,6 +33,7 @@ function local(): Stored {
     theme: THEMES.includes(s.theme as Theme) ? (s.theme as Theme) : 'system',
     ai: { enabled: ai.enabled === true, off: Array.isArray(ai.off) ? ai.off.filter((f): f is AiFeature => FEATURES.includes(f)) : [], provider: PROVIDERS.includes(ai.provider as AiProvider) ? (ai.provider as AiProvider) : 'anthropic', models: ai.models ?? {}, baseUrls: ai.baseUrls ?? {} },
     requests: { timeoutMs: Number(r.timeoutMs) || REQUEST_DEFAULTS.timeoutMs, followRedirects: r.followRedirects !== false, insecure: r.insecure === true, autoHeaders: r.autoHeaders && typeof r.autoHeaders === 'object' ? r.autoHeaders : {} },
+    mcatzp: mcatzpOf(s.mcatzp),
   };
 }
 
@@ -83,11 +90,27 @@ export function setSettings(patch: DialCatzSettingsPatch): DialCatzSettings {
     if (r.insecure !== undefined) s.requests.insecure = r.insecure === true;
     if (r.autoHeaders !== undefined) s.requests.autoHeaders = Object.fromEntries(Object.entries(r.autoHeaders ?? {}).filter(([k]) => AUTO_HEADERS.some((a) => a.key === k)).map(([k, v]) => [k, v === true]));
   }
+  const m = patch.mcatzp;
+  if (m) {
+    if (m.on !== undefined) s.mcatzp.on = m.on === true;
+    if (m.all !== undefined) s.mcatzp.all = m.all === true;
+    if (m.values !== undefined) s.mcatzp.values = m.values === true;
+    if (m.responses !== undefined) s.mcatzp.responses = m.responses === true;
+    if (m.git !== undefined) s.mcatzp.git = m.git === true;
+    if (m.workspaces !== undefined) s.mcatzp.workspaces = ids(m.workspaces);
+  }
   store.setExtra(KEY, s);
   const conn = ai && (ai.provider !== undefined || ai.models !== undefined || ai.baseUrls !== undefined);
   if (patch.theme !== undefined || conn) writeShared({ ...(patch.theme !== undefined ? { theme: s.theme } : {}), ...(conn ? { ai: { provider: s.ai.provider, models: s.ai.models, baseUrls: s.ai.baseUrls } } : {}) });
   nativeTheme.themeSource = s.theme;
   return settings();
+}
+
+/** Approved MCatzP clients: only the main process changes them (a pairing answered, Revoke). */
+export function setMcatzpClients(clients: McatzpSettings['clients']): void {
+  const s = stored();
+  s.mcatzp.clients = clients;
+  store.setExtra(KEY, s);
 }
 
 export async function setAiKey(provider: AiProvider, key: string): Promise<DialCatzSettings> {

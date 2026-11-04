@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import AboutCard from './AboutCard.vue';
 import AiModelPicker from './AiModelPicker.vue';
+import McatzpSettings from './McatzpSettings.vue';
 import { computed, onMounted, ref } from 'vue';
 import { AI_FEATURES, AI_PROVIDERS, aiProvider, type AiFeature, type AiProvider, type DialCatzSettingsPatch, type Theme } from '@shared/types';
 import { AUTO_HEADERS } from '@shared/request';
@@ -92,6 +93,7 @@ const CHANNELS = [
 const TABS = [
   { id: 'general', label: 'General' },
   { id: 'ai', label: 'AI' },
+  { id: 'mcatzp', label: 'MCatzP' },
   { id: 'updates', label: 'Updates' },
   { id: 'about', label: 'About' },
 ] as const;
@@ -265,6 +267,7 @@ const THEMES: { id: Theme; label: string }[] = [
 
       </template>
 
+      <McatzpSettings v-if="settingsTab === 'mcatzp'" />
       <AboutCard v-if="settingsTab === 'about'" />
       </div>
     </div>

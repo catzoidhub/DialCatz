@@ -1,5 +1,5 @@
 import { computed, reactive, ref, toRaw, watch } from 'vue';
-import { newRequest, uid, type ConnectRequest, type DialCatzSettings, type Environment, type EnvVariable, type PresenceEntry, type WsEvent, type HistoryEntry, type RequestAuth, type RequestSpec, type SendResult, type ServerConnection, type TreeItem, type Workspace, type WorkspaceSummary } from '@shared/types';
+import { newRequest, uid, type ConnectRequest, type McatzpAsk, type McatzpInstallProgress, type McatzpTab, type McatzpTabResponse, type DialCatzSettings, type Environment, type EnvVariable, type PresenceEntry, type WsEvent, type HistoryEntry, type RequestAuth, type RequestSpec, type SendResult, type ServerConnection, type TreeItem, type Workspace, type WorkspaceSummary } from '@shared/types';
 import { AUTO_HEADERS, buildVars, effectiveAuth, interpolate, nameFromUrl, toWire, type Vars } from '@shared/request';
 import { store } from './store';
 import { requestContext, responseContext, runScript, type ScriptResult } from './scripts';
@@ -101,7 +101,10 @@ watch(
 export const aiOn = (feature: import('@shared/types').AiFeature) => !!settings.value?.ai.enabled && !settings.value.ai.off.includes(feature);
 export const askOpen = ref(false);
 /** Settings page tab (General / AI / Updates / About), like DBCatz. */
-export const settingsTab = ref<'general' | 'ai' | 'updates' | 'about'>('general');
+export const settingsTab = ref<'general' | 'ai' | 'mcatzp' | 'updates' | 'about'>('general');
+/** A question from an MCP client waiting for the user, and Install MCatzP running in Settings. */
+export const mcatzpAsk = ref<McatzpAsk | null>(null);
+export const mcatzpInstalling = ref<McatzpInstallProgress | null>(null);
 /** The update check / download (Catzoid #54) and whether its dialog is open. */
 export const updateState = ref<import('@shared/types').UpdateState>({ kind: 'idle' });
 export const updateOpen = ref(false);
@@ -488,4 +491,36 @@ export async function saveTab(tab: Tab, parentId?: string, name?: string): Promi
   tab.name = name || item.name;
   tab.dirty = false;
   return true;
+}
+
+// ---------------------------------------------------------------- MCatzP: what only the window holds
+
+const MCATZP_MAX_BODY = 2_000_000;
+function mcatzpTab(t: Tab): McatzpTab {
+  const r = t.result?.response;
+  return { id: t.id, workspaceId: t.workspaceId, name: t.name, method: t.spec.method, url: t.spec.url, dirty: t.dirty, sending: t.sending, active: t.id === activeTabId.value, kind: t.ws ? 'websocket' : 'http', status: r?.status ?? null, error: t.result?.error ?? null, timeMs: r?.timings.total ?? null, sentAt: t.sentAt ?? null };
+}
+/** Open tabs for a client; the main process masks and leaves out what is not shared. */
+export const mcatzpTabs = (): McatzpTab[] => tabs.value.map(mcatzpTab);
+/** A tab's last response (the active tab without an id). */
+export function mcatzpTabResponse(id: string | null): McatzpTabResponse | null {
+  const t = id ? tabs.value.find((x) => x.id === id) : activeTab.value;
+  if (!t) return null;
+  const r = t.result?.response;
+  const s = t.result?.sent;
+  return {
+    ...mcatzpTab(t),
+    statusText: r?.statusText ?? null,
+    headers: r?.headers ?? [],
+    body: (r?.body ?? '').slice(0, MCATZP_MAX_BODY),
+    binary: r?.binary === true,
+    contentType: r?.contentType ?? null,
+    size: r?.size ?? null,
+    truncated: r?.truncated === true || (r?.body.length ?? 0) > MCATZP_MAX_BODY,
+    sent: s ? { method: s.method, url: s.url, headers: s.headers } : null,
+    tests: (t.scripts?.tests?.tests ?? []).map((x) => ({ name: x.name, passed: x.pass, ...(x.error ? { error: x.error } : {}) })),
+    scriptLogs: [...(t.scripts?.pre?.logs ?? []), ...(t.scripts?.tests?.logs ?? [])].slice(-200),
+    scriptError: t.scripts?.pre?.error ?? t.scripts?.tests?.error ?? null,
+    log: (t.ws?.log ?? []).slice(-200).map((e) => ({ dir: e.type, text: e.binary ? '(binary)' : e.data.slice(0, 20_000), at: e.at })),
+  };
 }

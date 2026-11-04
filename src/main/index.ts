@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { API_METHODS, uid, type ConnectRequest, type DevCatzSite, type DoCatzProject, type Workspace, type PostmanChoice, type DialCatzApi, type HistoryEntry, type TreeItem, type WireRequest } from '@shared/types';
+import { API_METHODS, uid, type ConnectRequest, type DevCatzSite, type DoCatzProject, type McatzpTab, type McatzpTabResponse, type Workspace, type PostmanChoice, type DialCatzApi, type HistoryEntry, type TreeItem, type WireRequest } from '@shared/types';
 import { dataDir, store } from './store';
 import { applySettings, setAiKey, setSettings, settings } from './settings';
 import * as http from './http';
@@ -30,6 +30,10 @@ import * as updates from './updates';
 import * as uninstall from './uninstall';
 import * as reports from './reports';
 import { mergeRoutes } from './routemerge';
+import { Mcatzp } from './mcatzp';
+import * as mcatzpSetup from './mcatzp/install';
+import { MCATZP_TARGETS } from '@catzoid/mcatzp-host';
+import { randomUUID } from 'node:crypto';
 
 /**
  * DialCatz — an API client: collections, environments and history on this computer, team workspaces synced
@@ -82,7 +86,10 @@ function createWindow(): void {
   windowListens = false;
   w.once('ready-to-show', () => w.show());
   w.on('closed', () => ((win = null), (windowListens = false)));
-  w.webContents.on('did-start-loading', () => (windowListens = false));
+  // A reload starts over; an iframe in a response's preview must not (did-start-loading fires for those too).
+  w.webContents.on('did-start-navigation', (_e, _url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) windowListens = false;
+  });
   // Links in responses / docs open in the browser, never inside the app window.
   w.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
@@ -155,10 +162,39 @@ app.on('open-url', (e, url) => {
   else app.once('ready', () => handleLink(url));
 });
 app.on('activate', () => createWindow());
-app.on('before-quit', () => (sockets.closeAll(), live.stopAll()));
+app.on('before-quit', () => {
+  mcatzp?.quit();
+  sockets.closeAll();
+  live.stopAll();
+});
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
+
+let mcatzp: Mcatzp;
+const windowReads = new Map<string, (data: unknown) => void>();
+/** What only the window holds (open tabs, responses). No window, or none answering: there is nothing to read. */
+function askWindow<T>(what: 'tabs' | 'response', tab: string | null): Promise<T | null> {
+  if (!win || win.isDestroyed() || !windowListens) return Promise.resolve(null);
+  const id = randomUUID();
+  return new Promise((done) => {
+    const timer = setTimeout(() => {
+      windowReads.delete(id);
+      done(null);
+    }, 3000);
+    windowReads.set(id, (data) => {
+      clearTimeout(timer);
+      done((data ?? null) as T | null);
+    });
+    send('app:mcatzpRead', { id, what, tab });
+  });
+}
+let mcatzpInstalling: AbortController | null = null;
+const mcatzpClient = (id: unknown) => {
+  const known = MCATZP_TARGETS.find((t) => t === id);
+  if (!known) throw new Error('Unknown client');
+  return known;
+};
 
 function api(): DialCatzApi {
   return {
@@ -174,7 +210,14 @@ function api(): DialCatzApi {
       node: process.versions.node,
     }),
     settings: async () => settings(),
-    setSettings: async (patch) => setSettings(patch),
+    setSettings: async (patch) => {
+      const next = setSettings(patch);
+      if (patch.mcatzp) {
+        if (patch.mcatzp.on !== undefined) await mcatzp.set(next.mcatzp.on);
+        mcatzp.scopesChanged();
+      }
+      return next;
+    },
     setAiKey: (provider, key) => setAiKey(provider, key),
 
     workspaces: async () => ws.list(),
@@ -733,6 +776,43 @@ function api(): DialCatzApi {
     reportError: (message, stack) => reports.error(String(message ?? ''), String(stack ?? ''), 'renderer'),
     reportPrefs: async () => reports.prefs(),
     setReportPrefs: async (patch) => reports.setPrefs(patch ?? {}),
+
+    mcatzpActivity: async () => mcatzp.activity.list(),
+    mcatzpClearActivity: async () => mcatzp.activity.clear(),
+    mcatzpRevoke: (name) => mcatzp.revoke(String(name)),
+    mcatzpSetup: (askSite) => mcatzpSetup.setupState(askSite !== false),
+    mcatzpInstall: async () => {
+      if (mcatzpInstalling) throw new Error('MCatzP is being installed');
+      mcatzpInstalling = new AbortController();
+      const report = (p: Parameters<Parameters<typeof mcatzpSetup.install>[0]>[0] | null) => send('app:mcatzpInstalling', p);
+      try {
+        report({ phase: 'download', received: 0, total: 0 });
+        await mcatzpSetup.install(report, mcatzpInstalling.signal);
+      } catch (e) {
+        // Cancel is an answer, not a failure.
+        if (!mcatzpInstalling?.signal.aborted) throw e;
+      } finally {
+        mcatzpInstalling = null;
+        report(null);
+      }
+      return mcatzpSetup.setupState();
+    },
+    mcatzpInstallCancel: async () => mcatzpInstalling?.abort(),
+    mcatzpTargets: () => mcatzpSetup.targets(),
+    mcatzpAddToClient: async (id) => {
+      await mcatzpSetup.addToClient(mcatzpClient(id));
+      return mcatzpSetup.targets();
+    },
+    mcatzpRemoveFromClient: async (id) => {
+      await mcatzpSetup.removeFromClient(mcatzpClient(id));
+      return mcatzpSetup.targets();
+    },
+    mcatzpPending: async () => mcatzp.pending(),
+    mcatzpAnswer: async (id, answer) => mcatzp.answer(String(id), answer === 'once' || answer === 'session' ? answer : 'deny'),
+    mcatzpWindowReply: async (id, data) => {
+      windowReads.get(String(id))?.(data);
+      windowReads.delete(String(id));
+    },
   };
 }
 
@@ -1059,6 +1139,16 @@ if (primary) app.whenReady().then(() => {
   gitHosts.setAccountsListener(() => repos.changed());
   applyMenu();
   createWindow();
+  mcatzp = new Mcatzp(api(), {
+    show: (ask) => {
+      if (ask) createWindow();
+      send('app:mcatzpAsk', ask);
+    },
+    settingsChanged: () => send('app:settings', settings()),
+    tabs: async () => (await askWindow<McatzpTab[]>('tabs', null)) ?? [],
+    tabResponse: (tab) => askWindow<McatzpTabResponse>('response', tab),
+  });
+  void mcatzp.set(settings().mcatzp.on).catch(() => undefined);
   // Updates (Catzoid #54): every state change reaches the window and relabels the menu item.
   let lastKind = '';
   updates.init(

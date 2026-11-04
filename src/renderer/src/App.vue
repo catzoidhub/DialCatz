@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { activeTab, activeTabId, notify, selectWorkspace, aiOn, askOpen, connectRequest as connect, goSection, importRequest, loadHistory, onWsEvent, presence, loadSettings, loadWorkspaces, reloadWorkspace, restoreTabs, section, sendTab, settings, settingsTab, syncTabsWithWorkspace, updateState, updateOpen, reportOpen, uninstallOpen, tabs, toast, workspace, type Section } from './state';
+import { activeTab, activeTabId, mcatzpAsk, mcatzpInstalling, mcatzpTabResponse, mcatzpTabs, plain, notify, selectWorkspace, aiOn, askOpen, connectRequest as connect, goSection, importRequest, loadHistory, onWsEvent, presence, loadSettings, loadWorkspaces, reloadWorkspace, restoreTabs, section, sendTab, settings, settingsTab, syncTabsWithWorkspace, updateState, updateOpen, reportOpen, uninstallOpen, tabs, toast, workspace, type Section } from './state';
 import { backIndex, backList, canBack, canForward, forwardList, goBack, goForward, goTo, navApply, navPrune, navVisit, type NavEntry } from './nav';
 import PopMenu from './components/PopMenu.vue';
 import UpdateDialog from './components/UpdateDialog.vue';
 import ReportDialog from './components/ReportDialog.vue';
 import WelcomeDialog from './components/WelcomeDialog.vue';
 import UninstallDialog from './components/UninstallDialog.vue';
+import McatzpPairDialog from './components/McatzpPairDialog.vue';
 import RequestsSection from './components/RequestsSection.vue';
 import EnvironmentsSection from './components/EnvironmentsSection.vue';
 import HistorySection from './components/HistorySection.vue';
@@ -223,6 +224,11 @@ onMounted(async () => {
       notify('success', `Opened “${w.name}” from its repository`);
     }),
   );
+  // MCatzP: a client's question, Install running in Settings, and what only this window holds.
+  offs.push(api.onMcatzpAsk((a) => (mcatzpAsk.value = a)));
+  offs.push(api.onMcatzpInstalling((p) => (mcatzpInstalling.value = p)));
+  offs.push(api.onMcatzpRead((r) => void api.mcatzpWindowReply(r.id, plain(r.what === 'tabs' ? mcatzpTabs() : mcatzpTabResponse(r.tab)))));
+  mcatzpAsk.value = await api.mcatzpPending();
   // "Open in DialCatz" from DoCatz (an API container's page): the import on that project, that service as baseUrl.
   offs.push(api.onDoCatz(({ project, service }) => (importRequest.value = { tab: 'docatz', project, service })));
   offs.push(api.onPresence((p) => (presence.value = { ...presence.value, [p.workspaceId]: p.presence })));
@@ -282,6 +288,7 @@ onBeforeUnmount(() => offs.forEach((f) => f()));
     <UpdateDialog v-if="updateOpen" @close="updateOpen = false" />
     <ReportDialog v-if="reportOpen" :kind="reportOpen" @close="reportOpen = null" />
     <WelcomeDialog v-if="ready" />
+    <McatzpPairDialog />
     <UninstallDialog v-if="uninstallOpen" @close="uninstallOpen = false" />
     <div v-if="askCrash" class="toast toast-start toast-bottom z-50">
       <div class="alert max-w-md items-start gap-2.5 text-sm shadow-lg">
