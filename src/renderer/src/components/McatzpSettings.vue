@@ -279,7 +279,7 @@ const groups = computed(() => {
           </label>
           <label class="flex cursor-pointer items-start gap-2 text-sm">
             <input type="checkbox" class="checkbox checkbox-sm mt-0.5" :checked="s.changes" @change="save({ changes: ($event.target as HTMLInputElement).checked })" />
-            <span>Let clients ask for changes<span class="block text-xs opacity-60">Sending requests, running collections, creating and changing requests, variables and imports. DialCatz shows you each request first, with where it goes and what secrets it carries; a client never sets a secret itself. Off: clients can only read.</span></span>
+            <span>Let clients ask for changes<span class="block text-xs opacity-60">Sending requests, running collections, creating and changing requests, variables and imports. DialCatz shows you each request first, with where it goes and what secrets it carries; a client never sets a secret itself. For what cannot be undone you type a name. Off: clients can only read.</span></span>
           </label>
         </div>
         </div>

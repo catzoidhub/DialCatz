@@ -8,13 +8,14 @@ import { setMcatzpClients, settings } from '../settings';
 import { readActions, type Scopes, type WindowReads } from './actions';
 import { ActivityLog } from './activity';
 import { type ChangeAction, changeActions, type McatzpPage, type WindowCommand } from './changes';
+import { destructiveActions, type DirectGit } from './destructive';
 
 /** Unanswered questions lapse before MCatzP stops waiting (3 and 10 minutes), so a late Allow never runs for nobody. */
 const PAIR_WAIT_MS = 150_000;
 const CHANGE_WAIT_MS = 9 * 60_000;
 
 /** What it needs from the window. */
-export interface McatzpWindow extends WindowReads {
+export interface McatzpWindow extends WindowReads, DirectGit {
   show(ask: McatzpAsk | null): void;
   settingsChanged(): void;
   /** After Allow: the page of what was asked. */
@@ -81,7 +82,7 @@ export class Mcatzp {
   }
 
   private changes(): ChangeAction[] {
-    return changeActions(this.api, this.scopes(), this.win.command, () => this.win.settingsChanged());
+    return [...changeActions(this.api, this.scopes(), this.win.command, () => this.win.settingsChanged()), ...destructiveActions(this.api, this.scopes(), this.win)];
   }
 
   private scopes(): Scopes {

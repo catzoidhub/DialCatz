@@ -1173,6 +1173,7 @@ if (primary) app.whenReady().then(() => {
     open: (page) => send('app:mcatzpOpen', page),
     refresh: () => send('app:mcatzpRefresh', null),
     command: windowCommand,
+    gitDiscard: (id, files) => repos.discard(id, files),
   });
   void mcatzp.set(settings().mcatzp.on).catch(() => undefined);
   // Updates (Catzoid #54): every state change reaches the window and relabels the menu item.
