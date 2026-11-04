@@ -1,7 +1,7 @@
 {
   "name": "dialcatz",
   "productName": "DialCatz",
-  "version": "1.0.5",
+  "version": "1.1.0",
   "license": "GPL-3.0-only",
   "private": true,
   "description": "DialCatz — an open-source API client: collections, environments, history and team sync through a self-hosted DialCatz Den.",
