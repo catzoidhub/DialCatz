@@ -1,4 +1,4 @@
-import { type ActionDef, type ConfirmAnswer, McatzpHost } from '@catzoid/mcatzp-host';
+import { type ActionDef, type BridgeEntry, type ConfirmAnswer, McatzpHost } from '@catzoid/mcatzp-host';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { app } from 'electron';
@@ -115,7 +115,9 @@ export class Mcatzp {
   quit(): void {
     if (!this.host.running) return;
     const { channel: _c, tokenFile: _t, approved: _a, ...entry } = this.host.entry();
-    setBridgeMcatzp({ ...entry, enabled: false });
+    // closed: the switch is on and the app is not running, so MCatzP says "open DialCatz", not "turn it on". Not in the
+    // protocol package on npm; host.start() writes a fresh entry without it.
+    setBridgeMcatzp({ ...entry, enabled: false, closed: true } as BridgeEntry);
     void this.host.stop().catch(() => undefined);
   }
 
