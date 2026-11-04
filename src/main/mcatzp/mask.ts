@@ -50,7 +50,8 @@ export function secretValues(workspaces: Workspace[]): string[] {
 
 const PATTERNS: [RegExp, (...g: string[]) => string][] = [
   // First: the name=value rule below would take only the word "Bearer" as the value and leave the token.
-  [/\b(bearer|basic|token|digest)\s+[A-Za-z0-9._~+/=-]{8,}/gi, (word) => `${word} ${MASK}`],
+  // After "bearer" anything is a credential; after the others, ordinary words ("basic information") are not.
+  [/\b(bearer|basic|token|digest)\s+([A-Za-z0-9._~+/=-]{8,})/gi, (word, value) => (/^bearer$/i.test(word) || /[\d._~+/=-]|[a-z].*[A-Z]|[A-Z].*[a-z]/.test(value) ? `${word} ${MASK}` : `${word} ${value}`)],
   // name=value, "name": "value", name: value — a secret-looking name in any text, a form body or a query string.
   [/((?:[\w.-]*(?:passw(?:or)?d|passphrase|pwd|secret|token|(?<![A-Za-z])key|apikey|credential|authorization|cookie|session|jwt|otp|csrf|xsrf|dsn)[\w.-]*))(["']?\s*[:=]\s*)("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,&;)}\]]+)/gi, (name, sep) => `${name}${sep}${MASK}`],
   // <password>value</password>

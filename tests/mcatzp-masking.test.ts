@@ -47,6 +47,8 @@ test('text bodies: forms, XML, tokens by their shape', () => {
   expect(maskBody('auth: Bearer abcdefgh12345678', [])).not.toContain('abcdefgh12345678');
   for (const t of ['Authorization: Bearer abcdefgh12345', 'authorization=Basic abcdefgh12345', 'x-auth-token: token abcdefgh12345', 'cookie: Bearer abcdefgh12345']) expect(maskText(t, [])).not.toContain('abcdefgh12345');
   expect(maskText('Authorization: Bearer {{token}}', [])).toContain('{{token}}');
+  expect(maskText('basic information and token authentication', [])).toBe('basic information and token authentication');
+  for (const t of ['Bearer onlylowercaseletters', 'Basic dXNlcjpwYXNz', 'Token Ab3dEfGh12']) expect(maskText(t, [])).not.toContain(t.split(' ')[1]);
   expect(maskText('const key = "unknown-9"; // key=unknown-10', [])).not.toContain('unknown-');
   expect(maskText('monkey=banana', [])).toBe('monkey=banana');
 });
