@@ -9,6 +9,7 @@ import PromptDialog from './PromptDialog.vue';
 import ConfirmDialog from './ConfirmDialog.vue';
 import GitPanel from './GitPanel.vue';
 import Icon from './Icon.vue';
+import CopyName from './CopyName.vue';
 
 /** Sidebar head: which workspace is on screen (personal or team), and its sync state for team ones. */
 const api = window.dialcatz;
@@ -76,10 +77,6 @@ function startDelete(id: string, name: string, folder: boolean, e: Event) {
   close(e);
   typed.value = '';
   deleting.value = { id, name, folder };
-}
-async function copyName() {
-  await api.copyText(deleting.value!.name);
-  notify('info', 'Name copied');
 }
 async function remove() {
   const d = deleting.value!;
@@ -297,7 +294,7 @@ const ago = (iso?: string) => {
     @cancel="deleting = null"
   >
     <div class="space-y-1.5">
-      <p class="flex flex-wrap items-center gap-1 text-sm">Type <b class="font-mono">{{ deleting.name }}</b><button class="btn btn-ghost btn-xs btn-square" title="Copy the name" aria-label="Copy the name" @click="copyName"><Icon name="copy" class="size-3.5" /></button>to confirm:</p>
+      <p class="text-sm">To confirm, type <CopyName :value="deleting.name" /></p>
       <input v-model="typed" class="input input-sm w-full font-mono" :placeholder="deleting.name" spellcheck="false" autocomplete="off" @keydown.enter="remove" />
     </div>
   </ConfirmDialog>

@@ -2,9 +2,9 @@
 import { computed, onMounted, ref } from 'vue';
 import type { UninstallPlan } from '@shared/types';
 import { words } from '../platform';
-import { notify } from '../state';
 import CatMood from './CatMood.vue';
 import Icon from './Icon.vue';
+import CopyName from './CopyName.vue';
 
 /**
  * Uninstall DialCatz (Catzoid family #55): what goes, the shared Catzoid settings and AI key only when the user says so
@@ -24,10 +24,6 @@ onMounted(async () => {
 });
 const blocked = computed(() => busy.value || typed.value.trim() !== NAME);
 
-async function copyName() {
-  await api.copyText(NAME);
-  notify('success', 'Name copied');
-}
 async function go() {
   if (blocked.value) return;
   busy.value = true;
@@ -63,7 +59,7 @@ async function go() {
         <div v-if="plan.brew" class="alert alert-info alert-soft text-sm"><CatMood mood="info" class="size-7 shrink-0 -my-0.5" /><span>Installed with Homebrew: also run <code class="selectable font-mono">{{ plan.brew }}</code> in Terminal.</span></div>
         <p v-if="plan.dev" class="text-xs text-warning">Running from a build folder: the data is removed, no app is moved to the {{ words.trash }}.</p>
         <div class="space-y-1.5">
-          <p class="flex flex-wrap items-center gap-1 text-sm">Type <b class="font-mono">{{ NAME }}</b><button class="btn btn-ghost btn-xs btn-square" title="Copy the name" aria-label="Copy the name" @click="copyName"><Icon name="copy" class="size-3.5" /></button>to confirm:</p>
+          <p class="text-sm">To confirm, type <CopyName :value="NAME" /></p>
           <input v-model="typed" class="input input-sm w-full font-mono" :placeholder="NAME" spellcheck="false" autocomplete="off" @keydown.enter="go" />
         </div>
       </template>

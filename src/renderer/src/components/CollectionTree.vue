@@ -11,6 +11,7 @@ import ImportDialog from './ImportDialog.vue';
 import RunnerDialog from './RunnerDialog.vue';
 import CopyCollectionDialog from './CopyCollectionDialog.vue';
 import Icon from './Icon.vue';
+import CopyName from './CopyName.vue';
 import { store } from '../store';
 
 /**
@@ -90,7 +91,7 @@ async function apply(fn: () => Promise<import('@shared/types').Workspace>, ok?: 
 
 const prompt = ref<{ title: string; value: string; confirm: string; done: (v: string) => void } | null>(null);
 const confirm = ref<{ title: string; text: string; done: () => void; typeName?: string; list?: string[] } | null>(null);
-// Deleting a collection or folder asks for its name typed out (a copy button saves typing it).
+// Deleting a collection or folder asks for its name typed out.
 const typed = ref('');
 watch(confirm, () => (typed.value = ''));
 const confirmBlocked = computed(() => !!confirm.value?.typeName && typed.value.trim() !== confirm.value.typeName.trim());
@@ -99,10 +100,6 @@ function confirmOk() {
   const c = confirm.value;
   confirm.value = null;
   c.done();
-}
-async function copyName() {
-  await window.dialcatz.copyText(confirm.value?.typeName ?? '');
-  notify('success', confirm.value?.list ? 'Text copied' : 'Name copied');
 }
 
 // ---------------------------------------------------------------- selecting several collections (bulk actions)
@@ -570,7 +567,7 @@ const SORTS: { id: SidebarLayout['sortBy']; label: string }[] = [
         <li v-for="n in confirm.list" :key="n" class="flex items-center gap-2"><Icon name="collection" class="size-3.5 shrink-0 opacity-60" /><span class="truncate">{{ n }}</span></li>
       </ul>
       <div v-if="confirm.typeName" class="space-y-1.5">
-        <p class="flex flex-wrap items-center gap-1 text-sm">Type <b class="font-mono">{{ confirm.typeName }}</b><button class="btn btn-ghost btn-xs btn-square" :title="confirm.list ? 'Copy the text' : 'Copy the name'" :aria-label="confirm.list ? 'Copy the text' : 'Copy the name'" @click="copyName"><Icon name="copy" class="size-3.5" /></button>to confirm:</p>
+        <p class="text-sm">To confirm, type <CopyName :value="confirm.typeName" /></p>
         <input v-model="typed" class="input input-sm w-full font-mono" :placeholder="confirm.typeName" spellcheck="false" autocomplete="off" @keydown.enter="confirmOk" />
       </div>
     </ConfirmDialog>

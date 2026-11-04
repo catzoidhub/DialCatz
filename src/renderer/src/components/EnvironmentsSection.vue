@@ -8,6 +8,7 @@ import PromptDialog from './PromptDialog.vue';
 import ConfirmDialog from './ConfirmDialog.vue';
 import CatMood from './CatMood.vue';
 import Icon from './Icon.vue';
+import CopyName from './CopyName.vue';
 import EnvList from './EnvList.vue';
 
 /**
@@ -154,13 +155,9 @@ async function named(name: string) {
     if (w) setWorkspace(w);
   }
 }
-// Deleting asks for the environment's name typed out (a copy button saves typing it).
+// Deleting asks for the environment's name typed out.
 const typed = ref('');
 watch(deleting, () => (typed.value = ''));
-async function copyName() {
-  await window.dialcatz.copyText(deleting.value?.name ?? '');
-  notify('success', 'Name copied');
-}
 async function confirmDelete() {
   if (typed.value.trim() !== deleting.value?.name.trim()) return;
   const e = deleting.value!;
@@ -195,10 +192,6 @@ function deletePicked() {
   const list = envPicked.value;
   if (list.length === 1) deleting.value = list[0];
   else if (list.length) bulkDeleting.value = list;
-}
-async function copyBulkText() {
-  await window.dialcatz.copyText(bulkText.value);
-  notify('success', 'Text copied');
 }
 async function confirmBulkDelete() {
   if (!bulkDeleting.value || typed.value.trim() !== bulkText.value) return;
@@ -508,7 +501,7 @@ async function activate() {
       @cancel="deleting = null"
     >
       <div class="space-y-1.5">
-        <p class="flex flex-wrap items-center gap-1 text-sm">Type <b class="font-mono">{{ deleting.name }}</b><button class="btn btn-ghost btn-xs btn-square" title="Copy the name" aria-label="Copy the name" @click="copyName"><Icon name="copy" class="size-3.5" /></button>to confirm:</p>
+        <p class="text-sm">To confirm, type <CopyName :value="deleting.name" /></p>
         <input v-model="typed" class="input input-sm w-full font-mono" :placeholder="deleting.name" spellcheck="false" autocomplete="off" @keydown.enter="confirmDelete" />
       </div>
     </ConfirmDialog>
@@ -526,7 +519,7 @@ async function activate() {
         <li v-for="e in bulkDeleting" :key="e.id" class="flex items-center gap-2"><Icon name="environments" class="size-3.5 shrink-0 opacity-60" /><span class="flex-1 truncate">{{ e.name }}</span><span class="text-xs opacity-50">{{ e.variables.length }} variable{{ e.variables.length === 1 ? '' : 's' }}</span></li>
       </ul>
       <div class="space-y-1.5">
-        <p class="flex flex-wrap items-center gap-1 text-sm">Type <b class="font-mono">{{ bulkText }}</b><button class="btn btn-ghost btn-xs btn-square" title="Copy the text" aria-label="Copy the text" @click="copyBulkText"><Icon name="copy" class="size-3.5" /></button>to confirm:</p>
+        <p class="text-sm">To confirm, type <CopyName :value="bulkText" /></p>
         <input v-model="typed" class="input input-sm w-full font-mono" :placeholder="bulkText" spellcheck="false" autocomplete="off" @keydown.enter="confirmBulkDelete" />
       </div>
     </ConfirmDialog>
