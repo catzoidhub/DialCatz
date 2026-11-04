@@ -40,7 +40,13 @@ const bridge = {
   /** A question from an MCP client waiting for the user (null: none left). */
   onMcatzpAsk: (cb: (ask: McatzpAsk | null) => void) => on('app:mcatzpAsk', cb),
   /** The main process asks for what only the window holds; answered with mcatzpWindowReply. */
-  onMcatzpRead: (cb: (req: { id: string; what: 'tabs' | 'response'; tab: string | null }) => void) => on('app:mcatzpRead', cb),
+  onMcatzpRead: (cb: (req: { id: string; what: 'tabs' | 'response' | 'runState'; tab: string | null }) => void) => on('app:mcatzpRead', cb),
+  /** The main process asks the window to do something only it can (send, with its scripts and history). */
+  onMcatzpCommand: (cb: (req: { id: string; what: string; args: Record<string, unknown> }) => void) => on('app:mcatzpCommand', cb),
+  /** After Allow: the page of what was asked. */
+  onMcatzpOpen: (cb: (page: { workspaceId?: string; itemId?: string; section?: 'requests' | 'environments' | 'git' | 'team' | 'settings' }) => void) => on('app:mcatzpOpen', cb),
+  /** A client's change ran: reload what is on screen. */
+  onMcatzpRefresh: (cb: () => void) => on('app:mcatzpRefresh', cb),
   /** Install MCatzP running in Settings. */
   onMcatzpInstalling: (cb: (p: McatzpInstallProgress | null) => void) => on('app:mcatzpInstalling', cb),
   /** Who has which request open in a team workspace. */

@@ -1,5 +1,5 @@
 import { computed, reactive, ref, toRaw, watch } from 'vue';
-import { newRequest, uid, type ConnectRequest, type McatzpAsk, type McatzpInstallProgress, type McatzpTab, type McatzpTabResponse, type DialCatzSettings, type Environment, type EnvVariable, type PresenceEntry, type WsEvent, type HistoryEntry, type RequestAuth, type RequestSpec, type SendResult, type ServerConnection, type TreeItem, type Workspace, type WorkspaceSummary } from '@shared/types';
+import { newRequest, uid, type ConnectRequest, type McatzpAsk, type McatzpInstallProgress, type McatzpRun, type McatzpTab, type McatzpTabResponse, type DialCatzSettings, type Environment, type EnvVariable, type PresenceEntry, type WsEvent, type HistoryEntry, type RequestAuth, type RequestSpec, type SendResult, type ServerConnection, type TreeItem, type Workspace, type WorkspaceSummary } from '@shared/types';
 import { AUTO_HEADERS, buildVars, effectiveAuth, interpolate, nameFromUrl, toWire, type Vars } from '@shared/request';
 import { store } from './store';
 import { requestContext, responseContext, runScript, type ScriptResult } from './scripts';
@@ -523,4 +523,154 @@ export function mcatzpTabResponse(id: string | null): McatzpTabResponse | null {
     scriptError: t.scripts?.pre?.error ?? t.scripts?.tests?.error ?? null,
     log: (t.ws?.log ?? []).slice(-200).map((e) => ({ dir: e.type, text: e.binary ? '(binary)' : e.data.slice(0, 20_000), at: e.at })),
   };
+}
+
+// ---------------------------------------------------------------- MCatzP: what a client asks the window to do
+
+/** The collection run a client started last. */
+export const mcatzpRun = ref<McatzpRun | null>(null);
+let stopRun = false;
+/** Tabs being sent for a client: what stops when it gives up. */
+const clientSends = new Set<string>();
+async function clientSend(tab: Tab): Promise<void> {
+  clientSends.add(tab.id);
+  try {
+    await sendTab(tab);
+  } finally {
+    clientSends.delete(tab.id);
+  }
+}
+const RUN_TOKEN = 'mcatzp-run';
+
+/** After Allow: the page of what was asked. */
+export async function mcatzpOpen(page: { workspaceId?: string; itemId?: string; section?: Section }): Promise<void> {
+  if (page.workspaceId && page.workspaceId !== workspace.value?.id) await selectWorkspace(page.workspaceId);
+  if (page.section) goSection(page.section);
+  if (page.section === 'requests' && page.itemId) {
+    const item = workspace.value?.items.find((i) => i.id === page.itemId);
+    if (item) openItem(item);
+  }
+}
+
+/** A client's change ran: the sidebar and the open tabs follow, tabs with unsaved edits stay as they are. */
+export async function mcatzpRefresh(): Promise<void> {
+  await loadWorkspaces();
+  await reloadWorkspace();
+  if (workspace.value) syncTabsWithWorkspace(workspace.value);
+}
+
+async function openForClient(workspaceId: string, itemId: string): Promise<Tab> {
+  if (workspace.value?.id !== workspaceId) await selectWorkspace(workspaceId);
+  const item = workspace.value?.items.find((i) => i.id === itemId);
+  if (!item) throw new Error('That request is gone');
+  // What the user allowed is the saved request: a tab with other edits would send something else.
+  const open = tabs.value.find((t) => t.itemId === itemId && t.workspaceId === workspaceId);
+  if (open?.dirty) throw new Error(`${item.name} has unsaved edits in DialCatz: the user saves or discards them first`);
+  openItem(item);
+  return tabs.value.find((t) => t.itemId === itemId && t.workspaceId === workspaceId)!;
+}
+
+function clientTab(id: unknown): Tab {
+  const t = tabs.value.find((x) => x.id === id);
+  if (!t) throw new Error(`No tab ${String(id)} (list_open_tabs shows them)`);
+  return t;
+}
+
+/** Every request under a collection or folder, in the tree's order, as the runner goes through them. */
+function requestsUnder(rootId: string): TreeItem[] {
+  const items = workspace.value?.items ?? [];
+  const out: TreeItem[] = [];
+  const walk = (parentId: string) => {
+    for (const i of items.filter((x) => x.parentId === parentId).sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name))) {
+      if (i.kind === 'request') out.push(i);
+      else walk(i.id);
+    }
+  };
+  walk(rootId);
+  return out;
+}
+
+async function runForClient(target: string, iterations: number, delay: number, stopOnFail: boolean): Promise<void> {
+  const list = requestsUnder(target);
+  const run = mcatzpRun.value!;
+  stopRun = false;
+  outer: for (let it = 1; it <= iterations; it++) {
+    for (const item of list) {
+      if (stopRun) break outer;
+      const { result, scripts } = await execute(plain(item.request!), item.id, RUN_TOKEN);
+      const tests = [...(scripts.pre?.tests ?? []), ...(scripts.tests?.tests ?? [])];
+      const error = result.error ?? scripts.pre?.error ?? scripts.tests?.error ?? undefined;
+      const failed = tests.filter((t) => !t.pass);
+      run.rows.push({ iteration: it, name: item.name, method: item.request!.method, url: result.sent?.url ?? item.request!.url, status: result.response?.status ?? null, timeMs: result.response?.timings.total ?? 0, passed: tests.length - failed.length, failed: failed.length, ...(error ? { error } : {}), failures: failed.map((t) => `${t.name}: ${t.error}`) });
+      if (stopOnFail && (failed.length || error)) break outer;
+      if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  run.finished = true;
+  run.stopped = stopRun;
+  const failedRows = run.rows.filter((r) => r.failed || r.error || (r.status ?? 0) >= 400).length;
+  notify(failedRows ? 'warning' : 'success', `Run of ${run.target}: ${run.rows.length} request(s), ${failedRows} with problems`);
+}
+
+/** What a client asked for, after the user allowed it. A throw goes back to the client as the failure. */
+export async function mcatzpCommand(what: string, a: Record<string, unknown>): Promise<unknown> {
+  if (what === 'send') {
+    const tab = await openForClient(String(a.workspaceId), String(a.itemId));
+    if (tab.sending) throw new Error(`${tab.name} is being sent already`);
+    await clientSend(tab);
+    return mcatzpTabResponse(tab.id);
+  }
+  if (what === 'sendNew') {
+    if (workspace.value?.id !== a.workspaceId) await selectWorkspace(String(a.workspaceId));
+    const tab = newTab(a.spec as RequestSpec, String(a.name).slice(0, 80));
+    if (!tab) throw new Error('No workspace is open');
+    await clientSend(tabs.value.find((t) => t.id === tab.id)!);
+    return mcatzpTabResponse(tab.id);
+  }
+  if (what === 'cancelSend') {
+    await api.cancel(clientTab(a.tab).id);
+    return { stopped: true };
+  }
+  // The client gave up on its call: what it was waiting for stops, never a send of the user's in another tab.
+  if (what === 'cancelClient') {
+    for (const id of clientSends) await api.cancel(id);
+    return null;
+  }
+  if (what === 'run') {
+    if (mcatzpRun.value && !mcatzpRun.value.finished) throw new Error('A run is going on already: get_run_results shows it, stop_run stops it');
+    if (workspace.value?.id !== a.workspaceId) await selectWorkspace(String(a.workspaceId));
+    const root = workspace.value?.items.find((i) => i.id === a.target);
+    if (!root) throw new Error('That collection is gone');
+    const list = requestsUnder(root.id);
+    const iterations = Number(a.iterations) || 1;
+    mcatzpRun.value = { id: uid('run_'), target: root.name, total: list.length * iterations, finished: false, stopped: false, rows: [] };
+    void runForClient(root.id, iterations, Number(a.delay) || 0, a.stopOnFail === true).catch((e: Error) => {
+      if (mcatzpRun.value) mcatzpRun.value.finished = true;
+      notify('error', e.message);
+    });
+    return { started: true, requests: mcatzpRun.value.total, note: 'Still running: get_run_results shows how far it is. Tell the user how it went.' };
+  }
+  if (what === 'stopRun') {
+    stopRun = true;
+    await api.cancel(RUN_TOKEN);
+    return { stopped: !!mcatzpRun.value && !mcatzpRun.value.finished };
+  }
+  if (what === 'wsConnect') {
+    const tab = await openForClient(String(a.workspaceId), String(a.itemId));
+    if (!isWs(tab)) throw new Error(`${tab.name} is not a WebSocket request (ws:// or wss://)`);
+    if (tab.ws?.state !== 'open') await toggleWs(tab);
+    return { tab: tab.id, state: tab.ws?.state ?? 'connecting' };
+  }
+  if (what === 'wsSend') {
+    const tab = clientTab(a.tab);
+    if (tab.ws?.state !== 'open') throw new Error(`${tab.name} is not connected (websocket_connect)`);
+    tab.ws.draft = String(a.text);
+    await sendWs(tab);
+    return { sent: true };
+  }
+  if (what === 'wsClose') {
+    await api.wsClose(clientTab(a.tab).id);
+    return { closed: true };
+  }
+  throw new Error(`Unknown request from MCatzP: ${what}`);
 }

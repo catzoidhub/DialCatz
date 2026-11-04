@@ -22,7 +22,7 @@ type Stored = Omit<DialCatzSettings, 'ai'> & { ai: Omit<DialCatzSettings['ai'], 
 const ids = (a: unknown) => (Array.isArray(a) ? [...new Set(a.filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length < 300))] : []);
 function mcatzpOf(m: Partial<McatzpSettings> | undefined): McatzpSettings {
   const clients = Array.isArray(m?.clients) ? m.clients.filter((c) => typeof c?.name === 'string' && typeof c?.approvedAt === 'string') : [];
-  return { on: m?.on === true, all: m?.all === true, workspaces: ids(m?.workspaces), values: m?.values !== false, responses: m?.responses !== false, git: m?.git === true, clients };
+  return { on: m?.on === true, all: m?.all === true, workspaces: ids(m?.workspaces), values: m?.values !== false, responses: m?.responses !== false, git: m?.git === true, changes: m?.changes !== false, clients };
 }
 
 function local(): Stored {
@@ -97,6 +97,7 @@ export function setSettings(patch: DialCatzSettingsPatch): DialCatzSettings {
     if (m.values !== undefined) s.mcatzp.values = m.values === true;
     if (m.responses !== undefined) s.mcatzp.responses = m.responses === true;
     if (m.git !== undefined) s.mcatzp.git = m.git === true;
+    if (m.changes !== undefined) s.mcatzp.changes = m.changes === true;
     if (m.workspaces !== undefined) s.mcatzp.workspaces = ids(m.workspaces);
   }
   store.setExtra(KEY, s);

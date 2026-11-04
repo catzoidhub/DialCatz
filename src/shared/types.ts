@@ -447,6 +447,8 @@ export interface McatzpSettings {
   responses: boolean;
   /** Git repositories (status, history, diffs). Off by default: they are not tied to a shared workspace. */
   git: boolean;
+  /** Clients may ask for changes and to send requests, each confirmed in a dialog. Off: they only read. */
+  changes: boolean;
   /** Approved clients, until Revoke. Set by the main process only. */
   clients: { name: string; approvedAt: string }[];
 }
@@ -461,8 +463,20 @@ export interface McatzpActivity {
   reason?: string;
 }
 
-/** `pair`: may this client connect at all? */
-export type McatzpAsk = { id: string; kind: 'pair'; client: string; version: string | null };
+/** `pair`: may this client connect at all? `change`: may it do this (built from the real parameters)? */
+export type McatzpAsk =
+  | { id: string; kind: 'pair'; client: string; version: string | null }
+  | { id: string; kind: 'change'; client: string; title: string; facts: { label: string; value: string }[]; allowSession: boolean; /** Destructive: this must be typed to allow it. */ typeName?: string };
+
+/** A collection run a client started: it runs in the window and shows there. */
+export interface McatzpRun {
+  id: string;
+  target: string;
+  total: number;
+  finished: boolean;
+  stopped: boolean;
+  rows: { iteration: number; name: string; method: string; url: string; status: number | null; timeMs: number; passed: number; failed: number; error?: string; failures: string[] }[];
+}
 
 /** The MCatzP program on this computer and what the site offers it (Settings → MCatzP). */
 export interface McatzpSetup {
@@ -1203,7 +1217,7 @@ export interface DialCatzApi {
   mcatzpRemoveFromClient(id: McatzpTarget['id']): Promise<McatzpTarget[]>;
   /** A question waiting for the user, for a window that just opened. */
   mcatzpPending(): Promise<McatzpAsk | null>;
-  mcatzpAnswer(id: string, answer: 'deny' | 'once' | 'session'): Promise<void>;
+  mcatzpAnswer(id: string, answer: 'deny' | 'once' | 'session', typed?: string): Promise<void>;
   /** The window's answer to onMcatzpRead. */
   mcatzpWindowReply(id: string, data: unknown): Promise<void>;
 }

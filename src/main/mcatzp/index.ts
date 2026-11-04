@@ -7,14 +7,21 @@ import { setBridgeMcatzp } from '../bridge';
 import { setMcatzpClients, settings } from '../settings';
 import { readActions, type Scopes, type WindowReads } from './actions';
 import { ActivityLog } from './activity';
+import { type ChangeAction, changeActions, type McatzpPage, type WindowCommand } from './changes';
 
-/** Unanswered questions lapse before MCatzP stops waiting (3 minutes), so a late Allow never runs for nobody. */
+/** Unanswered questions lapse before MCatzP stops waiting (3 and 10 minutes), so a late Allow never runs for nobody. */
 const PAIR_WAIT_MS = 150_000;
+const CHANGE_WAIT_MS = 9 * 60_000;
 
 /** What it needs from the window. */
 export interface McatzpWindow extends WindowReads {
   show(ask: McatzpAsk | null): void;
   settingsChanged(): void;
+  /** After Allow: the page of what was asked. */
+  open(page: McatzpPage): void;
+  /** A change ran: the window reloads what it shows. */
+  refresh(): void;
+  command: WindowCommand;
 }
 
 /**
@@ -44,21 +51,43 @@ export class Mcatzp {
         this.win.settingsChanged();
       },
       pair: (client) => this.ask({ id: randomUUID(), kind: 'pair', client: client.name, version: client.version ?? null }, PAIR_WAIT_MS).then((a) => a !== 'deny'),
-      // Read tools only for now: nothing asks yet (TODO #83).
-      confirm: async () => 'deny',
+      confirm: async (req) => {
+        const change = this.changes().find((c) => c.name === req.action.name);
+        if (!change) return 'deny';
+        if (change.noDialog) return 'once';
+        // If this throws, the action never runs: its error goes to the client instead of a question.
+        const { page, ...question } = await change.preview(req.args);
+        const answer = await this.ask({ id: randomUUID(), kind: 'change', client: req.client, allowSession: req.allowSession && !question.typeName, ...question }, CHANGE_WAIT_MS, req.signal);
+        // The user is right here and just said yes: take them to what is happening. Not for allowed-for-the-session calls.
+        if (answer !== 'deny' && !req.signal.aborted && page) this.win.open(page);
+        return answer;
+      },
       log: (e) => this.activity.add(e),
     });
     setBridgeMcatzp(this.host.entry());
   }
 
   private actions(): ActionDef[] {
-    return readActions(this.api, this.scopes(), this.win);
+    // The window follows what a client changed, as if it was done there.
+    const changes = this.changes().map((c) => ({
+      ...c,
+      run: async (args: Record<string, unknown>, ctx: Parameters<ChangeAction['run']>[1]) => {
+        const out = await c.run(args, ctx);
+        this.win.refresh();
+        return out;
+      },
+    }));
+    return [...readActions(this.api, this.scopes(), this.win), ...changes];
+  }
+
+  private changes(): ChangeAction[] {
+    return changeActions(this.api, this.scopes(), this.win.command, () => this.win.settingsChanged());
   }
 
   private scopes(): Scopes {
     const s = settings().mcatzp;
     const shared = new Set(s.workspaces);
-    return { workspace: (id) => s.all || shared.has(id), values: s.values, responses: s.responses, git: s.git };
+    return { workspace: (id) => s.all || shared.has(id), values: s.values, responses: s.responses, git: s.git, changes: s.changes };
   }
 
   /** The switch: opens or closes the channel and tells bridge.json. */
@@ -120,9 +149,13 @@ export class Mcatzp {
   }
 
   /** The user's answer in the dialog (or the wait running out); then the next question, if any. */
-  answer(id: string, answer: ConfirmAnswer): void {
+  answer(id: string, answer: ConfirmAnswer, typed?: string): void {
     const at = this.asks.findIndex((a) => a.ask.id === id);
     if (at < 0) return;
+    // The dialog checks this too; here it is what counts.
+    const asked = this.asks[at].ask;
+    const need = asked.kind === 'change' ? asked.typeName : undefined;
+    if (need && answer !== 'deny' && typed?.trim() !== need) throw new Error(`Type ${need} to confirm`);
     const [a] = this.asks.splice(at, 1);
     clearTimeout(a.timer);
     a.done(answer);

@@ -170,7 +170,7 @@ const groups = computed(() => {
         <input type="checkbox" class="toggle toggle-primary toggle-sm mt-0.5" :checked="on" @change="save({ on: ($event.target as HTMLInputElement).checked })" />
         <span>
           Let AI assistants use DialCatz through MCatzP
-          <span class="block text-xs opacity-60">An MCP client you approve can read the workspaces you share, with secret values masked. It cannot send requests or change anything yet. It reaches DialCatz through a channel only your account on {{ thisComputer }} can open. What it reads goes to that assistant's model provider.</span>
+          <span class="block text-xs opacity-60">An MCP client you approve can read the workspaces you share, with secret values masked, and ask to send requests and make changes, which DialCatz confirms with you first. It reaches DialCatz through a channel only your account on {{ thisComputer }} can open. What it reads goes to that assistant's model provider.</span>
         </span>
       </label>
       <!-- Clients start this program, so it is what a client's setup points at. -->
@@ -276,6 +276,10 @@ const groups = computed(() => {
           <label class="flex cursor-pointer items-start gap-2 text-sm">
             <input type="checkbox" class="checkbox checkbox-sm mt-0.5" :checked="s.git" @change="save({ git: ($event.target as HTMLInputElement).checked })" />
             <span>Git repositories<span class="block text-xs opacity-60">Every repository in the Git section, whichever workspaces you share: status, history and diffs, with secret-looking values masked.</span></span>
+          </label>
+          <label class="flex cursor-pointer items-start gap-2 text-sm">
+            <input type="checkbox" class="checkbox checkbox-sm mt-0.5" :checked="s.changes" @change="save({ changes: ($event.target as HTMLInputElement).checked })" />
+            <span>Let clients ask for changes<span class="block text-xs opacity-60">Sending requests, running collections, creating and changing requests, variables and imports. DialCatz shows you each request first, with where it goes and what secrets it carries; a client never sets a secret itself. Off: clients can only read.</span></span>
           </label>
         </div>
         </div>

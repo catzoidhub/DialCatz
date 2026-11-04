@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { API_METHODS, uid, type ConnectRequest, type DevCatzSite, type DoCatzProject, type McatzpTab, type McatzpTabResponse, type Workspace, type PostmanChoice, type DialCatzApi, type HistoryEntry, type TreeItem, type WireRequest } from '@shared/types';
+import { API_METHODS, uid, type ConnectRequest, type DevCatzSite, type DoCatzProject, type McatzpRun, type McatzpTab, type McatzpTabResponse, type Workspace, type PostmanChoice, type DialCatzApi, type HistoryEntry, type TreeItem, type WireRequest } from '@shared/types';
 import { dataDir, store } from './store';
 import { applySettings, setAiKey, setSettings, settings } from './settings';
 import * as http from './http';
@@ -174,7 +174,7 @@ app.on('window-all-closed', () => {
 let mcatzp: Mcatzp;
 const windowReads = new Map<string, (data: unknown) => void>();
 /** What only the window holds (open tabs, responses). No window, or none answering: there is nothing to read. */
-function askWindow<T>(what: 'tabs' | 'response', tab: string | null): Promise<T | null> {
+function askWindow<T>(what: 'tabs' | 'response' | 'runState', tab: string | null): Promise<T | null> {
   if (!win || win.isDestroyed() || !windowListens) return Promise.resolve(null);
   const id = randomUUID();
   return new Promise((done) => {
@@ -187,6 +187,28 @@ function askWindow<T>(what: 'tabs' | 'response', tab: string | null): Promise<T 
       done((data ?? null) as T | null);
     });
     send('app:mcatzpRead', { id, what, tab });
+  });
+}
+/** What only the window can do (send, with its scripts and history). It opens when closed; a failure comes back as one. */
+async function windowCommand(what: string, args: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<unknown> {
+  createWindow();
+  for (let i = 0; i < 100 && !windowListens; i++) await new Promise((r) => setTimeout(r, 100));
+  if (!windowListens) throw new Error('The DialCatz window did not open');
+  const id = randomUUID();
+  return new Promise((done, fail) => {
+    const finish = (run: () => void) => {
+      clearTimeout(timer);
+      windowReads.delete(id);
+      run();
+    };
+    const timer = setTimeout(() => finish(() => fail(new Error('The DialCatz window did not answer in time'))), timeoutMs);
+    // The client gave up: its send stops. A dropped connection does not stop work already allowed.
+    signal?.addEventListener('abort', () => signal.reason === 'cancelled' && send('app:mcatzpCommand', { id: randomUUID(), what: 'cancelClient', args: {} }), { once: true });
+    windowReads.set(id, (data) => {
+      const r = data as { ok?: unknown; error?: string } | null;
+      finish(() => (r?.error ? fail(new Error(r.error)) : done(r?.ok ?? null)));
+    });
+    send('app:mcatzpCommand', { id, what, args });
   });
 }
 let mcatzpInstalling: AbortController | null = null;
@@ -808,7 +830,7 @@ function api(): DialCatzApi {
       return mcatzpSetup.targets();
     },
     mcatzpPending: async () => mcatzp.pending(),
-    mcatzpAnswer: async (id, answer) => mcatzp.answer(String(id), answer === 'once' || answer === 'session' ? answer : 'deny'),
+    mcatzpAnswer: async (id, answer, typed) => mcatzp.answer(String(id), answer === 'once' || answer === 'session' ? answer : 'deny', typeof typed === 'string' ? typed : undefined),
     mcatzpWindowReply: async (id, data) => {
       windowReads.get(String(id))?.(data);
       windowReads.delete(String(id));
@@ -1147,6 +1169,10 @@ if (primary) app.whenReady().then(() => {
     settingsChanged: () => send('app:settings', settings()),
     tabs: async () => (await askWindow<McatzpTab[]>('tabs', null)) ?? [],
     tabResponse: (tab) => askWindow<McatzpTabResponse>('response', tab),
+    runState: () => askWindow<McatzpRun>('runState', null),
+    open: (page) => send('app:mcatzpOpen', page),
+    refresh: () => send('app:mcatzpRefresh', null),
+    command: windowCommand,
   });
   void mcatzp.set(settings().mcatzp.on).catch(() => undefined);
   // Updates (Catzoid #54): every state change reaches the window and relabels the menu item.

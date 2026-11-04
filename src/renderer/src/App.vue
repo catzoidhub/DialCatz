@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { activeTab, activeTabId, mcatzpAsk, mcatzpInstalling, mcatzpTabResponse, mcatzpTabs, plain, notify, selectWorkspace, aiOn, askOpen, connectRequest as connect, goSection, importRequest, loadHistory, onWsEvent, presence, loadSettings, loadWorkspaces, reloadWorkspace, restoreTabs, section, sendTab, settings, settingsTab, syncTabsWithWorkspace, updateState, updateOpen, reportOpen, uninstallOpen, tabs, toast, workspace, type Section } from './state';
+import { activeTab, activeTabId, mcatzpAsk, mcatzpCommand, mcatzpInstalling, mcatzpOpen, mcatzpRefresh, mcatzpRun, mcatzpTabResponse, mcatzpTabs, plain, notify, selectWorkspace, aiOn, askOpen, connectRequest as connect, goSection, importRequest, loadHistory, onWsEvent, presence, loadSettings, loadWorkspaces, reloadWorkspace, restoreTabs, section, sendTab, settings, settingsTab, syncTabsWithWorkspace, updateState, updateOpen, reportOpen, uninstallOpen, tabs, toast, workspace, type Section } from './state';
 import { backIndex, backList, canBack, canForward, forwardList, goBack, goForward, goTo, navApply, navPrune, navVisit, type NavEntry } from './nav';
 import PopMenu from './components/PopMenu.vue';
 import UpdateDialog from './components/UpdateDialog.vue';
@@ -227,7 +227,10 @@ onMounted(async () => {
   // MCatzP: a client's question, Install running in Settings, and what only this window holds.
   offs.push(api.onMcatzpAsk((a) => (mcatzpAsk.value = a)));
   offs.push(api.onMcatzpInstalling((p) => (mcatzpInstalling.value = p)));
-  offs.push(api.onMcatzpRead((r) => void api.mcatzpWindowReply(r.id, plain(r.what === 'tabs' ? mcatzpTabs() : mcatzpTabResponse(r.tab)))));
+  offs.push(api.onMcatzpRead((r) => void api.mcatzpWindowReply(r.id, plain(r.what === 'tabs' ? mcatzpTabs() : r.what === 'runState' ? mcatzpRun.value : mcatzpTabResponse(r.tab)))));
+  offs.push(api.onMcatzpCommand((r) => void mcatzpCommand(r.what, r.args).then((ok) => api.mcatzpWindowReply(r.id, { ok: plain(ok ?? null) }), (e: Error) => api.mcatzpWindowReply(r.id, { error: e.message }))));
+  offs.push(api.onMcatzpOpen((page) => void mcatzpOpen(page)));
+  offs.push(api.onMcatzpRefresh(() => void mcatzpRefresh()));
   mcatzpAsk.value = await api.mcatzpPending();
   // "Open in DialCatz" from DoCatz (an API container's page): the import on that project, that service as baseUrl.
   offs.push(api.onDoCatz(({ project, service }) => (importRequest.value = { tab: 'docatz', project, service })));
