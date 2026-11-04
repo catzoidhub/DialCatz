@@ -2,9 +2,8 @@ import type { DialCatzApi } from '@shared/types';
 
 /**
  * Every API method and where it stands for MCatzP (user, 2026-10-28: every action, no silent gaps). A new method fails
- * the typecheck until it is placed here. `tool:` names the tools; `later:` the tier it is waiting for; `ask the user:`
- * an open question; `not a tool` is the window's own business; `never:` is kept from clients on purpose. tests/ hold it
- * to the registry. Tabs fed from the window's state have no method here: list_open_tabs and get_response read those.
+ * the typecheck until it is placed here. `tool:` names the tools; `not a tool` is the window's own business; `never:`
+ * is kept from clients on purpose. tests/ hold it to the registry. Tabs fed from the window's state have no method here: list_open_tabs and get_response read those.
  */
 export const MCATZP_COVERAGE: Record<keyof DialCatzApi, string> = {
   appInfo: 'tool: get_app_info',
@@ -16,8 +15,8 @@ export const MCATZP_COVERAGE: Record<keyof DialCatzApi, string> = {
   createWorkspace: "tool: create_workspace",
   renameWorkspace: "tool: rename_workspace",
   deleteWorkspace: 'tool: delete_workspace',
-  openFolderWorkspace: 'ask the user: needs a folder path instead of the picker',
-  useFolder: 'ask the user: needs a folder path instead of the picker',
+  openFolderWorkspace: 'tool: open_folder_workspace',
+  useFolder: 'tool: move_workspace_to_folder',
   stopUsingFolder: "tool: stop_using_folder",
   revealFolder: 'not a tool: opens the file manager',
   folderGitStatus: 'tool: folder_git_status',
@@ -29,7 +28,7 @@ export const MCATZP_COVERAGE: Record<keyof DialCatzApi, string> = {
   folderGitAbortMerge: "tool: folder_git_abort_merge",
   gitState: 'tool: list_git_repos',
   gitWatch: 'not a tool: the Git section being on screen',
-  gitRepoAdd: 'ask the user: needs a folder path instead of the picker',
+  gitRepoAdd: 'tool: git_add_repo',
   gitRepoRemove: 'tool: git_repo_remove',
   gitRepoLog: 'tool: git_sync_log',
   gitRevealRepo: 'not a tool: opens the file manager',
@@ -100,7 +99,7 @@ export const MCATZP_COVERAGE: Record<keyof DialCatzApi, string> = {
   saveGlobals: 'tool: set_globals, remove_variables',
   saveLayout: 'tool: set_favorite, set_group, rename_group, delete_group',
   importText: "tool: import_text",
-  importFile: 'ask the user: importText covers text; a file means a path',
+  importFile: 'tool: import_file',
   copyCollection: "tool: copy_collection",
   devcatzSites: 'tool: list_devcatz_sites',
   devcatzWorkspace: "tool: open_site_workspace",
@@ -109,12 +108,12 @@ export const MCATZP_COVERAGE: Record<keyof DialCatzApi, string> = {
   docatzProjects: 'tool: list_docatz_projects',
   docatzImport: "tool: import_from_docatz",
   docatzOpen: "tool: open_in_docatz",
-  postmanReadExport: 'ask the user: a file means a path',
-  migratePostman: 'ask the user: goes with postmanReadExport',
+  postmanReadExport: 'tool: read_postman_export',
+  migratePostman: 'tool: import_choice',
   postmanWorkspaces: 'never: takes an API key',
   postmanContents: 'never: takes an API key',
   migratePostmanApi: 'never: takes an API key',
-  exportCollection: 'ask the user: saves through a dialog; could return the text instead',
+  exportCollection: 'tool: export_collection',
   send: "tool: send_request, send_new_request, run_collection",
   aiModels: "not a tool: the app's own AI",
   aiTest: "not a tool: the app's own AI",
@@ -146,9 +145,9 @@ export const MCATZP_COVERAGE: Record<keyof DialCatzApi, string> = {
   syncWorkspace: "tool: sync_workspace",
   resolveConflict: "tool: resolve_conflict",
   openUrl: 'not a tool: the app opens links for the user',
-  exportEnvironment: 'ask the user: saves through a dialog, and values must stay out',
-  exportWorkspace: 'ask the user: saves through a dialog, and values must stay out',
-  importEnvironments: 'ask the user: picks files',
+  exportEnvironment: 'tool: export_environment',
+  exportWorkspace: 'tool: export_workspace',
+  importEnvironments: 'tool: import_environment_files',
   dbcatzInfo: 'tool: list_dbcatz_connections',
   dbcatzOpen: "tool: open_in_dbcatz",
   saveDbTarget: "tool: set_dbcatz_target",

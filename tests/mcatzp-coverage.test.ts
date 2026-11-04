@@ -12,8 +12,8 @@ test('every tool the coverage file names exists', () => {
   }
 });
 
-test('every place is one the coverage file knows', () => {
-  expect(Object.entries(MCATZP_COVERAGE).filter(([, place]) => !/^(tool: |later: (change|destructive)|not a tool|never: |ask the user)/.test(place))).toEqual([]);
+test('nothing is left for later', () => {
+  expect(Object.entries(MCATZP_COVERAGE).filter(([, place]) => !/^(tool: |not a tool|never: )/.test(place))).toEqual([]);
 });
 
 test('tool names are unique and every input refuses unknown fields', () => {
@@ -29,4 +29,11 @@ test('a destructive tool never offers "allow for this session"', () => {
 // "Allow for this session" holds per tool, whatever the call: these carry secrets, or run with them.
 test('sending a request and writing a script always ask', () => {
   for (const name of ['send_request', 'send_new_request', 'run_collection', 'websocket_connect', 'websocket_send', 'set_scripts']) expect(`${name}: ${!!allActions().find((a) => a.name === name)?.allowSession}`).toBe(`${name}: false`);
+});
+
+test('a client never names a path to read or write, and never exports a secret', () => {
+  for (const name of ['import_file', 'read_postman_export', 'import_environment_files', 'export_collection', 'export_environment', 'export_workspace', 'open_folder_workspace', 'move_workspace_to_folder', 'git_add_repo']) {
+    const props = Object.keys((allActions().find((a) => a.name === name)?.input as { properties: object }).properties);
+    expect(`${name}: ${props.filter((p) => /path|file|folder|dir|secrets/.test(p))}`).toBe(`${name}: `);
+  }
 });

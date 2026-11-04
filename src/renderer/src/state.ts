@@ -614,6 +614,8 @@ async function runForClient(target: string, iterations: number, delay: number, s
 
 /** What a client asked for, after the user allowed it. A throw goes back to the client as the failure. */
 export async function mcatzpCommand(what: string, a: Record<string, unknown>): Promise<unknown> {
+  // A file dialog is about to open: the window is up, that is all.
+  if (what === 'ping') return null;
   if (what === 'send') {
     const tab = await openForClient(String(a.workspaceId), String(a.itemId));
     if (tab.sending) throw new Error(`${tab.name} is being sent already`);

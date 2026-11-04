@@ -1,6 +1,6 @@
 import type { ActionDef, CallResult } from '@catzoid/mcatzp-host';
 import { buildVars, effectiveAuth, interpolate } from '@shared/request';
-import { emptyLayout, newRequest, uid, type DialCatzApi, type DialCatzSettingsPatch, type EnvVariable, type GitPull, type GitRepoEntry, type GitSyncAction, type KeyValue, type McatzpAsk, type RequestAuth, type RequestSpec, type TreeItem, type Workspace, type WorkspaceSummary } from '@shared/types';
+import { emptyLayout, newRequest, uid, type DialCatzApi, type DialCatzSettingsPatch, type EnvVariable, type GitPull, type GitRepoEntry, type GitSyncAction, type KeyValue, type McatzpAsk, type PostmanChoice, type RequestAuth, type RequestSpec, type TreeItem, type Workspace, type WorkspaceSummary } from '@shared/types';
 import { isSecretVar, isVariable, pick, placeOf, reply, responseOut, type Scopes, underCollection } from './actions';
 import { MASK, maskText, maskUrl, SECRET_NAME, secretValues } from './mask';
 
@@ -618,5 +618,83 @@ export function changeActions(api: DialCatzApi, scopes: Scopes, command: WindowC
     }),
   ];
 
-  return [...requests, ...imports, ...environments, ...sending, ...team, ...app, ...(scopes.git ? git : [])];
+  /** Files and folders are the user's to pick, in DialCatz's own dialog: a client never names a path here. Anything that opens a dialog needs the window up. */
+  const windowUp = () => command('ping', {}, 15_000);
+  const choiceOut = (c: PostmanChoice) => ({ token: c.token, groups: c.groups, globals: c.globals, skipped: c.skipped, next: 'import_choice brings what you pick from these, with this token.' });
+  const FORMAT = { type: 'string', enum: ['dialcatz', 'postman'] };
+  const picks: ChangeAction[] = [
+    asked('open_folder_workspace', 'Open a folder as a workspace', 'The user picks a folder in a dialog; it opens as a workspace (a new one when it is empty).', {}, [], async () => q('Pick a folder to open as a workspace?', [{ label: 'Folder', value: 'You pick it next' }], null), async () => {
+      await windowUp();
+      const w = await api.openFolderWorkspace();
+      return done(w ? { id: w.id, name: w.name, shared: scopes.workspace(w.id) } : { cancelled: true });
+    }),
+    asked('move_workspace_to_folder', 'Keep a workspace in a folder', 'The user picks a folder in a dialog; the collections and environment names are written there as files. Values stay on this computer.', { workspace: WORKSPACE }, ['workspace'], async (a) => {
+      const w = await writeOf(a.workspace);
+      return q(`Keep ${w.name} in a folder?`, [{ label: 'Folder', value: 'You pick it next' }, { label: 'Values', value: 'They stay on this computer, not in the files' }], { workspaceId: w.id });
+    }, async (a) => {
+      await windowUp();
+      const w = await api.useFolder((await writeOf(a.workspace)).id);
+      return done(w ? { id: w.id, folder: true } : { cancelled: true });
+    }),
+    asked('git_add_repo', 'Add a repository', 'The user picks a folder in a dialog; it joins the Git section.', {}, [], async () => q('Pick a folder to add to Git?', [{ label: 'Folder', value: 'You pick it next' }], { section: 'git' }), async () => {
+      await windowUp();
+      const id = await api.gitRepoAdd();
+      return done(id ? { id } : { cancelled: true });
+    }),
+    asked('import_file', 'Import a file', 'The user picks the files in a dialog. One collection goes straight in. An export zip or several files answer with what is in them: import_choice brings what you pick.', { workspace: WORKSPACE }, ['workspace'], async (a) => {
+      const w = await writeOf(a.workspace);
+      return q(`Pick a file to import into ${w.name}?`, [{ label: 'File', value: 'You pick it next' }], { workspaceId: w.id, section: 'requests' });
+    }, async (a) => {
+      await windowUp();
+      const r = await api.importFile((await writeOf(a.workspace)).id);
+      if (!r) return done({ cancelled: true });
+      return done(r.kind === 'collection' ? { collection: r.collectionId, requests: r.count } : choiceOut(r.choice));
+    }),
+    asked('read_postman_export', 'Read a Postman export', 'The user picks its zip, JSON files or a folder in a dialog. Answers with what is in it: import_choice brings what you pick.', { how: { type: 'string', enum: ['files', 'folder'] } }, ['how'], async (a) => q('Pick a Postman export to read?', [{ label: 'Picks', value: a.how === 'folder' ? 'A folder, next' : 'Files, next' }], null), async (a) => {
+      await windowUp();
+      const r = await api.postmanReadExport(a.how as 'files' | 'folder');
+      return done(r ? choiceOut(r) : { cancelled: true });
+    }),
+    asked('import_choice', 'Import from an export', 'Brings the picked collections, environments and globals of the export read last into a workspace.', { workspace: WORKSPACE, token: S('The token from import_file or read_postman_export.'), collections: { type: 'array', maxItems: 2000, items: S('A collection id from its answer.') }, environments: { type: 'array', maxItems: 2000, items: S('An environment id from its answer.') }, globals: { type: 'boolean' } }, ['workspace', 'token'], async (a) => {
+      const w = await writeOf(a.workspace);
+      return q(`Import into ${w.name}?`, [...fact('Collections', ((a.collections ?? []) as string[]).length || null), ...fact('Environments', ((a.environments ?? []) as string[]).length || null), ...fact('Globals', a.globals ? 'Yes' : null)], { workspaceId: w.id, section: 'requests' });
+    }, async (a) => {
+      const r = await api.migratePostman((await writeOf(a.workspace)).id, String(a.token), { collections: (a.collections ?? []) as string[], environments: (a.environments ?? []) as string[], globals: a.globals === true });
+      return done({ summary: { collections: r.summary.collections.length, environments: r.summary.environments.length, skipped: r.summary.skipped.length } });
+    }),
+    asked('import_environment_files', 'Import environment files', 'The user picks Postman or DialCatz environment files, or a Postman export zip, in a dialog.', { workspace: WORKSPACE }, ['workspace'], async (a) => {
+      const w = await writeOf(a.workspace);
+      return q(`Pick environment files for ${w.name}?`, [{ label: 'Files', value: 'You pick them next' }], { workspaceId: w.id, section: 'environments' });
+    }, async (a) => {
+      await windowUp();
+      const r = await api.importEnvironments((await writeOf(a.workspace)).id);
+      return done(r ? { names: r.names, skipped: r.skipped.length } : { cancelled: true });
+    }),
+    asked('export_collection', 'Export a collection', 'Saves a collection as a DialCatz or Postman file; the user picks where in a dialog.', { workspace: WORKSPACE, collection: COLLECTION, format: FORMAT }, ['workspace', 'collection'], async (a) => {
+      const w = await workspaceOf(a.workspace);
+      return q(`Export ${collectionOf(w, a.collection).name}?`, [{ label: 'Where', value: 'You pick it next' }, ...fact('Format', a.format)], null);
+    }, async (a) => {
+      await windowUp();
+      const w = await workspaceOf(a.workspace);
+      return done({ saved: await api.exportCollection(w.id, collectionOf(w, a.collection).id, a.format as 'dialcatz' | 'postman' | undefined) });
+    }),
+    asked('export_environment', 'Export an environment', 'Saves an environment as a file; the user picks where in a dialog. Secret values never go through this: exporting those stays in the app.', { workspace: WORKSPACE, environment: ENVIRONMENT, values: { type: 'boolean', description: 'Non-secret values too; names only otherwise.' }, format: FORMAT }, ['workspace', 'environment'], async (a) => {
+      const w = await workspaceOf(a.workspace);
+      return q(`Export ${envOfRef(w, a.environment).name}?`, [{ label: 'Where', value: 'You pick it next' }, { label: 'Holds', value: a.values ? 'Names and values, without secret ones' : 'Names only' }], null);
+    }, async (a) => {
+      await windowUp();
+      const w = await workspaceOf(a.workspace);
+      return done({ saved: await api.exportEnvironment(w.id, envOfRef(w, a.environment).id, { values: a.values === true, secrets: false, format: (a.format ?? 'dialcatz') as 'dialcatz' | 'postman' }) });
+    }),
+    asked('export_workspace', 'Export a workspace', 'Every collection, environment and the globals in one zip; the user picks where in a dialog. Secret values never go through this: exporting those stays in the app.', { workspace: WORKSPACE, values: { type: 'boolean', description: 'Non-secret values too; names only otherwise.' }, format: FORMAT }, ['workspace'], async (a) => {
+      const w = await workspaceOf(a.workspace);
+      return q(`Export all of ${w.name}?`, [{ label: 'Where', value: 'You pick it next' }, { label: 'Holds', value: a.values ? 'Names and values, without secret ones' : 'Names only' }], null);
+    }, async (a) => {
+      await windowUp();
+      const r = await api.exportWorkspace((await workspaceOf(a.workspace)).id, { values: a.values === true, secrets: false, format: (a.format ?? 'dialcatz') as 'dialcatz' | 'postman' });
+      return done(r === false ? { cancelled: true } : r);
+    }),
+  ];
+
+  return [...requests, ...imports, ...picks, ...environments, ...sending, ...team, ...app, ...(scopes.git ? git : [])];
 }
