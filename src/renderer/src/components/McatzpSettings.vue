@@ -185,7 +185,7 @@ const groups = computed(() => {
           <p class="text-xs opacity-60">One connection, every cat.</p>
         </div>
       </div>
-      <label class="flex cursor-pointer items-start gap-3">
+      <label class="mt-2 flex cursor-pointer items-start gap-3">
         <input type="checkbox" class="toggle toggle-primary toggle-sm mt-0.5" :checked="on" @change="save({ on: ($event.target as HTMLInputElement).checked })" />
         <span>
           Let AI assistants use DialCatz through MCatzP
@@ -216,7 +216,7 @@ const groups = computed(() => {
         </div>
         <button v-if="installing" class="btn btn-sm" :disabled="installing.phase === 'install'" @click="cancelInstall">Cancel</button>
         <button v-else-if="setup && !setup.path" class="btn btn-primary btn-sm" :disabled="!setup.checked || setup.noBuild" @click="installMcatzp">Install MCatzP</button>
-        <button v-else-if="outdated" class="btn btn-sm" @click="installMcatzp">Update to {{ setup?.latest }}</button>
+        <button v-else-if="outdated" class="btn btn-sm mcatzp-update" @click="installMcatzp">Update to {{ setup?.latest }}</button>
       </div>
 
       <template v-if="on">

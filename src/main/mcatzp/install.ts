@@ -30,3 +30,9 @@ export const targets = async (): Promise<McatzpTarget[]> => list(await options()
 export const addToClient = async (id: McatzpTargetId): Promise<void> => add(await options(), id);
 export const removeFromClient = async (id: McatzpTargetId): Promise<void> => remove(await options(), id);
 export const approvals = async (): Promise<McatzpApproval[]> => approvalsAcrossApps(await options());
+
+/** The version to update to: only a copy these apps installed, a Homebrew or npm copy updates its own way. Null when up to date. */
+export async function availableUpdate(): Promise<string | null> {
+  const { source, version, latest } = await setupState();
+  return source === 'catzoid' && version && latest && version.localeCompare(latest, undefined, { numeric: true }) < 0 ? latest : null;
+}

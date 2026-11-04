@@ -47,6 +47,8 @@ const bridge = {
   onMcatzpOpen: (cb: (page: { workspaceId?: string; itemId?: string; section?: 'requests' | 'environments' | 'git' | 'team' | 'settings' }) => void) => on('app:mcatzpOpen', cb),
   /** A client's change ran: reload what is on screen. */
   onMcatzpRefresh: (cb: () => void) => on('app:mcatzpRefresh', cb),
+  /** A new MCatzP version on offer, or none. */
+  onMcatzpUpdate: (cb: (version: string | null) => void) => on('app:mcatzpUpdate', cb),
   /** Install MCatzP running in Settings. */
   onMcatzpInstalling: (cb: (p: McatzpInstallProgress | null) => void) => on('app:mcatzpInstalling', cb),
   /** Who has which request open in a team workspace. */

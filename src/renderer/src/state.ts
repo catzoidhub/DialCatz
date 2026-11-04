@@ -105,6 +105,8 @@ export const settingsTab = ref<'general' | 'ai' | 'mcatzp' | 'updates' | 'about'
 /** A question from an MCP client waiting for the user, and Install MCatzP running in Settings. */
 export const mcatzpAsk = ref<McatzpAsk | null>(null);
 export const mcatzpInstalling = ref<McatzpInstallProgress | null>(null);
+/** The MCatzP version to update to, for the badges in Settings. */
+export const mcatzpUpdate = ref<string | null>(null);
 /** The update check / download (Catzoid #54) and whether its dialog is open. */
 export const updateState = ref<import('@shared/types').UpdateState>({ kind: 'idle' });
 export const updateOpen = ref(false);

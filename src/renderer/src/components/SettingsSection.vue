@@ -5,7 +5,7 @@ import McatzpSettings from './McatzpSettings.vue';
 import { computed, onMounted, ref } from 'vue';
 import { AI_FEATURES, AI_PROVIDERS, aiProvider, type AiFeature, type AiProvider, type DialCatzSettingsPatch, type Theme } from '@shared/types';
 import { AUTO_HEADERS } from '@shared/request';
-import { attempt, notify, settings, settingsTab, updateOpen, updateState } from '../state';
+import { attempt, mcatzpUpdate, notify, settings, settingsTab, updateOpen, updateState } from '../state';
 import type { ReportPrefs, UpdatePrefs } from '@shared/types';
 import { words } from '../platform';
 import PageHeader from './PageHeader.vue';
@@ -109,7 +109,7 @@ const THEMES: { id: Theme; label: string }[] = [
     <PageHeader title="Settings" icon="" :closable="false" tint="settings">
       <template #beside>
         <div role="tablist" class="seg no-drag ml-3">
-          <button v-for="t in TABS" :key="t.id" role="tab" class="seg-item normal-case" :class="{ 'is-active': settingsTab === t.id }" :aria-selected="settingsTab === t.id" @click="settingsTab = t.id">{{ t.label }}</button>
+          <button v-for="t in TABS" :key="t.id" role="tab" class="seg-item normal-case" :class="{ 'is-active': settingsTab === t.id }" :aria-selected="settingsTab === t.id" @click="settingsTab = t.id">{{ t.label }}<span v-if="t.id === 'mcatzp' && mcatzpUpdate" class="mcatzp-pill" :title="`MCatzP ${mcatzpUpdate} is available`">Update</span></button>
         </div>
       </template>
     </PageHeader>

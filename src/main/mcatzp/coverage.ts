@@ -173,6 +173,7 @@ export const MCATZP_COVERAGE: Record<keyof DialCatzApi, string> = {
   mcatzpClearActivity: 'never: Settings → MCatzP',
   mcatzpRevoke: 'never: a client does not approve itself',
   mcatzpSetup: 'never: a client does not install itself',
+  mcatzpUpdate: 'never: a client does not install itself',
   mcatzpInstall: 'never: a client does not install itself',
   mcatzpInstallCancel: 'never: a client does not install itself',
   mcatzpApprovals: 'never: Settings → MCatzP',

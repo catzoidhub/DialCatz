@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { activeTab, activeTabId, mcatzpAsk, mcatzpCommand, mcatzpInstalling, mcatzpOpen, mcatzpRefresh, mcatzpRun, mcatzpTabResponse, mcatzpTabs, plain, notify, selectWorkspace, aiOn, askOpen, connectRequest as connect, goSection, importRequest, loadHistory, onWsEvent, presence, loadSettings, loadWorkspaces, reloadWorkspace, restoreTabs, section, sendTab, settings, settingsTab, syncTabsWithWorkspace, updateState, updateOpen, reportOpen, uninstallOpen, tabs, toast, workspace, type Section } from './state';
+import { activeTab, activeTabId, mcatzpAsk, mcatzpUpdate, mcatzpCommand, mcatzpInstalling, mcatzpOpen, mcatzpRefresh, mcatzpRun, mcatzpTabResponse, mcatzpTabs, plain, notify, selectWorkspace, aiOn, askOpen, connectRequest as connect, goSection, importRequest, loadHistory, onWsEvent, presence, loadSettings, loadWorkspaces, reloadWorkspace, restoreTabs, section, sendTab, settings, settingsTab, syncTabsWithWorkspace, updateState, updateOpen, reportOpen, uninstallOpen, tabs, toast, workspace, type Section } from './state';
 import { backIndex, backList, canBack, canForward, forwardList, goBack, goForward, goTo, navApply, navPrune, navVisit, type NavEntry } from './nav';
 import PopMenu from './components/PopMenu.vue';
 import UpdateDialog from './components/UpdateDialog.vue';
@@ -227,6 +227,8 @@ onMounted(async () => {
   // MCatzP: a client's question, Install running in Settings, and what only this window holds.
   offs.push(api.onMcatzpAsk((a) => (mcatzpAsk.value = a)));
   offs.push(api.onMcatzpInstalling((p) => (mcatzpInstalling.value = p)));
+  offs.push(api.onMcatzpUpdate((v) => (mcatzpUpdate.value = v)));
+  mcatzpUpdate.value = await api.mcatzpUpdate();
   offs.push(api.onMcatzpRead((r) => void api.mcatzpWindowReply(r.id, plain(r.what === 'tabs' ? mcatzpTabs() : r.what === 'runState' ? mcatzpRun.value : mcatzpTabResponse(r.tab)))));
   offs.push(api.onMcatzpCommand((r) => void mcatzpCommand(r.what, r.args).then((ok) => api.mcatzpWindowReply(r.id, { ok: plain(ok ?? null) }), (e: Error) => api.mcatzpWindowReply(r.id, { error: e.message }))));
   offs.push(api.onMcatzpOpen((page) => void mcatzpOpen(page)));
@@ -262,7 +264,7 @@ onBeforeUnmount(() => offs.forEach((f) => f()));
       </div>
       <div class="my-2 w-12 border-t border-base-content/10" />
       <button class="rail-item no-drag" :class="{ 'is-active': section === 'settings' }" style="--rail-c: var(--c-settings)" @click="goSection('settings')">
-        <span class="rail-icon relative"><Icon name="settings" class="size-[18px]" /><span v-if="updateDot" class="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-primary ring-2 ring-base-200" title="An update is available" /></span>Settings
+        <span class="rail-icon relative"><Icon name="settings" class="size-[18px]" /><span v-if="updateDot" class="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-primary ring-2 ring-base-200" title="An update is available" /><span v-else-if="mcatzpUpdate" class="mcatzp-dot absolute -top-0.5 -right-0.5 ring-2 ring-base-200" :title="`MCatzP ${mcatzpUpdate} is available`" /></span>Settings
       </button>
     </nav>
 
