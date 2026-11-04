@@ -13,6 +13,7 @@
     "licenses": "node scripts/licenses.mjs",
     "start": "electron-vite preview",
     "test": "bun --tsconfig-override=tsconfig.node.json test tests",
+    "mcatzp-tools": "bun --tsconfig-override=tsconfig.node.json scripts/mcatzp-tools.ts",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json",
     "gen:den": "openapi-typescript ../DialCatz-Den/openapi.yaml -o src/main/den-api.ts && node scripts/den-api-header.mjs",
     "package:dir": "electron-vite build && electron-builder --mac dir",
