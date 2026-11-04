@@ -505,6 +505,12 @@ export interface McatzpTarget {
   /** The account signed in to it, when the assistant keeps that on this computer. */
   account?: string;
 }
+/** Who is approved in one Catzoid app (each app's bridge.json). */
+export interface McatzpApproval {
+  id: 'devcatz' | 'dbcatz' | 'dialcatz' | 'docatz';
+  name: string;
+  clients: string[];
+}
 export interface McatzpInstallProgress {
   phase: 'download' | 'install';
   received: number;
@@ -1212,6 +1218,8 @@ export interface DialCatzApi {
   /** Progress on onMcatzpInstalling. */
   mcatzpInstall(): Promise<McatzpSetup>;
   mcatzpInstallCancel(): Promise<void>;
+  /** Where each client is approved, across the Catzoid apps. */
+  mcatzpApprovals(): Promise<McatzpApproval[]>;
   mcatzpTargets(): Promise<McatzpTarget[]>;
   mcatzpAddToClient(id: McatzpTarget['id']): Promise<McatzpTarget[]>;
   mcatzpRemoveFromClient(id: McatzpTarget['id']): Promise<McatzpTarget[]>;
@@ -1233,7 +1241,7 @@ export const API_METHODS = [
   'servers', 'probeServer', 'connectWithToken', 'connectWithCode', 'refreshServer', 'disconnectServer', 'subscribeWorkspace', 'setPresence', 'presence', 'syncWorkspace', 'resolveConflict',
   'openUrl', 'exportWorkspace', 'exportEnvironment', 'importEnvironments', 'dbcatzInfo', 'dbcatzOpen', 'saveDbTarget', 'copyText', 'hostName',
   'updateState', 'updateCheck', 'updateDownload', 'updateCancel', 'updateInstall', 'updateSkip', 'updatePrefs', 'setUpdatePrefs',
-  'uninstallPlan', 'uninstall', 'reportPreview', 'reportSend', 'captureWindow', 'reportError', 'reportPrefs', 'setReportPrefs', 'mcatzpActivity', 'mcatzpClearActivity', 'mcatzpRevoke', 'mcatzpSetup', 'mcatzpInstall', 'mcatzpInstallCancel', 'mcatzpTargets', 'mcatzpAddToClient', 'mcatzpRemoveFromClient', 'mcatzpPending', 'mcatzpAnswer', 'mcatzpWindowReply',
+  'uninstallPlan', 'uninstall', 'reportPreview', 'reportSend', 'captureWindow', 'reportError', 'reportPrefs', 'setReportPrefs', 'mcatzpActivity', 'mcatzpClearActivity', 'mcatzpRevoke', 'mcatzpSetup', 'mcatzpInstall', 'mcatzpInstallCancel', 'mcatzpApprovals', 'mcatzpTargets', 'mcatzpAddToClient', 'mcatzpRemoveFromClient', 'mcatzpPending', 'mcatzpAnswer', 'mcatzpWindowReply',
 ] as const satisfies readonly (keyof DialCatzApi)[];
 
 // ------------------------------------------------------------------ helpers used on both sides

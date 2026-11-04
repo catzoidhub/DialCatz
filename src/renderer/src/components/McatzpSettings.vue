@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { McatzpActivity, McatzpSettings, McatzpSetup, McatzpTarget, WorkspaceSummary } from '@shared/types';
+import type { McatzpActivity, McatzpApproval, McatzpSettings, McatzpSetup, McatzpTarget, WorkspaceSummary } from '@shared/types';
+import dbcatzLogo from '../assets/logos/dbcatz.png';
+import devcatzLogo from '../assets/logos/devcatz.svg';
+import dialcatzLogo from '../assets/logos/dialcatz.png';
+import docatzLogo from '../assets/logos/docatz.png';
 import mcatzpLogo from '../assets/logos/mcatzp.svg';
 import { CLIENT_ICONS } from '../clientmarks';
 import { words } from '../platform';
@@ -81,9 +85,12 @@ const SECTIONS = [
 ] as const;
 const section = ref<(typeof SECTIONS)[number]['id']>('clients');
 
+const APP_LOGO: Record<McatzpApproval['id'], string> = { devcatz: devcatzLogo, dbcatz: dbcatzLogo, dialcatz: dialcatzLogo, docatz: docatzLogo };
+const approvals = ref<McatzpApproval[]>([]);
 const activity = ref<McatzpActivity[]>([]);
 const load = async () => {
   if (on.value && section.value !== 'access') activity.value = (await attempt(() => api.mcatzpActivity())) ?? activity.value;
+  if (on.value && section.value === 'clients') approvals.value = (await attempt(() => api.mcatzpApprovals())) ?? approvals.value;
 };
 // While this page is open only: calls come from outside DialCatz, with no state change to follow.
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -122,13 +129,25 @@ function clientTarget(name: string): McatzpTarget['id'] | null {
 
 /** Each approved client with what the log knows about it, the most recent first. */
 const clients = computed(() => {
-  const approved = s.value.clients.map((c) => {
-    const own = activity.value.filter((a) => a.client === c.name && a.action);
-    const id = clientTarget(c.name);
-    const mark = id ? (MARK[id] ?? null) : null;
-    return { ...c, last: own[0]?.time ?? null, calls: own.length, mark, account: targets.value.find((t) => t.id === id)?.account };
+  // Those approved here, then those only approved in another Catzoid app.
+  const here = s.value.clients;
+  const names = [...new Set([...here.map((c) => c.name), ...approvals.value.flatMap((a) => a.clients)])];
+  const list = names.map((name) => {
+    const own = activity.value.filter((a) => a.client === name && a.action);
+    const id = clientTarget(name);
+    const mine = here.find((c) => c.name === name);
+    const others = approvals.value.filter((a) => a.id !== 'dialcatz' && a.clients.includes(name));
+    return {
+      name,
+      approvedAt: mine?.approvedAt ?? null,
+      last: own[0]?.time ?? null,
+      calls: own.length,
+      mark: id ? (MARK[id] ?? null) : null,
+      account: targets.value.find((t) => t.id === id)?.account,
+      apps: [...(mine ? [{ id: 'dialcatz' as const, name: 'DialCatz' }] : []), ...others],
+    };
   });
-  return approved.sort((a, b) => (b.last ?? b.approvedAt).localeCompare(a.last ?? a.approvedAt));
+  return list.sort((a, b) => Number(!a.approvedAt) - Number(!b.approvedAt) || (b.last ?? b.approvedAt ?? '').localeCompare(a.last ?? a.approvedAt ?? ''));
 });
 
 const FILTERS = [
@@ -232,18 +251,24 @@ const groups = computed(() => {
 
           <div>
             <span class="label-caps mb-2 block">Approved</span>
-            <p v-if="!s.clients.length" class="text-xs opacity-60">None yet. A client asks in DialCatz the first time it connects, and shows up here once you allow it.</p>
-            <ul v-else class="divide-y divide-base-300/50 overflow-hidden rounded-box border border-base-300/60">
-            <li v-for="c in clients" :key="c.name" class="flex items-center gap-3 px-3 py-2.5">
-              <StackMark v-if="c.mark" :icon="CLIENT_ICONS[c.mark]" :label="c.name" class="size-9 shrink-0" />
-              <span v-else class="avatar-letter" aria-hidden="true">{{ c.name.slice(0, 1).toUpperCase() }}</span>
-              <div class="min-w-0 flex-1">
-                <p class="selectable truncate text-sm font-medium">{{ c.name }}</p>
-                <p class="truncate text-xs opacity-60"><template v-if="c.account">{{ c.account }} · </template>Approved {{ day(c.approvedAt) }}<template v-if="c.last"> · last call {{ when(c.last) }} · {{ c.calls }} {{ c.calls === 1 ? 'call' : 'calls' }}</template></p>
-              </div>
-              <button class="btn btn-sm" @click="revoke(c.name)">Revoke</button>
-            </li>
-          </ul>
+            <p v-if="!clients.length" class="text-xs opacity-60">None yet. A client asks in DialCatz the first time it connects, and shows up here once you allow it.</p>
+            <ul v-if="clients.length" class="divide-y divide-base-300/50 overflow-hidden rounded-box border border-base-300/60">
+              <li v-for="c in clients" :key="c.name" class="flex items-center gap-3 px-3 py-2.5">
+                <StackMark v-if="c.mark" :icon="CLIENT_ICONS[c.mark]" :label="c.name" class="size-9 shrink-0" />
+                <span v-else class="avatar-letter" aria-hidden="true">{{ c.name.slice(0, 1).toUpperCase() }}</span>
+                <div class="min-w-0 flex-1">
+                  <p class="selectable truncate text-sm font-medium">{{ c.name }}</p>
+                  <p class="truncate text-xs opacity-60">
+                    <template v-if="c.account">{{ c.account }} · </template><template v-if="c.approvedAt">Approved here {{ day(c.approvedAt) }}</template><template v-else>Not approved here: it asks the first time it connects</template><template v-if="c.last"> · last call {{ when(c.last) }} · {{ c.calls }} {{ c.calls === 1 ? 'call' : 'calls' }}</template>
+                  </p>
+                  <p class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+                    <span class="opacity-60">Approved in</span>
+                    <span v-for="a in c.apps" :key="a.id" class="app-chip"><img :src="APP_LOGO[a.id]" alt="" class="size-3.5 rounded-sm" draggable="false" />{{ a.name }}</span>
+                  </p>
+                </div>
+                <button v-if="c.approvedAt" class="btn btn-sm" @click="revoke(c.name)">Revoke</button>
+              </li>
+            </ul>
           </div>
         </div>
 
@@ -332,6 +357,14 @@ const groups = computed(() => {
   gap: 0.25rem;
   padding: 2rem 1rem;
   text-align: center;
+}
+.app-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 0.375rem;
+  background: color-mix(in oklab, var(--color-base-content) 8%, transparent);
+  padding: 0.0625rem 0.375rem;
 }
 .avatar-letter {
   display: grid;

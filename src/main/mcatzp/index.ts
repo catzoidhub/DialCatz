@@ -49,8 +49,11 @@ export class Mcatzp {
       isPaired: (name) => settings().mcatzp.clients.some((c) => c.name === name),
       onPaired: (name) => {
         setMcatzpClients([...settings().mcatzp.clients, { name, approvedAt: new Date().toISOString() }]);
+        setBridgeMcatzp(this.host.entry());
         this.win.settingsChanged();
       },
+      // In bridge.json, so the other Catzoid apps can show where each client is approved. Approval stays per app.
+      approved: () => settings().mcatzp.clients.map((c) => c.name),
       pair: (client) => this.ask({ id: randomUUID(), kind: 'pair', client: client.name, version: client.version ?? null }, PAIR_WAIT_MS).then((a) => a !== 'deny'),
       confirm: async (req) => {
         const change = this.changes().find((c) => c.name === req.action.name);
@@ -111,7 +114,7 @@ export class Mcatzp {
   /** The app is quitting and will not wait: bridge.json says off now, the socket closes as far as it gets. */
   quit(): void {
     if (!this.host.running) return;
-    const { channel: _c, tokenFile: _t, ...entry } = this.host.entry();
+    const { channel: _c, tokenFile: _t, approved: _a, ...entry } = this.host.entry();
     setBridgeMcatzp({ ...entry, enabled: false });
     void this.host.stop().catch(() => undefined);
   }
@@ -124,6 +127,7 @@ export class Mcatzp {
   /** Forgets a client and closes every connection (a new token): the others reconnect, this one asks again. */
   revoke(name: string): Promise<void> {
     setMcatzpClients(settings().mcatzp.clients.filter((c) => c.name !== name));
+    setBridgeMcatzp(this.host.entry());
     this.win.settingsChanged();
     const next = this.queue.then(async () => {
       if (!this.host.running) return;
