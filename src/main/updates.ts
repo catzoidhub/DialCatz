@@ -146,9 +146,9 @@ export async function check(byUser: boolean): Promise<UpdateState> {
     }
   } catch (e) {
     savePrefs({ lastChecked: Date.now() });
-    // No Windows build on the feed yet (latest.yml missing, as while the installer waits for signing): nothing newer
-    // for this copy, not a failure. As DBCatz.
-    if (process.platform === 'win32' && /\b404\b|Cannot find latest/i.test(String((e as Error)?.message ?? e))) set({ kind: 'none', version: app.getVersion(), manual: byUser });
+    // No Windows or Linux build on the feed yet (latest.yml / latest-linux.yml missing): nothing newer for this copy,
+    // not a failure. As DBCatz and DoCatz.
+    if (process.platform !== 'darwin' && /\b404\b|Cannot find latest/i.test(String((e as Error)?.message ?? e))) set({ kind: 'none', version: app.getVersion(), manual: byUser });
     else set(byUser ? { kind: 'error', message: friendly(e), manual: true, download: downloadPage() } : { kind: 'idle' });
   }
   return state;

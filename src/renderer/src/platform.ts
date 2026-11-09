@@ -11,6 +11,10 @@ export const isMac = currentOS === 'mac';
 /** Is the event's main modifier down (⌘ on macOS, Ctrl elsewhere). */
 export const modKey = (e: KeyboardEvent | MouseEvent) => (isMac ? e.metaKey : e.ctrlKey);
 
-/** A path with the home folder written the OS's way: ~/… on a Mac, %USERPROFILE%\… on Windows. */
+/** A path with the home folder written the OS's way: ~/… on a Mac and Linux, %USERPROFILE%\… on Windows. */
 export const homePath = (p: string) =>
-  currentOS === 'windows' ? p.replace(/\//g, '\\').replace(/^[A-Za-z]:\\Users\\[^\\]+/, '%USERPROFILE%') : p.replace(/^\/Users\/[^/]+/, '~');
+  currentOS === 'windows'
+    ? p.replace(/\//g, '\\').replace(/^[A-Za-z]:\\Users\\[^\\]+/, '%USERPROFILE%')
+    : currentOS === 'linux'
+      ? p.replace(/^\/home\/[^/]+/, '~').replace(/^\/root(?=\/|$)/, '~')
+      : p.replace(/^\/Users\/[^/]+/, '~');

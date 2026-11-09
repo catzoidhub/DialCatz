@@ -173,7 +173,8 @@ onBeforeUnmount(() => {
  * button opens the app menu, and a shortcut the page left alone (as the Mac menu gets it after the page) runs its
  * menu item. As DBCatz.
  */
-const isWin = currentOS === 'windows';
+/** Windows and Linux (#87): the same window without a menu bar. */
+const isWin = currentOS !== 'mac';
 let menuKeys = new Set<string>();
 const CODE_KEY: Record<string, string> = { Equal: '=', Minus: '-', NumpadAdd: '=', NumpadSubtract: '-', Comma: ',', Period: '.', Slash: '/', BracketLeft: '[', BracketRight: ']', Backspace: 'backspace', Delete: 'delete', Enter: 'enter', NumpadEnter: 'enter', Tab: 'tab', Escape: 'escape' };
 /** The View menu's own keys (roles, which a window without a menu bar does not get either). */

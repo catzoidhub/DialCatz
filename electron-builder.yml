@@ -11,6 +11,9 @@ files:
 extraResources:
   - from: resources/third-party-licenses.txt
     to: third-party-licenses.txt
+  # the window icon and the AppImage's install window and menu entry (Linux, appimage.ts)
+  - from: resources/icon.png
+    to: icon.png
 protocols:
   - name: DialCatz
     schemes: [dialcatz]
@@ -67,6 +70,36 @@ nsis:
   createDesktopShortcut: false
   createStartMenuShortcut: true
   uninstallDisplayName: ${productName}
+# Linux (#86 / #87, Catzoid #93), as DevCatz and DoCatz.
+linux:
+  icon: resources/icon.png
+  category: Development
+  maintainer: Mahryan Rakhmatullah <109191921+ryankucingg@users.noreply.github.com>
+  executableName: dialcatz
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  synopsis: Dial an endpoint. Hear it purr.
+  description: An open-source API client — collections, environments, history and tests for HTTP, GraphQL and WebSocket, with a self-hosted DialCatz Den for teams.
+  desktop:
+    entry:
+      Name: DialCatz
+      GenericName: API client
+      Comment: Collections, environments, history and tests for HTTP, GraphQL and WebSocket APIs
+      Keywords: api;http;rest;graphql;websocket;postman;dev;
+  # The window belongs to this menu entry (app_id / WM_CLASS = dialcatz.desktop's name).
+  syncDesktopName: true
+deb:
+  # App Center / GNOME Software read this when the .deb is opened: summary, description, screenshots, brand colours.
+  fpm:
+    - resources/linux/com.mrcatz.dialcatz.metainfo.xml=/usr/share/metainfo/com.mrcatz.dialcatz.metainfo.xml
+  # Without them the app does not start on a fresh Ubuntu (libgbm.so.1); the rest as electron-builder's defaults.
+  depends: [libgtk-3-0, libnotify4, libnss3, libxss1, libxtst6, xdg-utils, libatspi2.0-0, libuuid1, libsecret-1-0, libgbm1, libasound2t64 | libasound2]
+toolsets:
+  appimage: 1.0.3
 npmRebuild: false
 # In-app updates (Catzoid #54): writes app-update.yml into the app. The feed address is set at run time from the
 # shared Catzoid site address (src/main/updates.ts), so this URL is only the default; builds never upload anything.

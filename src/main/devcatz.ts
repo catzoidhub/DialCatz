@@ -1,10 +1,9 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { basename, delimiter, join } from 'node:path';
 import { uid, type DevCatzApp, type DevCatzOpenApi, type DevCatzSite, type EnvVariable, type TreeItem } from '@shared/types';
 import { send } from './http';
-import { exePath } from './platform';
+import { appDataDir, exePath } from './platform';
 import { importText } from './importers';
 import { laravelTree } from './routetree';
 
@@ -18,7 +17,7 @@ import { laravelTree } from './routetree';
  */
 
 // DIALCATZ_DEVCATZ_DIR points at another DevCatz data folder for tests.
-const DATA = process.env.DIALCATZ_DEVCATZ_DIR || (process.platform === 'darwin' ? join(homedir(), 'Library', 'Application Support', 'DevCatz') : join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'DevCatz'));
+const DATA = process.env.DIALCATZ_DEVCATZ_DIR || appDataDir('DevCatz');
 
 interface DevCatzConfig {
   projects?: { id: string; name: string; path: string; domain: string }[];

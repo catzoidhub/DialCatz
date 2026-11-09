@@ -6,7 +6,8 @@ import { store } from './store';
  * Server tokens in the system's secret store. macOS: a Keychain generic password (service "DialCatz Den",
  * account = the connection id), through `/usr/bin/security` with the secret on stdin, never in argv — the same
  * way shared.ts keeps the AI keys. Elsewhere: encrypted with Electron's safeStorage in config.json — on Windows that is
- * DPAPI for the current user, the same protection the shared AI keys get there.
+ * DPAPI for the current user, the same protection the shared AI keys get there; on Linux a key kept in the desktop's
+ * keyring (Secret Service / KWallet), refused when there is none.
  */
 
 const SERVICE = 'DialCatz Den';
@@ -48,6 +49,10 @@ export async function setToken(account: string, token: string): Promise<void> {
     });
   } else {
     if (!safeStorage.isEncryptionAvailable()) throw new Error('No secret store available on this system');
+    // Linux (#87): with no keyring (GNOME Keyring, KWallet) Electron "encrypts" with a fixed key; refuse rather than keep
+    // the token as good as plain text.
+    if (process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text')
+      throw new Error('No keyring to keep the token in: start GNOME Keyring or KWallet (unlocked), then connect again');
     const all = { ...(store.extra<Record<string, string>>(FALLBACK) ?? {}) };
     all[account] = safeStorage.encryptString(token).toString('base64');
     store.setExtra(FALLBACK, all);

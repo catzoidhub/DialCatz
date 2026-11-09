@@ -1,10 +1,10 @@
 import { app } from 'electron';
 import { execFile, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { AiProvider, GitAccount, Theme } from '@shared/types';
-import { isWin } from './platform';
+import { runAsRootLinux } from './linuxadmin';
+import { appDataDir, isLinux, isWin } from './platform';
 
 /**
  * Settings shared by the Catzoid apps (DevCatz, DBCatz, DialCatz): the theme and the AI connection
@@ -27,12 +27,14 @@ import { isWin } from './platform';
  *   Windows: %APPDATA%\Catzoid\shared.json; the AI keys DPAPI-encrypted for the user in Catzoid\keys\<provider>.dpapi
  *   (PowerShell's ConvertFrom-SecureString, as DevCatz and DBCatz), Git tokens in Catzoid\git\<account id>.dpapi
  *   (characters outside [\w.-] in the id become "_"), as DevCatz 1.0.2 for Windows writes them.
+ *   Linux: ~/.config/Catzoid/shared.json ($XDG_CONFIG_HOME); the AI keys and Git tokens in the desktop's keyring
+ *   through the Secret Service (secret-tool), attributes service + account as above — the same items as DevCatz and DoCatz.
  *
  * CATZOID_SHARED_DIR and CATZOID_KEYCHAIN (a keychain file) point both elsewhere, for tests.
  */
 
 export const SHARED_DIR =
-  process.env.CATZOID_SHARED_DIR || (isWin ? join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'Catzoid') : join(homedir(), 'Library', 'Application Support', 'Catzoid'));
+  process.env.CATZOID_SHARED_DIR || appDataDir('Catzoid');
 const FILE = join(SHARED_DIR, 'shared.json');
 const SERVICE = 'Catzoid AI';
 const GIT_SERVICE = 'Catzoid Git';
@@ -195,12 +197,53 @@ async function setWinSecret(file: string, value: string): Promise<void> {
   if (r.code !== 0) throw new Error('Windows could not store the secret');
 }
 
+/**
+ * Linux: the desktop's keyring through the Secret Service (secret-tool), attributes service + account — the same
+ * items DevCatz and DoCatz read and write. secret-tool is not on a fresh Ubuntu: saving installs it (libsecret-tools)
+ * through one password prompt; reading without it finds nothing. The secret goes in on stdin, never in a process list.
+ */
+function tool(args: string[], input?: string): Promise<{ code: number; out: string; err: string }> {
+  return new Promise((resolve) => {
+    const p = spawn(args[0], args.slice(1), { stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '';
+    let err = '';
+    const t = setTimeout(() => p.kill(), 60_000);
+    p.stdout.on('data', (d) => (out += d));
+    p.stderr.on('data', (d) => (err += d));
+    p.on('error', () => (clearTimeout(t), resolve({ code: 127, out: '', err: '' })));
+    p.on('close', (c) => (clearTimeout(t), resolve({ code: c ?? 1, out, err })));
+    p.stdin.end(input ?? '');
+  });
+}
+const hasSecretTool = async () => (await tool(['/bin/sh', '-c', 'command -v secret-tool'])).code === 0;
+async function linuxSecret(service: string, account: string): Promise<string> {
+  if (!account || !(await hasSecretTool())) return '';
+  const r = await tool(['secret-tool', 'lookup', 'service', service, 'account', account]);
+  return r.code === 0 ? r.out.replace(/\n$/, '') : '';
+}
+async function setLinuxSecret(service: string, account: string, value: string): Promise<void> {
+  if (!value) {
+    if (await hasSecretTool()) await tool(['secret-tool', 'clear', 'service', service, 'account', account]);
+    return;
+  }
+  if (!(await hasSecretTool())) {
+    const r = await runAsRootLinux(
+      'if command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libsecret-tools >/dev/null; elif command -v dnf >/dev/null 2>&1; then dnf install -y -q libsecret >/dev/null; elif command -v pacman >/dev/null 2>&1; then pacman -S --noconfirm --needed libsecret >/dev/null; fi',
+    );
+    if (r.cancelled) throw new Error('Cancelled: saving needs secret-tool, installed with your password');
+    if (!(await hasSecretTool())) throw new Error('Saving needs secret-tool from your package manager (sudo apt install libsecret-tools)');
+  }
+  const r = await tool(['secret-tool', 'store', `--label=${service} (${account})`, 'service', service, 'account', account], value);
+  if (r.code !== 0) throw new Error(`Keyring: ${r.err.trim() || `exit ${r.code}`} (is a keyring such as GNOME Keyring running and unlocked?)`);
+}
+
 /** The provider's API key from the shared Keychain item ('' when there is none). Cached for a minute. */
 export async function sharedKey(provider: AiProvider): Promise<string> {
   const hit = keyCache.get(provider);
   if (hit && Date.now() - hit.at < 60_000) return hit.key;
   let key: string;
   if (isWin) key = await winSecret(keyFile(provider));
+  else if (isLinux) key = await linuxSecret(SERVICE, provider);
   else {
     const r = await security(['find-generic-password', '-s', SERVICE, '-a', provider, '-w', ...KEYCHAIN]);
     key = r.code === 0 ? r.stdout.replace(/\n$/, '') : '';
@@ -215,6 +258,8 @@ export async function setSharedKey(provider: AiProvider, key: string): Promise<v
   if (isWin) {
     if (/["\\\n\r]/.test(k)) throw new Error('That key has characters an API key does not have');
     await setWinSecret(keyFile(provider), k);
+  } else if (isLinux) {
+    await setLinuxSecret(SERVICE, provider, k);
   } else if (!k) {
     await security(['delete-generic-password', '-s', SERVICE, '-a', provider, ...KEYCHAIN]);
   } else {
@@ -253,6 +298,7 @@ export async function sharedGitToken(id: string): Promise<string> {
   if (hit && Date.now() - hit.at < 60_000) return hit.token;
   let token: string;
   if (isWin) token = id ? await winSecret(gitTokenFile(id)) : '';
+  else if (isLinux) token = await linuxSecret(GIT_SERVICE, id);
   else {
     const r = await security(['find-generic-password', '-s', GIT_SERVICE, '-a', id, '-w', ...KEYCHAIN]);
     token = r.code === 0 ? r.stdout.replace(/\n$/, '') : '';
@@ -269,6 +315,7 @@ export async function setSharedGitToken(id: string, token: string): Promise<void
     if (/["\\\n\r]/.test(t)) throw new Error('That token has characters a token does not have');
     await setWinSecret(gitTokenFile(id), t);
   } else if (!/^[\w.-]+$/.test(id)) throw new Error('Bad account id');
+  else if (isLinux) await setLinuxSecret(GIT_SERVICE, id, t);
   else if (!t) await security(['delete-generic-password', '-s', GIT_SERVICE, '-a', id, ...KEYCHAIN]);
   else {
     if (/["\\\n\r]/.test(t)) throw new Error('That token has characters a token does not have');

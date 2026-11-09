@@ -1,10 +1,23 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 
 /** The OS DialCatz runs on, for the main process (the renderer and shared code use @shared/platform). */
 export const isWin = process.platform === 'win32';
 export const isMac = process.platform === 'darwin';
+/** Linux (DialCatz #87, 2026-11-10): a branch reads `isWin ? win : isLinux ? linux : mac`, never the macOS path. */
+export const isLinux = process.platform === 'linux';
+
+/**
+ * A Catzoid app's data folder (or the family's, `Catzoid`), where that app writes it: %APPDATA% on Windows,
+ * $XDG_CONFIG_HOME or ~/.config on Linux, ~/Library/Application Support on macOS — Electron's userData for each app.
+ */
+export function appDataDir(name: string): string {
+  if (isWin) return join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), name);
+  if (isLinux) return join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), name);
+  return join(homedir(), 'Library', 'Application Support', name);
+}
 
 const found = new Map<string, string>();
 /**

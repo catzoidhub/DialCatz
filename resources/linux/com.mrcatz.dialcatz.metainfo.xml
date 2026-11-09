@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream data for the .deb (Ubuntu App Center / GNOME Software show it when the package is opened), so the
+     Linux install page has the same care as the DMG window and the Windows installer (Catzoid #93, DialCatz #86). -->
+<component type="desktop-application">
+  <id>com.mrcatz.dialcatz</id>
+  <name>DialCatz</name>
+  <summary>Dial an endpoint. Hear it purr.</summary>
+  <developer id="com.catzoid">
+    <name>Catzoid</name>
+  </developer>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <description>
+    <p>
+      DialCatz is an open-source API client: requests in collections, environments for every server, a history of what
+      you sent, and tests that run after each response. Teams share their collections through a DialCatz Den they host
+      themselves.
+    </p>
+    <ul>
+      <li>HTTP, GraphQL and WebSocket requests, with params, headers, bodies, auth and scripts</li>
+      <li>Collections and environments, with a runner for whole folders</li>
+      <li>Imports from Postman, OpenAPI files and the routes of DevCatz sites and DoCatz projects</li>
+      <li>Team sync through a self-hosted DialCatz Den, with no account anywhere else</li>
+      <li>An AI helper that explains responses and writes requests, with the provider you choose</li>
+    </ul>
+    <p>Your requests and secrets stay on your computer; the Den is yours.</p>
+  </description>
+  <launchable type="desktop-id">dialcatz.desktop</launchable>
+  <branding>
+    <color type="primary" scheme_preference="light">#4fcfba</color>
+    <color type="primary" scheme_preference="dark">#241f6e</color>
+  </branding>
+  <url type="homepage">https://catzoid.com/dialcatz</url>
+  <url type="help">https://catzoid.com/docs</url>
+  <url type="bugtracker">https://github.com/catzoidhub/DialCatz/issues</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>A request with its response</caption>
+      <image>https://catzoid.com/screens/dialcatz/request-light.webp</image>
+    </screenshot>
+    <screenshot>
+      <caption>Environments for every server</caption>
+      <image>https://catzoid.com/screens/dialcatz/environments-light.webp</image>
+    </screenshot>
+    <screenshot>
+      <caption>The runner going through a folder</caption>
+      <image>https://catzoid.com/screens/dialcatz/runner-light.webp</image>
+    </screenshot>
+    <screenshot>
+      <caption>A team sharing collections through its Den</caption>
+      <image>https://catzoid.com/screens/dialcatz/team-light.webp</image>
+    </screenshot>
+  </screenshots>
+  <categories>
+    <category>Development</category>
+  </categories>
+  <keywords>
+    <keyword>api</keyword>
+    <keyword>http</keyword>
+    <keyword>rest</keyword>
+    <keyword>graphql</keyword>
+    <keyword>websocket</keyword>
+  </keywords>
+  <provides>
+    <binary>dialcatz</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="1.1.0" date="2026-11-05"/>
+  </releases>
+</component>

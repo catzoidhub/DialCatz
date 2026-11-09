@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { appDataDir } from './platform';
 import { app, shell } from 'electron';
 import type { DbCatzConnection, DbCatzTarget } from '@shared/types';
 
@@ -13,7 +13,7 @@ import type { DbCatzConnection, DbCatzTarget } from '@shared/types';
  * DIALCATZ_DBCATZ_DIR points at another DBCatz data folder for tests.
  */
 
-const DATA = process.env.DIALCATZ_DBCATZ_DIR || (process.platform === 'darwin' ? join(homedir(), 'Library', 'Application Support', 'DBCatz') : join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'DBCatz'));
+const DATA = process.env.DIALCATZ_DBCATZ_DIR || appDataDir('DBCatz');
 
 interface Bridge {
   schema: number;

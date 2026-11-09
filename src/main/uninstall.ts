@@ -1,5 +1,5 @@
 import { app, shell } from 'electron';
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -8,7 +8,9 @@ import { AI_PROVIDERS, type UninstallPlan } from '@shared/types';
 import { deleteToken } from './secrets';
 import { servers } from './servers';
 import { SHARED_DIR, setSharedKey } from './shared';
-import { isWin } from './platform';
+import { appImageDesktopFile, appImageIconFile } from './appimage';
+import { runAsRootLinux, shq } from './linuxadmin';
+import { isLinux, isWin } from './platform';
 
 /**
  * Uninstall DialCatz (Catzoid family #55; the list is DialCatz TODO #53 and the Homebrew cask's `zap`): its data folder
@@ -23,6 +25,10 @@ import { isWin } from './platform';
  * uninstaller (the app, its shortcuts, its entry in Installed apps), and the dialcatz:// link goes — all from a small
  * progress window that starts once DialCatz has quit (Windows keeps a running app's profile locked). The shared AI
  * keys and Git tokens are the Catzoid\keys\*.dpapi files.
+ *
+ * Linux (#87, as DoCatz): the data folder ~/.config/DialCatz, ~/.cache/DialCatz and ~/.cache/dialcatz-updater, the
+ * AppImage's menu entry and icon, and the app: the AppImage file is deleted, a .deb goes with `dpkg -r` behind the
+ * password prompt while DialCatz still runs (a running program keeps its open files).
  */
 
 const ID = 'com.mrcatz.dialcatz';
@@ -30,6 +36,8 @@ const LIB = join(homedir(), 'Library');
 const SIBLINGS = ['DevCatz', 'DBCatz', 'DoCatz'];
 
 function bundle(): string | null {
+  // Linux: the AppImage file, or a .deb's /opt/DialCatz.
+  if (isLinux) return app.isPackaged ? process.env.APPIMAGE || (process.execPath.startsWith('/opt/') ? dirname(process.execPath) : null) : null;
   // Windows: the NSIS uninstaller next to DialCatz.exe.
   if (isWin) {
     const u = join(dirname(process.execPath), `Uninstall ${app.getName()}.exe`);
@@ -62,12 +70,32 @@ function winLeftovers(): string[] {
   return [join(local, 'dialcatz-updater')].filter(existsSync);
 }
 
+/** Linux: the .deb package this DialCatz came from (null for an AppImage or a copied folder). */
+function linuxPackage(): string | null {
+  if (!isLinux || process.env.APPIMAGE || !app.isPackaged) return null;
+  const r = spawnSync('dpkg', ['-S', process.execPath], { encoding: 'utf8', timeout: 10_000 });
+  return r.status === 0 ? r.stdout.split(':')[0]?.trim() || null : null;
+}
+
+/** Linux: what DialCatz keeps outside its data folder (caches, update downloads, the AppImage's menu entry). */
+function linuxLeftovers(): { label: string; path: string }[] {
+  const cache = process.env.XDG_CACHE_HOME || join(homedir(), '.cache');
+  return [
+    { label: 'Caches', path: join(cache, app.getName()) },
+    { label: 'Update downloads', path: join(cache, 'dialcatz-updater') },
+    { label: 'The menu entry', path: appImageDesktopFile() },
+    { label: 'The menu entry’s icon', path: appImageIconFile() },
+  ].filter((f) => existsSync(f.path));
+}
+
 function otherApps(): string[] {
   if (isWin) {
     // The per-user NSIS install folder (the default), or the app's uninstall entry in the registry's folder.
     const local = process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local');
     return SIBLINGS.filter((n) => existsSync(join(local, 'Programs', n, `${n}.exe`)) || existsSync(join(local, 'Programs', n.toLowerCase(), `${n}.exe`)));
   }
+  if (isLinux)
+    return SIBLINGS.filter((n) => [join(homedir(), 'Applications', `${n}.AppImage`), join('/opt', n, n.toLowerCase())].some(existsSync));
   return SIBLINGS.filter((n) => [join('/Applications', `${n}.app`), join(homedir(), 'Applications', `${n}.app`)].some(existsSync));
 }
 
@@ -91,6 +119,20 @@ export function plan(): UninstallPlan {
       brew: null,
       dev: !b,
     };
+  if (isLinux) {
+    const pkg = linuxPackage();
+    return {
+      items: [
+        { label: 'Collections, environments, history and settings', detail: home(app.getPath('userData')) },
+        ...(tokens ? [{ label: `${tokens} DialCatz Den token${tokens === 1 ? '' : 's'}`, detail: `inside the data folder (${words.secretStore})` }] : []),
+        ...linuxLeftovers().map((f) => ({ label: f.label, detail: home(f.path) })),
+        ...(b ? [{ label: pkg ? `The app (the ${pkg} package, removed with your password)` : 'The app', detail: home(b) }] : []),
+      ],
+      otherApps: otherApps(),
+      brew: null,
+      dev: !b,
+    };
+  }
   return {
     items: [
       { label: 'Collections, environments, history and settings', detail: home(app.getPath('userData')) },
@@ -115,6 +157,19 @@ export async function run(removeShared: boolean): Promise<void> {
   if (isWin) {
     const folders = [app.getPath('userData'), ...winLeftovers(), ...(removeShared && existsSync(SHARED_DIR) ? [SHARED_DIR] : [])];
     await afterQuitWin(bundle(), folders);
+    setTimeout(() => app.exit(0), 300);
+    return;
+  }
+  if (isLinux) {
+    const pkg = linuxPackage();
+    if (pkg) {
+      const r = await runAsRootLinux(`dpkg -r ${shq(pkg)} >/dev/null`);
+      if (!r.ok) console.warn('uninstall: dpkg -r:', r.message);
+    }
+    const b = bundle();
+    const folders = [app.getPath('userData'), ...linuxLeftovers().map((f) => f.path), ...(b && !pkg ? [b] : []), ...(removeShared ? [SHARED_DIR] : [])];
+    const child = spawn('/bin/sh', ['-c', `while kill -0 ${process.pid} 2>/dev/null; do sleep 0.3; done; rm -rf ${folders.map(shq).join(' ')}`], { detached: true, stdio: 'ignore', cwd: homedir() });
+    child.unref();
     setTimeout(() => app.exit(0), 300);
     return;
   }

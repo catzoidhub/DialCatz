@@ -1,5 +1,6 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, shell } from 'electron';
-import { isWin } from './platform';
+import { offerAppImageInstall } from './appimage';
+import { isLinux, isWin } from './platform';
 import { execFile } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
@@ -57,9 +58,11 @@ const HISTORY_MAX = 300;
  * changes. As DevCatz and DBCatz (Catzoid #76).
  */
 function titleBarOverlay(): { color: string; symbolColor: string; height: number } {
+  // Linux (GNOME, #87): the buttons bring their own round grey backgrounds, so no strip behind them (as DevCatz, DoCatz).
+  if (isLinux) return { color: '#00000000', symbolColor: nativeTheme.shouldUseDarkColors ? '#e5e7eb' : '#1f2937', height: 40 };
   return nativeTheme.shouldUseDarkColors ? { color: '#2b2d34', symbolColor: '#e5e7eb', height: 40 } : { color: '#e7e8ec', symbolColor: '#1f2937', height: 40 };
 }
-if (isWin) nativeTheme.on('updated', () => win && !win.isDestroyed() && win.setTitleBarOverlay(titleBarOverlay()));
+if (isWin || isLinux) nativeTheme.on('updated', () => win && !win.isDestroyed() && win.setTitleBarOverlay(titleBarOverlay()));
 
 function createWindow(): void {
   if (win && !win.isDestroyed()) {
@@ -76,8 +79,10 @@ function createWindow(): void {
     minHeight: 560,
     title: 'DialCatz',
     ...(mac ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 18, y: 18 }, vibrancy: 'sidebar' as const, backgroundColor: '#00000000' } : {}),
-    // Windows: no menu bar; the system buttons sit over the top right corner (Catzoid #76), the menu is behind ☰.
-    ...(isWin ? { titleBarStyle: 'hidden' as const, titleBarOverlay: titleBarOverlay(), backgroundColor: nativeTheme.shouldUseDarkColors ? '#1d1f24' : '#f6f7f9' } : {}),
+    // Windows and Linux (#87): no menu bar; the system buttons sit over the top right corner (Catzoid #76), the menu is
+    // behind ☰. Linux also takes the window icon from here (an AppImage has no other).
+    ...(isLinux ? { icon: join(app.isPackaged ? process.resourcesPath : join(app.getAppPath(), 'resources'), 'icon.png') } : {}),
+    ...(isWin || isLinux ? { titleBarStyle: 'hidden' as const, titleBarOverlay: titleBarOverlay(), backgroundColor: nativeTheme.shouldUseDarkColors ? '#1d1f24' : '#f6f7f9' } : {}),
     show: false,
     // plugins: the built-in PDF viewer for PDF responses.
     webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false, contextIsolation: true, plugins: true },
@@ -167,7 +172,10 @@ app.on('before-quit', () => {
   sockets.closeAll();
   live.stopAll();
 });
+/** The AppImage install window is up (#86): closing it for "Just run it" must not quit before the real window opens. */
+let offeringInstall = false;
 app.on('window-all-closed', () => {
+  if (offeringInstall) return;
   if (process.platform !== 'darwin') app.quit();
 });
 
@@ -1160,8 +1168,15 @@ function updateLabel(): string {
 // Crash and error reports (Catzoid #65): crashReporter starts before the window; uploads only when the user opted in.
 if (primary) reports.init();
 
-if (primary) app.whenReady().then(() => {
-  if (app.isPackaged) app.setAsDefaultProtocolClient('dialcatz');
+if (primary) app.whenReady().then(async () => {
+  // Linux AppImage (#86): the install window first; true = restarting from ~/Applications or quitting.
+  if (isLinux) {
+    offeringInstall = true;
+    const stop = await offerAppImageInstall(process.resourcesPath).catch(() => false);
+    offeringInstall = false;
+    if (stop) return;
+  }
+  if (app.isPackaged && !isLinux) app.setAsDefaultProtocolClient('dialcatz');
   ws.ensureDefault();
   const impl = api() as unknown as Record<string, (...args: unknown[]) => unknown>;
   for (const m of API_METHODS) ipcMain.handle(`dialcatz:${m}`, (_e, ...args) => impl[m](...args));

@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
+import { appDataDir } from './platform';
 import { uid, type DoCatzProject, type DoCatzService, type EnvVariable, type TreeItem } from '@shared/types';
 import { envFileVariables, MAX_SPEC, OPENAPI_PATHS, parseSpec, servedOpenApi } from './devcatz';
 import { goravelCommand, laravelTree, parseGoravelRoutes, routesTree } from './routetree';
@@ -19,7 +20,7 @@ import { goravelCommand, laravelTree, parseGoravelRoutes, routesTree } from './r
  */
 
 // DIALCATZ_DOCATZ_DIR points at another DoCatz data folder for tests.
-const DATA = process.env.DIALCATZ_DOCATZ_DIR || (process.platform === 'darwin' ? join(homedir(), 'Library', 'Application Support', 'DoCatz') : join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'DoCatz'));
+const DATA = process.env.DIALCATZ_DOCATZ_DIR || appDataDir('DoCatz');
 /** DoCatz's own docker CLI and its context (the engine DoCatz runs, never another Docker on the computer). */
 const DOCKER = join(homedir(), '.docatz', 'bin', process.platform === 'win32' ? 'docker.exe' : 'docker');
 
