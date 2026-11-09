@@ -24,7 +24,13 @@ const api = window.dialcatz;
 const info = ref<AppInfo | null>(null);
 onMounted(async () => (info.value = (await attempt(() => api.appInfo())) ?? null));
 
-const arch = computed(() => (info.value?.arch === 'arm64' ? 'Apple silicon' : info.value?.arch === 'x64' ? (info.value.platform === 'darwin' ? 'Intel' : 'x64') : (info.value?.arch ?? '')));
+/** The build, OS first: macOS Apple silicon / Intel, Windows x64 / ARM64, Linux x64 / ARM64. Only macOS names its chips. */
+const arch = computed(() => {
+  const i = info.value;
+  if (!i) return '';
+  const chip = i.platform === 'darwin' ? ({ arm64: 'Apple silicon', x64: 'Intel' } as Record<string, string>)[i.arch] : ({ arm64: 'ARM64', x64: 'x64', ia32: 'x86' } as Record<string, string>)[i.arch];
+  return `${words.os} ${chip ?? i.arch}`;
+});
 const host = computed(() => (info.value ? new URL(info.value.site).host : ''));
 const links = computed(() => {
   const site = info.value?.site;
@@ -58,7 +64,7 @@ function checkUpdates() {
 function copyDetails() {
   const i = info.value;
   if (!i) return;
-  void api.copyText(`DialCatz ${i.version} (${i.arch})\n${words.os} ${i.os}\nElectron ${i.electron} · Chromium ${i.chrome} · Node.js ${i.node}`);
+  void api.copyText(`DialCatz ${i.version} (${arch.value})\n${words.os} ${i.os}\nElectron ${i.electron} · Chromium ${i.chrome} · Node.js ${i.node}`);
   notify('success', 'Version details copied');
 }
 </script>
