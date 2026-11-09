@@ -161,6 +161,11 @@ export async function download(): Promise<void> {
   cancel = new CancellationToken();
   set({ kind: 'downloading', version, percent: 0, transferred: 0, total: back.size ?? 0, bytesPerSecond: 0 });
   try {
+    // The install id reaches catzoid.com only, never GitHub (Catzoid #90): the zip / exe (and blockmaps) are 302s
+    // from catzoid.com/updates/… to release-assets.githubusercontent.com, and electron-updater keeps these headers
+    // across that redirect. The yml request already counted the check; electron-updater reads the headers at
+    // download time (computeRequestHeaders), so clearing them here covers the download. The next check sets them again.
+    autoUpdater.requestHeaders = null;
     await autoUpdater.downloadUpdate(cancel);
   } catch (e) {
     if (cancel?.cancelled) set(back);
