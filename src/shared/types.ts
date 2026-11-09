@@ -1219,6 +1219,8 @@ export interface DialCatzApi {
   mcatzpUpdate(): Promise<string | null>;
   /** Progress on onMcatzpInstalling. */
   mcatzpInstall(): Promise<McatzpSetup>;
+  /** Takes MCatzP out of every assistant and removes the copy a Catzoid app installed; turns this app's switch off. */
+  mcatzpUninstall(): Promise<{ removedFrom: string[]; binary: 'removed' | 'kept' | 'none'; keptPath: string | null }>;
   mcatzpInstallCancel(): Promise<void>;
   /** Where each client is approved, across the Catzoid apps. */
   mcatzpApprovals(): Promise<McatzpApproval[]>;
@@ -1243,7 +1245,7 @@ export const API_METHODS = [
   'servers', 'probeServer', 'connectWithToken', 'connectWithCode', 'refreshServer', 'disconnectServer', 'subscribeWorkspace', 'setPresence', 'presence', 'syncWorkspace', 'resolveConflict',
   'openUrl', 'exportWorkspace', 'exportEnvironment', 'importEnvironments', 'dbcatzInfo', 'dbcatzOpen', 'saveDbTarget', 'copyText', 'hostName',
   'updateState', 'updateCheck', 'updateDownload', 'updateCancel', 'updateInstall', 'updateSkip', 'updatePrefs', 'setUpdatePrefs',
-  'uninstallPlan', 'uninstall', 'reportPreview', 'reportSend', 'captureWindow', 'reportError', 'reportPrefs', 'setReportPrefs', 'mcatzpActivity', 'mcatzpClearActivity', 'mcatzpRevoke', 'mcatzpSetup', 'mcatzpUpdate', 'mcatzpInstall', 'mcatzpInstallCancel', 'mcatzpApprovals', 'mcatzpTargets', 'mcatzpAddToClient', 'mcatzpRemoveFromClient', 'mcatzpPending', 'mcatzpAnswer', 'mcatzpWindowReply',
+  'uninstallPlan', 'uninstall', 'reportPreview', 'reportSend', 'captureWindow', 'reportError', 'reportPrefs', 'setReportPrefs', 'mcatzpActivity', 'mcatzpClearActivity', 'mcatzpRevoke', 'mcatzpSetup', 'mcatzpUpdate', 'mcatzpInstall', 'mcatzpUninstall', 'mcatzpInstallCancel', 'mcatzpApprovals', 'mcatzpTargets', 'mcatzpAddToClient', 'mcatzpRemoveFromClient', 'mcatzpPending', 'mcatzpAnswer', 'mcatzpWindowReply',
 ] as const satisfies readonly (keyof DialCatzApi)[];
 
 // ------------------------------------------------------------------ helpers used on both sides

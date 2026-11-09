@@ -8,7 +8,7 @@ import docatzLogo from '../assets/logos/docatz.png';
 import mcatzpLogo from '../assets/logos/mcatzp.svg';
 import { CLIENT_ICONS } from '../clientmarks';
 import { words } from '../platform';
-import { attempt, mcatzpInstalling, settings, workspaces } from '../state';
+import { attempt, mcatzpInstalling, notify, settings, workspaces } from '../state';
 import ConfirmDialog from './ConfirmDialog.vue';
 import CatMood from './CatMood.vue';
 import StackMark from './StackMark.vue';
@@ -45,6 +45,27 @@ const updateHow = { homebrew: 'Homebrew', other: 'how you installed it' } as con
 async function installMcatzp() {
   const next = await attempt(() => api.mcatzpInstall());
   if (next) setup.value = next;
+  void loadTargets();
+}
+/** Uninstall (user, 2026-11-10; every Catzoid app has it): out of every assistant, and the shared copy when a Catzoid app installed it. */
+const askUninstall = ref(false);
+const uninstallBusy = ref(false);
+const uninstallText = computed(() => {
+  const where = targets.value.filter((t) => t.current).map((t) => t.label);
+  const path = setup.value?.path;
+  return `${where.length ? `It is taken out of ${where.join(', ')}. ` : ''}${
+    setup.value?.source === 'catzoid' ? `The program (${path}) is removed. ` : path ? `Your own copy (${path}) stays: remove it the way you installed it. ` : ''
+  }Every Catzoid app shares MCatzP, so they lose it too; DialCatz's MCatzP switch turns off. Install it again any time.`;
+});
+async function uninstallMcatzp() {
+  uninstallBusy.value = true;
+  const r = await attempt(() => api.mcatzpUninstall());
+  uninstallBusy.value = false;
+  askUninstall.value = false;
+  if (!r) return;
+  notify('success', r.binary === 'kept' ? `MCatzP taken out of the assistants; your copy at ${r.keptPath} stays` : 'MCatzP uninstalled');
+  settings.value = (await attempt(() => api.settings())) ?? settings.value;
+  setup.value = (await attempt(() => api.mcatzpSetup(false))) ?? setup.value;
   void loadTargets();
 }
 const targets = ref<McatzpTarget[]>([]);
@@ -217,6 +238,7 @@ const groups = computed(() => {
         <button v-if="installing" class="btn btn-sm" :disabled="installing.phase === 'install'" @click="cancelInstall">Cancel</button>
         <button v-else-if="setup && !setup.path" class="btn btn-primary btn-sm" :disabled="!setup.checked || setup.noBuild" @click="installMcatzp">Install MCatzP</button>
         <button v-else-if="outdated" class="btn btn-sm mcatzp-update" @click="installMcatzp">Update to {{ setup?.latest }}</button>
+        <button v-if="!installing && setup?.path" class="btn btn-ghost btn-sm text-error" title="Take MCatzP out of every assistant and remove the program a Catzoid app installed" @click="askUninstall = true">Uninstall…</button>
       </div>
 
       <template v-if="on">
@@ -341,6 +363,7 @@ const groups = computed(() => {
         </div>
       </template>
     </div>
+    <ConfirmDialog v-if="askUninstall" title="Uninstall MCatzP?" :text="uninstallText" confirm="Uninstall" tone="error" :busy="uninstallBusy" @ok="uninstallMcatzp" @cancel="askUninstall = false" />
     <ConfirmDialog v-if="replacing" :title="`Point ${replacing.label} at this copy?`" :text="`It already runs MCatzP as: ${replacing.command}`" confirm="Use this copy" tone="primary" @ok="addClient(replacing!, true)" @cancel="replacing = null" />
   </div>
 </template>

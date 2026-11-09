@@ -844,6 +844,19 @@ function api(): DialCatzApi {
       void checkMcatzpUpdate();
       return mcatzpSetup.setupState();
     },
+    mcatzpUninstall: async () => {
+      if (mcatzpInstalling) throw new Error('MCatzP is being installed');
+      // The channel closes first: assistants connected now lose it rather than finding a missing program.
+      if (settings().mcatzp.on) {
+        setSettings({ mcatzp: { on: false } });
+        await mcatzp.set(false);
+        send('app:settings', settings());
+      }
+      const r = await mcatzpSetup.uninstall();
+      mcatzpUpdate = null;
+      send('app:mcatzpUpdate', null);
+      return r;
+    },
     mcatzpInstallCancel: async () => mcatzpInstalling?.abort(),
     mcatzpApprovals: () => mcatzpSetup.approvals(),
     mcatzpTargets: () => mcatzpSetup.targets(),
