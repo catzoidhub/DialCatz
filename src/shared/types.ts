@@ -479,6 +479,15 @@ export interface McatzpRun {
 }
 
 /** The MCatzP program on this computer and what the site offers it (Settings → MCatzP). */
+/** Uninstall MCatzP (the host package's result): `how` is the command that removes a kept Homebrew / npm copy. */
+export interface McatzpUninstallResult {
+  removedFrom: McatzpTarget['id'][];
+  failed: { id: McatzpTarget['id']; error: string }[];
+  binary: 'removed' | 'kept' | 'none';
+  keptPath: string | null;
+  how: string | null;
+}
+
 export interface McatzpSetup {
   path: string | null;
   version: string | null;
@@ -1220,7 +1229,7 @@ export interface DialCatzApi {
   /** Progress on onMcatzpInstalling. */
   mcatzpInstall(): Promise<McatzpSetup>;
   /** Takes MCatzP out of every assistant and removes the copy a Catzoid app installed; turns this app's switch off. */
-  mcatzpUninstall(): Promise<{ removedFrom: string[]; binary: 'removed' | 'kept' | 'none'; keptPath: string | null }>;
+  mcatzpUninstall(): Promise<McatzpUninstallResult>;
   mcatzpInstallCancel(): Promise<void>;
   /** Where each client is approved, across the Catzoid apps. */
   mcatzpApprovals(): Promise<McatzpApproval[]>;

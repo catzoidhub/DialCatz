@@ -63,7 +63,14 @@ async function uninstallMcatzp() {
   uninstallBusy.value = false;
   askUninstall.value = false;
   if (!r) return;
-  notify('success', r.binary === 'kept' ? `MCatzP taken out of the assistants; your copy at ${r.keptPath} stays` : 'MCatzP uninstalled');
+  const label = (id: string) => targets.value.find((t) => t.id === id)?.label ?? id;
+  // Assistants whose entry could not be taken out: named, with the reason (host 1.0.3).
+  if (r.failed.length) notify('warning', `MCatzP could not be taken out of ${r.failed.map((f) => `${label(f.id)} (${f.error})`).join(', ')}`);
+  else
+    notify(
+      'success',
+      r.binary === 'kept' ? `MCatzP taken out of the assistants; your copy at ${r.keptPath} stays${r.how ? ` — remove it with ${r.how}` : ''}` : 'MCatzP uninstalled',
+    );
   settings.value = (await attempt(() => api.settings())) ?? settings.value;
   setup.value = (await attempt(() => api.mcatzpSetup(false))) ?? setup.value;
   void loadTargets();
