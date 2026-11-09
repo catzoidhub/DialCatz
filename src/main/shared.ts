@@ -204,15 +204,18 @@ async function setWinSecret(file: string, value: string): Promise<void> {
  */
 function tool(args: string[], input?: string): Promise<{ code: number; out: string; err: string }> {
   return new Promise((resolve) => {
-    const p = spawn(args[0], args.slice(1), { stdio: ['pipe', 'pipe', 'pipe'] });
+    // stdin only when there is something to write: a program that exits without reading it (sh, secret-tool lookup)
+    // would make the write fail with EPIPE, an uncaught error (found on Ubuntu, #87).
+    const p = spawn(args[0], args.slice(1), { stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
+    p.stdin?.on('error', () => undefined);
     let out = '';
     let err = '';
     const t = setTimeout(() => p.kill(), 60_000);
-    p.stdout.on('data', (d) => (out += d));
-    p.stderr.on('data', (d) => (err += d));
+    p.stdout?.on('data', (d) => (out += d));
+    p.stderr?.on('data', (d) => (err += d));
     p.on('error', () => (clearTimeout(t), resolve({ code: 127, out: '', err: '' })));
     p.on('close', (c) => (clearTimeout(t), resolve({ code: c ?? 1, out, err })));
-    p.stdin.end(input ?? '');
+    if (input !== undefined) p.stdin?.end(input);
   });
 }
 const hasSecretTool = async () => (await tool(['/bin/sh', '-c', 'command -v secret-tool'])).code === 0;
