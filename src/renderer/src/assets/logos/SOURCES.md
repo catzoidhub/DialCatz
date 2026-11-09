@@ -59,4 +59,4 @@ App logos of the Catzoid family:
 
 - devcatz.png — the Catzoid site, public/brand/devcatz/icon-64.png (DevCatz app icon; Open in DevCatz)
 
-AI assistants (Settings → MCatzP, clients/ and clientmarks.ts; copied from DevCatz): Simple Icons 16.36.0 (claude, cursor, windsurf, googlegemini, opencode, cline, githubcopilot, qwen, lmstudio, amp, warp), 13.21.0 (openai), 12.0.0 (visualstudiocode). zcode.png — the app's own icon, /Applications/ZCode.app. kiro.png — https://github.com/kirodotdev.png; roo.png — https://github.com/RooCodeInc.png (their GitHub organisation avatars). antigravity.svg — https://antigravity.google/favicon.svg (from its site).
+AI assistants (Settings → MCatzP, clients/ and clientmarks.ts; copied from DevCatz): Simple Icons 16.36.0 (claude, cursor, windsurf, googlegemini, opencode, cline, githubcopilot, qwen, lmstudio, amp, warp), 13.21.0 (openai, zed), 12.0.0 (visualstudiocode). zcode.png — the app's own icon, /Applications/ZCode.app. kiro.png — https://github.com/kirodotdev.png; roo.png — https://github.com/RooCodeInc.png (their GitHub organisation avatars). antigravity.svg — https://antigravity.google/favicon.svg (from its site).

@@ -1,6 +1,7 @@
 {
   "name": "dialcatz",
   "productName": "DialCatz",
+  "desktopName": "dialcatz.desktop",
   "version": "1.1.0",
   "license": "GPL-3.0-only",
   "private": true,
@@ -23,8 +24,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.1.0",
-    "@catzoid/mcatzp-host": "^1.0.0",
-    "@catzoid/mcatzp-protocol": "^1.0.0",
+    "@catzoid/mcatzp-host": "^1.0.2",
+    "@catzoid/mcatzp-protocol": "^1.0.2",
     "ajv": "^8.17.1",
     "electron-updater": "6.8.10",
     "yaml": "2"
