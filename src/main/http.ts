@@ -1,5 +1,6 @@
 import http from 'node:http';
 import https from 'node:https';
+import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 import type { Readable } from 'node:stream';
 import { readFile, stat } from 'node:fs/promises';
@@ -8,6 +9,15 @@ import { homedir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { rootCertificates } from 'node:tls';
 import type { HttpResponse, SendOptions, SendResult, WireRequest } from '@shared/types';
+
+/**
+ * Happy eyeballs: Node tries a host's addresses (IPv6 and IPv4 in turn) and gives each only 250 ms by default. On a slow
+ * link (a VM's NAT, a far server, mobile data) every IPv4 attempt ran out while IPv6 was unreachable, and the request
+ * failed with an AggregateError although the server answered in ~800 ms (found on Ubuntu in UTM, #87). 2.5 s per
+ * address still moves on quickly from an address that does not answer. Every connection of the main process (requests,
+ * WebSocket, the Den) goes through this.
+ */
+setDefaultAutoSelectFamilyAttemptTimeout(2500);
 import { store } from './store';
 
 /**
@@ -214,7 +224,21 @@ function once(w: WireRequest, body: Buffer | undefined, signal: AbortSignal, opt
   });
 }
 
-function friendly(e: Error & { code?: string }, url: string): string {
+type NetError = Error & { code?: string; errors?: NetError[] };
+
+/**
+ * An AggregateError (every address of the host failed) says nothing by itself: the reason is the most telling of its
+ * errors — a refusal or a certificate problem before a timeout, a timeout before an unreachable address family.
+ */
+function unwrap(e: NetError): NetError {
+  const all = e.name === 'AggregateError' && Array.isArray(e.errors) ? e.errors : null;
+  if (!all?.length) return e;
+  const rank = (x: NetError) => (x.code === 'ENETUNREACH' || x.code === 'EHOSTUNREACH' ? 3 : x.code === 'ETIMEDOUT' ? 2 : 1);
+  return [...all].sort((a, b) => rank(a) - rank(b))[0];
+}
+
+function friendly(err: NetError, url: string): string {
+  const e = unwrap(err);
   if (e.name === 'AbortError' || e.code === 'ABORT_ERR') return 'Cancelled';
   let host = url;
   try {
@@ -230,6 +254,8 @@ function friendly(e: Error & { code?: string }, url: string): string {
       return `${host} refused the connection: nothing is listening there`;
     case 'ECONNRESET':
       return `${host} closed the connection`;
+    case 'ETIMEDOUT':
+      return `${host} did not answer the connection in time (ETIMEDOUT)`;
     case 'EHOSTUNREACH':
     case 'ENETUNREACH':
       return `${host} cannot be reached from this network`;
