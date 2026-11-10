@@ -76,7 +76,7 @@ async function cancel() {
         <span class="label-caps">This device</span>
         <input v-model="device" class="input input-sm flex-1" :placeholder="`e.g. Andi – ${currentOS === 'mac' ? 'MacBook' : 'Laptop'}`" />
       </div>
-      <p class="text-xs opacity-50">The one-time code is exchanged for your own token, kept in {{ words.secretStore }}. The admin sees this device name and can revoke it alone.</p>
+      <p class="text-xs opacity-50">The one-time code is exchanged for your own token, kept in {{ words.tokenStore }}. The admin sees this device name and can revoke it alone.</p>
       <div v-if="error" class="alert alert-error alert-soft text-sm"><CatMood mood="error" class="size-7 shrink-0 -my-0.5" /><span>{{ error }}</span></div>
       <div class="modal-action">
         <button class="btn btn-ghost btn-sm" :disabled="busy" @click="cancel">Cancel</button>

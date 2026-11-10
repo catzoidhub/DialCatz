@@ -21,6 +21,8 @@ export function wordsFor(os: OS) {
     computer: os === 'mac' ? 'Mac' : os === 'windows' ? 'PC' : 'computer',
     /** The same words as DevCatz and DBCatz: on Windows the secrets are DPAPI-encrypted for the user. */
     secretStore: os === 'mac' ? 'Keychain' : os === 'windows' ? "Windows' protected storage (DPAPI)" : 'the system keyring',
+    /** Where DialCatz Den tokens are kept (secrets.ts; #3): each OS's own credential store. */
+    tokenStore: os === 'mac' ? 'Keychain' : os === 'windows' ? 'Windows Credential Manager' : 'the system keyring',
     trash: os === 'mac' ? 'Trash' : os === 'windows' ? 'Recycle Bin' : 'Trash',
     /** The home folder as paths are written on this OS (~ on a Mac, %USERPROFILE% on Windows). */
     home: os === 'windows' ? '%USERPROFILE%\\' : '~/',

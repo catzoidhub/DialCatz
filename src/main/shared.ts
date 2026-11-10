@@ -219,12 +219,12 @@ function tool(args: string[], input?: string): Promise<{ code: number; out: stri
   });
 }
 const hasSecretTool = async () => (await tool(['/bin/sh', '-c', 'command -v secret-tool'])).code === 0;
-async function linuxSecret(service: string, account: string): Promise<string> {
+export async function linuxSecret(service: string, account: string): Promise<string> {
   if (!account || !(await hasSecretTool())) return '';
   const r = await tool(['secret-tool', 'lookup', 'service', service, 'account', account]);
   return r.code === 0 ? r.out.replace(/\n$/, '') : '';
 }
-async function setLinuxSecret(service: string, account: string, value: string): Promise<void> {
+export async function setLinuxSecret(service: string, account: string, value: string): Promise<void> {
   if (!value) {
     if (await hasSecretTool()) await tool(['secret-tool', 'clear', 'service', service, 'account', account]);
     return;

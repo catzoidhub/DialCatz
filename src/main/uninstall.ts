@@ -5,7 +5,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { words } from '@shared/platform';
 import { AI_PROVIDERS, type UninstallPlan } from '@shared/types';
-import { deleteToken } from './secrets';
+import { deleteToken, tokenStore } from './secrets';
 import { servers } from './servers';
 import { SHARED_DIR, setSharedKey } from './shared';
 import { appImageDesktopFile, appImageIconFile } from './appimage';
@@ -111,7 +111,7 @@ export function plan(): UninstallPlan {
     return {
       items: [
         { label: 'Collections, environments, history and settings', detail: app.getPath('userData') },
-        ...(tokens ? [{ label: `${tokens} DialCatz Den token${tokens === 1 ? '' : 's'}`, detail: `inside the data folder (${words.secretStore})` }] : []),
+        ...(tokens ? [{ label: `${tokens} DialCatz Den token${tokens === 1 ? '' : 's'}`, detail: tokenStore() }] : []),
         ...winLeftovers().map((p) => ({ label: 'Update downloads', detail: p })),
         ...(b ? [{ label: 'The app, its shortcuts and its entry in Installed apps', detail: 'its own uninstaller' }] : []),
       ],
@@ -124,7 +124,7 @@ export function plan(): UninstallPlan {
     return {
       items: [
         { label: 'Collections, environments, history and settings', detail: home(app.getPath('userData')) },
-        ...(tokens ? [{ label: `${tokens} DialCatz Den token${tokens === 1 ? '' : 's'}`, detail: `inside the data folder (${words.secretStore})` }] : []),
+        ...(tokens ? [{ label: `${tokens} DialCatz Den token${tokens === 1 ? '' : 's'}`, detail: tokenStore() }] : []),
         ...linuxLeftovers().map((f) => ({ label: f.label, detail: home(f.path) })),
         ...(b ? [{ label: pkg ? `The app (the ${pkg} package, removed with your password)` : 'The app', detail: home(b) }] : []),
       ],
@@ -136,7 +136,7 @@ export function plan(): UninstallPlan {
   return {
     items: [
       { label: 'Collections, environments, history and settings', detail: home(app.getPath('userData')) },
-      ...(tokens ? [{ label: `${tokens} DialCatz Den token${tokens === 1 ? '' : 's'}`, detail: `${words.secretStore} items “DialCatz Den”` }] : []),
+      ...(tokens ? [{ label: `${tokens} DialCatz Den token${tokens === 1 ? '' : 's'}`, detail: tokenStore() }] : []),
       { label: 'Caches, logs and saved window state', detail: '~/Library/Caches, Logs, Saved Application State, Preferences' },
       ...(b ? [{ label: 'The app', detail: `${home(b)} → Trash` }] : []),
     ],
