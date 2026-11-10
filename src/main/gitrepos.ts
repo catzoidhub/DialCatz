@@ -56,6 +56,13 @@ export class GitRepos {
     });
   }
 
+  /** Asks `git --version` again (after Install Git). */
+  async refreshVersion(): Promise<string | null> {
+    this.version = await g.gitVersion();
+    this.h.changed();
+    return this.version;
+  }
+
   private added = (): Added[] => (store.extra<Added[]>('gitRepos') ?? []).filter((a) => a?.path);
 
   /** Re-reads which repositories there are (folder workspaces may have moved); keeps the summaries. */

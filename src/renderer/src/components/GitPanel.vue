@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import type { FolderGitChange, FolderGitStatus } from '@shared/types';
 import { notify, reloadWorkspace, workspace } from '../state';
+import InstallGitButton from './InstallGitButton.vue';
 import CatMood from './CatMood.vue';
 import Icon from './Icon.vue';
 import RepoPicker from './RepoPicker.vue';
@@ -137,6 +138,7 @@ const MARK: Record<FolderGitChange['kind'], { letter: string; tone: string; titl
         <div class="alert alert-soft text-sm" :class="st.gitMissing ? 'alert-warning' : 'alert-info'">
           <CatMood :mood="st.gitMissing ? 'warning' : 'info'" class="size-7 shrink-0 -my-0.5" />
           <span class="flex-1">{{ st.gitMissing ? st.error : 'This folder is not in a Git repository yet. Start one here, or move the workspace into a folder of an existing repository.' }}</span>
+          <InstallGitButton v-if="st.gitMissing" @installed="refresh()" />
           <button v-if="!st.gitMissing" class="btn btn-sm" :disabled="!!busy" @click="init"><span v-if="busy === 'init'" class="loading loading-spinner loading-xs" />Start Git here</button>
           <button v-if="!st.gitMissing" class="btn btn-primary btn-sm" :disabled="!!busy" @click="connecting = true">Connect to a repository…</button>
         </div>

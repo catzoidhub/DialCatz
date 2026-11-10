@@ -26,6 +26,7 @@ export const MCATZP_COVERAGE: Record<keyof DialCatzApi, string> = {
   folderGitPush: "tool: folder_git_sync",
   folderGitInit: "tool: folder_git_init",
   folderGitAbortMerge: "tool: folder_git_abort_merge",
+  gitInstall: 'never: installs software with the system prompt for a password or administrator rights',
   gitState: 'tool: list_git_repos',
   gitWatch: 'not a tool: the Git section being on screen',
   gitRepoAdd: 'tool: git_add_repo',

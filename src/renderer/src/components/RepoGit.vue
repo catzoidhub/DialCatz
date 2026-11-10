@@ -11,6 +11,7 @@ import ConfirmDialog from './ConfirmDialog.vue';
 import PopMenu, { type MenuItem } from './PopMenu.vue';
 import { attempt, goSection, loadWorkspaces, notify } from '../state';
 import { gitState } from '../gitstate';
+import InstallGitButton from './InstallGitButton.vue';
 import CatMood from './CatMood.vue';
 import GitignoreDialog from './GitignoreDialog.vue';
 const herd = window.dialcatz;
@@ -215,7 +216,7 @@ const openGitPage = () => emit('accounts');
       <div class="text-lg font-semibold">Not a Git repository</div>
       <p class="text-sm opacity-70">Start tracking this folder's history: DialCatz runs <code>git init -b main</code> in {{ p.path }}, then you can commit and connect a remote.</p>
       <button class="btn btn-primary btn-sm" @click="act(() => H.gitInit(p.id).then(() => true), 'Repository created')">Initialize repository</button>
-      <p v-if="gitState?.version === null" class="text-xs text-warning">git is not installed: {{ words.installGit }}.</p>
+      <p v-if="gitState?.version === null" class="flex items-center justify-center gap-2 text-xs text-warning">git is not installed <InstallGitButton /></p>
     </div>
 
     <template v-else>

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, shell } from 'electron';
 import { offerAppImageInstall } from './appimage';
+import { installGit } from './gitinstall';
 import { isLinux, isWin } from './platform';
 import { execFile } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -317,6 +318,11 @@ function api(): DialCatzApi {
       await git.abortMerge(f);
       ws.folderChanged(id);
       return git.status(f);
+    },
+    gitInstall: async () => {
+      const r = await installGit();
+      await repos.refreshVersion();
+      return r;
     },
     gitState: async () => {
       await repos.pollAll();
