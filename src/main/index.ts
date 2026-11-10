@@ -483,6 +483,12 @@ function api(): DialCatzApi {
     deleteWorkspace: async (id) => {
       if (ws.load(id).serverId) throw new Error('Hide a team workspace from the Team page instead');
       ws.remove(id);
+      // Not shared with MCatzP any more: a deleted workspace's id stayed in Settings → MCatzP's list (Windows PC, 2026-11-10).
+      const shared = settings().mcatzp.workspaces;
+      if (shared.includes(id)) {
+        setSettings({ mcatzp: { workspaces: shared.filter((w) => w !== id) } });
+        send('app:settings', settings());
+      }
       // The last personal one gone: an empty one takes its place (there is always somewhere to work).
       if (!ws.list().some((w) => !w.serverId)) ws.create('Personal');
     },
