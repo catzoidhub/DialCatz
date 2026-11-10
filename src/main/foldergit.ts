@@ -4,6 +4,7 @@ import { join, relative } from 'node:path';
 import { parse } from 'yaml';
 import type { FolderGitChange, FolderGitStatus } from '@shared/types';
 import { gitEnv, isLocalRepoPath, parseRemote } from './gitcore';
+import { words } from '@shared/platform';
 import { exePath, isWin, userSsh } from './platform';
 import { credsFor } from './githosts';
 
@@ -23,7 +24,7 @@ function git(cwd: string, args: string[], allowFail = false, extra: Record<strin
   return new Promise((resolve, reject) =>
     execFile(exePath('git'), args, { cwd, env, timeout: TIMEOUT, maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (e, stdout, stderr) => {
       const code = e ? (typeof (e as { code?: unknown }).code === 'number' ? ((e as { code: number }).code) : -1) : 0;
-      if (e && (e as NodeJS.ErrnoException).code === 'ENOENT') return reject(new GitError(isWin ? 'Git is not installed on this computer. Install Git for Windows (git-scm.com), then try again.' : 'Git is not installed on this computer. Install it (in Terminal: xcode-select --install), then try again.'));
+      if (e && (e as NodeJS.ErrnoException).code === 'ENOENT') return reject(new GitError(`Git is not installed on this computer: ${words.installGit}, then try again.`));
       if (e && !allowFail) return reject(new GitError(friendly(String(stderr || e.message))));
       resolve({ out: String(stdout), err: String(stderr), code });
     }),

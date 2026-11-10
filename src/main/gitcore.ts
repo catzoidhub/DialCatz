@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import type { GitBranch, GitCommit, GitFile, GitStash, GitStatus, GitSummary, GitTag } from '@shared/types';
 import { dataDir } from './store';
+import { words } from '@shared/platform';
 import { exePath, isWin, killTree, userSsh } from './platform';
 
 /**
@@ -71,7 +72,7 @@ export function git(cwd: string, args: string[], opts: { env?: Record<string, st
     const timer = setTimeout(() => killTree(child), opts.timeout ?? 60_000);
     child.on('error', (e) => {
       clearTimeout(timer);
-      done({ code: 127, stdout: '', stderr: e.message.includes('ENOENT') ? (process.platform === 'win32' ? 'git is not installed (Git for Windows, git-scm.com)' : 'git is not installed (xcode-select --install)') : e.message });
+      done({ code: 127, stdout: '', stderr: e.message.includes('ENOENT') ? `git is not installed: ${words.installGit}` : e.message });
     });
     child.on('close', (code) => {
       clearTimeout(timer);

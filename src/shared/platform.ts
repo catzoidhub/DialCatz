@@ -30,7 +30,7 @@ export function wordsFor(os: OS) {
     sep: os === 'windows' ? '\\' : '/',
     appearanceSettings: os === 'mac' ? 'System Settings → Appearance' : os === 'windows' ? 'Settings → Personalization → Colors' : 'the system settings',
     fileManager: os === 'mac' ? 'Finder' : os === 'windows' ? 'File Explorer' : 'the file manager',
-    installGit: os === 'mac' ? 'run xcode-select --install in Terminal' : os === 'windows' ? 'install Git for Windows (git-scm.com)' : 'install git with your package manager',
+    installGit: os === 'mac' ? 'run xcode-select --install in Terminal' : os === 'windows' ? 'install Git for Windows (git-scm.com)' : 'install git with your package manager (for example: sudo apt install git)',
   } as const;
 }
 

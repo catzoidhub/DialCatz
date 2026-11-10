@@ -9,7 +9,7 @@
   <a href="https://catzoid.com/community">Community</a>
 </p>
 
-An API client for macOS and Windows: REST, GraphQL and WebSocket requests, collections, environments, scripts, tests and a runner — and your team’s own server, [DialCatz Den](https://github.com/catzoidhub/DialCatz-Den), when you want to share them.
+An API client for macOS, Windows and Linux: REST, GraphQL and WebSocket requests, collections, environments, scripts, tests and a runner — and your team’s own server, [DialCatz Den](https://github.com/catzoidhub/DialCatz-Den), when you want to share them.
 
 Part of [Catzoid](https://catzoid.com) — free, open-source developer tools with nine lives. All cats, no catch: no
 account, no Pro tier, nothing locked behind a payment.
@@ -40,6 +40,10 @@ Windows 10 / 11 (x64): `DialCatz-Setup-<version>.exe` from the same page or the
 [latest release](https://github.com/catzoidhub/DialCatz/releases/latest). It installs for your account only, no
 administrator rights needed, and updates itself too. It is not code-signed yet (see Code signing below).
 
+Linux (x64): `DialCatz-<version>-x64.AppImage` or `DialCatz-<version>-amd64.deb` from the same page or the
+[latest release](https://github.com/catzoidhub/DialCatz/releases/latest). The AppImage offers to install itself into
+`~/Applications` with a menu entry on its first run; the `.deb` suits Ubuntu and Debian. Neither is signed yet.
+
 ## Build from source
 
 ```bash
@@ -57,7 +61,7 @@ macOS builds are signed with a Developer ID and notarized by Apple. **The Window
 the SignPath Foundation, which signs open-source projects for free, asks for a project with more history and public
 use than DialCatz has today, and paid certificates are out of reach for now. Windows SmartScreen therefore warns when you
 open the installer: choose **More info → Run anyway**. The installer is built by GitHub Actions from this repository,
-so what you run is this source. Stars, issues and pull requests help DialCatz qualify for free signing later. Policy:
+so what you run is this source. Linux packages are built by GitHub Actions from this repository too, and are not signed either. Stars, issues and pull requests help DialCatz qualify for free signing later. Policy:
 [catzoid.com/legal/code-signing](https://catzoid.com/legal/code-signing).
 
 ## How it is made
