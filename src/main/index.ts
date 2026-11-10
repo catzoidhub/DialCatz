@@ -1,7 +1,8 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeTheme, shell } from 'electron';
 import { offerAppImageInstall } from './appimage';
 import { checkGitUpdate, installGit, updateGit } from './gitinstall';
 import { isLinux, isWin } from './platform';
+import { messageBox, openDialog, saveDialog } from './dialogs';
 import { execFile } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
@@ -279,12 +280,12 @@ function api(): DialCatzApi {
       return ws.save({ ...w, name: n });
     },
     openFolderWorkspace: async () => {
-      const r = await dialog.showOpenDialog(win!, { title: 'Open a folder as a workspace (an empty one starts a new workspace)', buttonLabel: 'Open', properties: ['openDirectory', 'createDirectory'] });
+      const r = await openDialog(win, { title: 'Open a folder as a workspace (an empty one starts a new workspace)', buttonLabel: 'Open', properties: ['openDirectory', 'createDirectory'] });
       if (r.canceled || !r.filePaths[0]) return null;
       return ws.openFolder(r.filePaths[0]);
     },
     useFolder: async (id) => {
-      const r = await dialog.showOpenDialog(win!, { title: 'Choose the folder for this workspace (inside a Git repository to share it)', buttonLabel: 'Use this folder', properties: ['openDirectory', 'createDirectory'] });
+      const r = await openDialog(win, { title: 'Choose the folder for this workspace (inside a Git repository to share it)', buttonLabel: 'Use this folder', properties: ['openDirectory', 'createDirectory'] });
       if (r.canceled || !r.filePaths[0]) return null;
       return ws.useFolder(id, r.filePaths[0]);
     },
@@ -339,7 +340,7 @@ function api(): DialCatzApi {
       return repos.state();
     },
     gitRepoAdd: async () => {
-      const r = await dialog.showOpenDialog(win!, { title: 'Add a repository (or a folder to start Git in)', buttonLabel: 'Add', properties: ['openDirectory'] });
+      const r = await openDialog(win, { title: 'Add a repository (or a folder to start Git in)', buttonLabel: 'Add', properties: ['openDirectory'] });
       if (r.canceled || !r.filePaths[0]) return null;
       return repos.add(r.filePaths[0]);
     },
@@ -357,7 +358,7 @@ function api(): DialCatzApi {
       return (w.name === 'dialcatz' ? ws.save({ ...w, name: repos.state().repos.find((r) => r.id === id)?.name ?? w.name }) : w).id;
     },
     gitPickFolder: async (start) => {
-      const r = await dialog.showOpenDialog(win!, { title: 'Clone into this folder', buttonLabel: 'Choose', defaultPath: existsSync(String(start)) ? String(start) : undefined, properties: ['openDirectory', 'createDirectory'] });
+      const r = await openDialog(win, { title: 'Clone into this folder', buttonLabel: 'Choose', defaultPath: existsSync(String(start)) ? String(start) : undefined, properties: ['openDirectory', 'createDirectory'] });
       return r.canceled ? null : (r.filePaths[0] ?? null);
     },
     gitStatus: (id) => repos.status(id),
@@ -367,7 +368,7 @@ function api(): DialCatzApi {
     gitUnstage: (id, files) => repos.unstage(id, (files ?? []).map(String)),
     gitDiscard: async (id, files) => {
       const list = (files ?? []).map(String);
-      const { response } = await dialog.showMessageBox(win!, {
+      const { response } = await messageBox(win, {
         type: 'warning',
         buttons: ['Discard', 'Cancel'],
         defaultId: 1,
@@ -404,7 +405,7 @@ function api(): DialCatzApi {
     gitWorktrees: (id) => repos.worktrees(id),
     gitWorktreeAdd: async (id, branch, create, from) => {
       const root = repos.pathOf(String(id));
-      const r = await dialog.showSaveDialog(win!, { title: 'Folder for the new worktree', buttonLabel: 'Create worktree', defaultPath: join(dirname(root), `${basename(root)}-${String(branch).replace(/[^\w.-]+/g, '-')}`), properties: ['createDirectory'] });
+      const r = await saveDialog(win, { title: 'Folder for the new worktree', buttonLabel: 'Create worktree', defaultPath: join(dirname(root), `${basename(root)}-${String(branch).replace(/[^\w.-]+/g, '-')}`), properties: ['createDirectory'] });
       if (r.canceled || !r.filePath) return null;
       return repos.worktreeAdd(id, r.filePath, String(branch ?? ''), create === true, from ? String(from) : undefined);
     },
@@ -456,7 +457,7 @@ function api(): DialCatzApi {
       return w.name === n ? w : ws.save({ ...w, name: n });
     },
     pickFolder: async (title, start) => {
-      const r = await dialog.showOpenDialog(win!, { title: String(title ?? 'Choose a folder'), buttonLabel: 'Choose', defaultPath: existsSync(String(start)) ? String(start) : undefined, properties: ['openDirectory', 'createDirectory'] });
+      const r = await openDialog(win, { title: String(title ?? 'Choose a folder'), buttonLabel: 'Choose', defaultPath: existsSync(String(start)) ? String(start) : undefined, properties: ['openDirectory', 'createDirectory'] });
       return r.canceled ? null : (r.filePaths[0] ?? null);
     },
     teamAdminUrl: async (id) => srv.adminUrl(String(id)),
@@ -482,7 +483,7 @@ function api(): DialCatzApi {
     saveLayout: async (id, layout) => ws.saveLayout(id, layout),
     importText: async (id, text) => doImport(id, text),
     importFile: async (id) => {
-      const r = await dialog.showOpenDialog(win!, {
+      const r = await openDialog(win, {
         title: 'Import a collection, environment or export',
         properties: ['openFile', 'multiSelections'],
         filters: [{ name: 'Collections, environments, exports (JSON, YAML, zip)', extensions: ['json', 'yaml', 'yml', 'zip'] }],
@@ -589,7 +590,7 @@ function api(): DialCatzApi {
       return { workspace: w, collectionId: collectionIds[0] ?? null, requests, source, skipped, merged };
     },
     postmanReadExport: async (how) => {
-      const r = await dialog.showOpenDialog(win!, {
+      const r = await openDialog(win, {
         title: how === 'folder' ? 'Choose the folder of an export' : 'Choose a Postman or DialCatz export (zip) or exported JSON files',
         properties: how === 'folder' ? ['openDirectory'] : ['openFile', 'multiSelections'],
         filters: how === 'folder' ? undefined : [{ name: 'Postman export', extensions: ['zip', 'json'] }],
@@ -629,7 +630,7 @@ function api(): DialCatzApi {
       const fmt = postmanFormat ? 'postman' : 'dialcatz';
       const stamp = new Date().toISOString().slice(0, 10);
       const safe = (n: string) => n.replace(/[^\w.-]+/g, '-').slice(0, 80) || 'untitled';
-      const r = await dialog.showSaveDialog(win!, { defaultPath: join(app.getPath('downloads'), `${safe(w.name)}-${stamp}.${fmt}_export.zip`), filters: [{ name: 'Workspace export', extensions: ['zip'] }] });
+      const r = await saveDialog(win, { defaultPath: join(app.getPath('downloads'), `${safe(w.name)}-${stamp}.${fmt}_export.zip`), filters: [{ name: 'Workspace export', extensions: ['zip'] }] });
       if (r.canceled || !r.filePath) return false;
       const dir = mkdtempSync(join(tmpdir(), 'dialcatz-export-'));
       try {
@@ -685,13 +686,13 @@ function api(): DialCatzApi {
           }
         : { dialcatz: 1, kind: 'environment', exportedBy: `DialCatz ${app.getVersion()}`, environment: { name: env.name, variables: env.variables.map((v) => ({ key: v.key, value: value(v), enabled: v.enabled, secret: v.secret })) } };
       const file = `${env.name.replace(/[^\w.-]+/g, '-')}.${postmanFormat ? 'postman' : 'dialcatz'}_environment.json`;
-      const r = await dialog.showSaveDialog(win!, { defaultPath: join(app.getPath('downloads'), file), filters: [{ name: 'Environment', extensions: ['json'] }] });
+      const r = await saveDialog(win, { defaultPath: join(app.getPath('downloads'), file), filters: [{ name: 'Environment', extensions: ['json'] }] });
       if (r.canceled || !r.filePath) return false;
       writeFileSync(r.filePath, JSON.stringify(data, null, 2), { mode: 0o600 });
       return true;
     },
     importEnvironments: async (id) => {
-      const r = await dialog.showOpenDialog(win!, { title: 'Choose environment files (Postman or DialCatz), or a Postman export', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Environment', extensions: ['json', 'zip'] }] });
+      const r = await openDialog(win, { title: 'Choose environment files (Postman or DialCatz), or a Postman export', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Environment', extensions: ['json', 'zip'] }] });
       if (r.canceled || !r.filePaths.length) return null;
       const found = await postman.read(r.filePaths);
       if (!found.environments.length) throw new Error(`No environments in there${found.collections.length ? ' (collections are imported with Import…)' : ''}`);
@@ -714,7 +715,7 @@ function api(): DialCatzApi {
       const postmanFormat = format === 'postman';
       const data = postmanFormat ? toPostman(w.items, collectionId) : exportCollection(w.items, collectionId);
       const name = (w.items.find((i) => i.id === collectionId)?.name ?? 'collection').replace(/[^\w.-]+/g, '-');
-      const r = await dialog.showSaveDialog(win!, { defaultPath: join(app.getPath('downloads'), `${name}.${postmanFormat ? 'postman' : 'dialcatz'}_collection.json`), filters: [{ name: postmanFormat ? 'Postman collection' : 'DialCatz collection', extensions: ['json'] }] });
+      const r = await saveDialog(win, { defaultPath: join(app.getPath('downloads'), `${name}.${postmanFormat ? 'postman' : 'dialcatz'}_collection.json`), filters: [{ name: postmanFormat ? 'Postman collection' : 'DialCatz collection', extensions: ['json'] }] });
       if (r.canceled || !r.filePath) return false;
       writeFileSync(r.filePath, JSON.stringify(data, null, 2));
       return true;
@@ -740,20 +741,20 @@ function api(): DialCatzApi {
     aiBody: (request, instruction, token) => ai.body(request, String(instruction), String(token)),
     aiCancel: async (token) => ai.cancel(String(token)),
     pickDataFile: async () => {
-      const r = await dialog.showOpenDialog(win!, { title: 'Choose a data file for the runner', properties: ['openFile'], filters: [{ name: 'CSV or JSON', extensions: ['csv', 'tsv', 'txt', 'json'] }] });
+      const r = await openDialog(win, { title: 'Choose a data file for the runner', properties: ['openFile'], filters: [{ name: 'CSV or JSON', extensions: ['csv', 'tsv', 'txt', 'json'] }] });
       if (r.canceled || !r.filePaths[0]) return null;
       return datafile.read(r.filePaths[0]);
     },
     saveText: async (name, text) => {
       const clean = String(name ?? 'results.txt').replace(/[^\w.-]+/g, '-');
       const ext = clean.split('.').pop() ?? 'txt';
-      const r = await dialog.showSaveDialog(win!, { defaultPath: join(app.getPath('downloads'), clean), filters: [{ name: ext.toUpperCase(), extensions: [ext] }] });
+      const r = await saveDialog(win, { defaultPath: join(app.getPath('downloads'), clean), filters: [{ name: ext.toUpperCase(), extensions: [ext] }] });
       if (r.canceled || !r.filePath) return false;
       writeFileSync(r.filePath, String(text ?? ''));
       return true;
     },
     pickFile: async (title) => {
-      const r = await dialog.showOpenDialog(win!, { title, properties: ['openFile'] });
+      const r = await openDialog(win, { title, properties: ['openFile'] });
       if (r.canceled || !r.filePaths[0]) return null;
       http.allowFile(r.filePaths[0]);
       return r.filePaths[0];
@@ -765,7 +766,7 @@ function api(): DialCatzApi {
     saveResponse: async (token, suggestedName) => {
       const body = http.lastBody(token);
       if (!body) return false;
-      const r = await dialog.showSaveDialog(win!, { defaultPath: join(app.getPath('downloads'), suggestedName.replace(/[/\\]/g, '-')) });
+      const r = await saveDialog(win, { defaultPath: join(app.getPath('downloads'), suggestedName.replace(/[/\\]/g, '-')) });
       if (r.canceled || !r.filePath) return false;
       writeFileSync(r.filePath, body);
       return true;
