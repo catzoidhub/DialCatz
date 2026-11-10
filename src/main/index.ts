@@ -237,6 +237,18 @@ const mcatzpClient = (id: unknown) => {
   return known;
 };
 
+/** The OS version for About: on Linux the distribution (/etc/os-release, e.g. "Ubuntu 24.04.3 LTS"), not the kernel (as DBCatz). */
+function systemVersion(): string {
+  if (process.platform !== 'linux') return process.getSystemVersion();
+  try {
+    const name = /^PRETTY_NAME="?([^"\n]+)"?/m.exec(readFileSync('/etc/os-release', 'utf8'))?.[1];
+    if (name) return `${name} (kernel ${process.getSystemVersion()})`;
+  } catch {
+    /* no os-release */
+  }
+  return process.getSystemVersion();
+}
+
 function api(): DialCatzApi {
   return {
     appInfo: async () => ({
@@ -245,7 +257,7 @@ function api(): DialCatzApi {
       dataDir: dataDir(),
       site: siteBase(),
       arch: process.arch,
-      os: process.getSystemVersion(),
+      os: systemVersion(),
       electron: process.versions.electron,
       chrome: process.versions.chrome,
       node: process.versions.node,

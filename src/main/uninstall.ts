@@ -27,7 +27,7 @@ import { isLinux, isWin } from './platform';
  * keys and Git tokens are the Catzoid\keys\*.dpapi files.
  *
  * Linux (#87, as DoCatz): the data folder ~/.config/DialCatz, ~/.cache/DialCatz and ~/.cache/dialcatz-updater, the
- * AppImage's menu entry and icon, and the app: the AppImage file is deleted, a .deb goes with `dpkg -r` behind the
+ * AppImage's menu entry and icon, and the app: the AppImage file is deleted, a .deb goes with `dpkg --purge` behind the
  * password prompt while DialCatz still runs (a running program keeps its open files).
  */
 
@@ -161,14 +161,27 @@ export async function run(removeShared: boolean): Promise<void> {
     return;
   }
   if (isLinux) {
+    // --purge, not -r: -r left the package in dpkg's list as "rc" (removed, configuration kept) though DialCatz has none
+    // (as DBCatz 3b287fb).
     const pkg = linuxPackage();
     if (pkg) {
-      const r = await runAsRootLinux(`dpkg -r ${shq(pkg)} >/dev/null`);
-      if (!r.ok) console.warn('uninstall: dpkg -r:', r.message);
+      const r = await runAsRootLinux(`dpkg --purge ${shq(pkg)} >/dev/null`);
+      if (!r.ok) console.warn('uninstall: dpkg --purge:', r.message);
     }
     const b = bundle();
     const folders = [app.getPath('userData'), ...linuxLeftovers().map((f) => f.path), ...(b && !pkg ? [b] : []), ...(removeShared ? [SHARED_DIR] : [])];
-    const child = spawn('/bin/sh', ['-c', `while kill -0 ${process.pid} 2>/dev/null; do sleep 0.3; done; rm -rf ${folders.map(shq).join(' ')}`], { detached: true, stdio: 'ignore', cwd: homedir() });
+    // The dialcatz:// default xdg-mime wrote stays in mimeapps.list after the menu entry is gone: only DialCatz's own
+    // line goes, the rest of the file is the user's (as DBCatz 3b287fb).
+    const config = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
+    const dataHome = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share');
+    const lists = [join(config, 'mimeapps.list'), join(dataHome, 'applications', 'mimeapps.list')].filter(existsSync);
+    // The menu entry's folder keeps a mimeinfo.cache naming dialcatz.desktop until it is rebuilt (VM, 2026-11-10:
+    // xdg-mime still answered dialcatz.desktop after the entry was gone).
+    const apps = join(dataHome, 'applications');
+    const unlink =
+      lists.map((l) => `; sed -i '/^x-scheme-handler\\/dialcatz=.*dialcatz\\.desktop/d' ${shq(l)} 2>/dev/null`).join('') +
+      (existsSync(join(apps, 'mimeinfo.cache')) ? `; update-desktop-database ${shq(apps)} 2>/dev/null` : '');
+    const child = spawn('/bin/sh', ['-c', `while kill -0 ${process.pid} 2>/dev/null; do sleep 0.3; done; rm -rf ${folders.map(shq).join(' ')}${unlink}`], { detached: true, stdio: 'ignore', cwd: homedir() });
     child.unref();
     setTimeout(() => app.exit(0), 300);
     return;
