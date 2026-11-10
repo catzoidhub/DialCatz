@@ -45,6 +45,8 @@ async function load() {
 void load();
 // The main process refreshes the summary after every operation and every 20 s: follow it.
 watch(() => JSON.stringify(p.value.summary), () => void load());
+// Git installed (here or on the Git page): read the repository again.
+watch(() => gitState.value?.version, (v, old) => v && !old && void load());
 watch(() => p.value.id, () => ((loaded.value = false), (st.value = null), (selected.value = null), (sub.value = 'changes'), void load(), void loadLog()));
 const onFocus = () => void load();
 onMounted(() => window.addEventListener('focus', onFocus));
@@ -209,6 +211,12 @@ const openGitPage = () => emit('accounts');
   <section class="flex flex-col gap-4">
     <div v-if="!loaded" class="flex items-center gap-2 text-sm opacity-60"><span class="loading loading-spinner loading-sm" />Reading the repository…</div>
 
+    <!-- No git: git is what tells a repository from a folder, so "Not a Git repository" would be wrong (DevCatz 23f4cfa). -->
+    <div v-else-if="gitState?.checked && !gitState.version" class="mx-auto max-w-lg space-y-3 pt-8 text-center">
+      <div class="text-lg font-semibold">Git is not installed</div>
+      <p class="text-sm opacity-70">DialCatz uses the git on this {{ words.computer }} for this repository's changes, commits and branches. Install it, and the repository shows right away.</p>
+      <InstallGitButton @installed="load" />
+    </div>
     <div v-else-if="error" role="alert" class="alert alert-error alert-soft text-sm"><CatMood mood="error" class="size-7 shrink-0 -my-0.5" />{{ error }}</div>
 
     <!-- Not a repository -->
@@ -216,7 +224,6 @@ const openGitPage = () => emit('accounts');
       <div class="text-lg font-semibold">Not a Git repository</div>
       <p class="text-sm opacity-70">Start tracking this folder's history: DialCatz runs <code>git init -b main</code> in {{ p.path }}, then you can commit and connect a remote.</p>
       <button class="btn btn-primary btn-sm" @click="act(() => H.gitInit(p.id).then(() => true), 'Repository created')">Initialize repository</button>
-      <p v-if="gitState?.version === null" class="flex items-center justify-center gap-2 text-xs text-warning">git is not installed <InstallGitButton /></p>
     </div>
 
     <template v-else>

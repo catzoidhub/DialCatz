@@ -266,7 +266,7 @@ const broken = reactive(new Set<string>());
       </ul>
       <div class="border-t border-base-300/60 px-4 py-3 text-xs opacity-60">
         <div v-if="gitState?.version" class="space-y-1.5"><div>git {{ gitState.version }} · your own config and credentials. Accounts are shared with the Catzoid apps.</div><GitUpdate /></div>
-        <span v-else-if="gitState" class="flex flex-wrap items-center gap-2 text-warning">git is missing <InstallGitButton /></span>
+        <span v-else-if="gitState?.checked" class="flex flex-wrap items-center gap-2 text-warning">git is missing <InstallGitButton /></span>
       </div>
     </aside>
 

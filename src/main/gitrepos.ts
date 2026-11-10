@@ -39,6 +39,8 @@ export function workspaceIn(root: string): string | null {
 
 export class GitRepos {
   version: string | null = null;
+  /** The first `git --version` has answered (before it, a null version means "not known yet", not "missing"). */
+  checked = false;
   private roots = new Map<string, { root: string; added: boolean; workspaces: string[] }>();
   private summaries = new Map<string, GitSummary | null>();
   private busy = new Map<string, string>();
@@ -52,6 +54,7 @@ export class GitRepos {
   constructor(private h: GitRepoHooks) {
     void g.gitVersion().then((v) => {
       this.version = v;
+      this.checked = true;
       this.h.changed();
     });
   }
@@ -59,6 +62,7 @@ export class GitRepos {
   /** Asks `git --version` again (after Install Git). */
   async refreshVersion(): Promise<string | null> {
     this.version = await g.gitVersion();
+    this.checked = true;
     this.h.changed();
     return this.version;
   }
@@ -98,7 +102,7 @@ export class GitRepos {
         busy: this.busy.get(id) ?? null,
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
-    return { version: this.version, accounts: hosts.listAccounts(), clone: this.clone, cloneDir: this.cloneDir(), repos };
+    return { version: this.version, checked: this.checked, accounts: hosts.listAccounts(), clone: this.clone, cloneDir: this.cloneDir(), repos };
   }
 
   /** The folder most repositories live in (new clones go next to them), else ~/Projects (or ~/ when that is not there). */
@@ -128,6 +132,8 @@ export class GitRepos {
   }
 
   private async poll(): Promise<void> {
+    // No git (yet): nothing to read, and on a Mac git would only reopen Apple's installer prompt.
+    if (!this.version) return;
     await this.rescan();
     for (const [id, r] of this.roots) this.summaries.set(id, existsSync(r.root) ? await g.summary(r.root).catch(() => null) : null);
     for (const id of [...this.summaries.keys()]) if (!this.roots.has(id)) this.summaries.delete(id);

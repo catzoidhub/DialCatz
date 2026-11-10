@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { parse } from 'yaml';
 import type { FolderGitChange, FolderGitStatus } from '@shared/types';
-import { gitEnv, isLocalRepoPath, parseRemote } from './gitcore';
+import { gitEnv, isLocalRepoPath, parseRemote, macGitUsable } from './gitcore';
 import { words } from '@shared/platform';
 import { exePath, isWin, userSsh } from './platform';
 import { credsFor } from './githosts';
@@ -19,7 +19,9 @@ const TIMEOUT = 90_000;
 
 class GitError extends Error {}
 
-function git(cwd: string, args: string[], allowFail = false, extra: Record<string, string> = {}): Promise<{ out: string; err: string; code: number }> {
+async function git(cwd: string, args: string[], allowFail = false, extra: Record<string, string> = {}): Promise<{ out: string; err: string; code: number }> {
+  // macOS without the Command Line Tools: no call to Apple's stub, which would reopen its installer prompt.
+  if (!(await macGitUsable())) throw new GitError(`Git is not installed on this computer: ${words.installGit}, then try again.`);
   const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C', ...(userSsh() ? {} : { GIT_SSH_COMMAND: 'ssh -o BatchMode=yes' }), ...extra };
   return new Promise((resolve, reject) =>
     execFile(exePath('git'), args, { cwd, env, timeout: TIMEOUT, maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (e, stdout, stderr) => {

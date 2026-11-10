@@ -813,6 +813,8 @@ export interface GitWorktree {
 export interface GitState {
   /** `git --version`, null when git is missing (Xcode Command Line Tools not installed). */
   version: string | null;
+  /** The first `git --version` has answered: before it a null version means "not known yet", not "missing". */
+  checked: boolean;
   accounts: GitAccount[];
   clone: GitCloneTask | null;
   /** Default folder new clones go into (the folder most repositories live in). */

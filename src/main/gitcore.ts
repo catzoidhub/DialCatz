@@ -56,8 +56,31 @@ export interface GitResult {
   stderr: string;
 }
 
+/**
+ * macOS: `/usr/bin/git` without the Command Line Tools is only Apple's stub — every call opens Apple's "install the
+ * command line developer tools" prompt again (a repository's page and the 20 s poll would keep reopening it). So
+ * DialCatz asks `xcode-select -p` first and runs no git until the tools are there (a git from Homebrew & co. needs no
+ * check). A "missing" answer is asked again after a minute; gitVersion() asks again at once (after Install Git).
+ * The same as DevCatz 23f4cfa.
+ */
+const GIT_OK = Promise.resolve(true);
+let macGit: { at: number; ok: Promise<boolean> } | null = null;
+export function macGitUsable(): Promise<boolean> {
+  if (process.platform !== 'darwin') return GIT_OK;
+  if (macGit && (Date.now() - macGit.at < 60_000 || macGit.ok === GIT_OK)) return macGit.ok;
+  const ok = new Promise<boolean>((resolveOk) => {
+    const child = spawn('/bin/sh', ['-c', 'p=$(command -v git) || exit 1; [ "$p" != /usr/bin/git ] || /usr/bin/xcode-select -p >/dev/null 2>&1'], { stdio: 'ignore' });
+    child.on('error', () => resolveOk(false));
+    child.on('close', (code) => resolveOk(code === 0));
+  });
+  macGit = { at: Date.now(), ok: ok.then((v) => (v ? ((macGit = { at: Date.now(), ok: GIT_OK }), true) : false)) };
+  return macGit.ok;
+}
+const missingGit = (): GitResult => ({ code: 127, stdout: '', stderr: `git is not installed: ${words.installGit}` });
+
 /** Runs git with arguments (no shell) and collects its output. */
-export function git(cwd: string, args: string[], opts: { env?: Record<string, string>; input?: string; timeout?: number; maxBytes?: number } = {}): Promise<GitResult> {
+export async function git(cwd: string, args: string[], opts: { env?: Record<string, string>; input?: string; timeout?: number; maxBytes?: number } = {}): Promise<GitResult> {
+  if (!(await macGitUsable())) return missingGit();
   return new Promise((done) => {
     const child = spawn(exePath('git'), args, { cwd, env: { ...process.env, ...gitEnv(), ...opts.env } as NodeJS.ProcessEnv, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     const out: Buffer[] = [];
@@ -108,12 +131,16 @@ const cleanError = (s: string) => {
  * progress lines (\r) are passed with `progress = true`. Resolves with the exit
  * code; `signal` kills it.
  */
-export function gitStream(
+export async function gitStream(
   cwd: string,
   args: string[],
   log: (line: string, progress: boolean) => void,
   opts: { env?: Record<string, string>; signal?: AbortSignal } = {},
 ): Promise<number> {
+  if (!(await macGitUsable())) {
+    log(missingGit().stderr, false);
+    return 127;
+  }
   return new Promise((done) => {
     const child = spawn(exePath('git'), args, { cwd, env: { ...process.env, ...gitEnv(), ...opts.env } as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     const onAbort = () => killTree(child);
@@ -140,6 +167,7 @@ export function gitStream(
 }
 
 export async function gitVersion(): Promise<string | null> {
+  macGit = null; // asked again: after Install Git the answer changes
   const r = await git(process.cwd(), ['--version'], { timeout: 10_000 });
   return r.code === 0 ? (r.stdout.match(/git version (\S+)/)?.[1] ?? null) : null;
 }
