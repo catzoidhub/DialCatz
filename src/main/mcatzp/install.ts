@@ -33,17 +33,12 @@ export const removeFromClient = async (id: McatzpTargetId): Promise<void> => rem
 export const approvals = async (): Promise<McatzpApproval[]> => approvalsAcrossApps(await options());
 
 /**
- * Uninstall MCatzP (user, 2026-11-10, the same in every Catzoid app), through the host package (MCatzP 1.0.3): the entries
- * that run the copy in use leave their clients, the shared copy goes (and its bin folder when empty), a Homebrew or npm
- * copy stays and its path comes back with the command that removes it, an `npx` entry is left alone. The other Catzoid
- * apps lose MCatzP too: the window asks first.
+ * Uninstall MCatzP (user, 2026-11-10, the same in every Catzoid app), through the host package (MCatzP 1.0.4): the entries
+ * that run the copy in use leave their clients, the shared copy goes (and its bin folder when empty; on Windows a copy
+ * an assistant still runs is moved aside), a Homebrew / npm / bun copy stays with the command that removes it, an
+ * `npx` entry is left alone. The other Catzoid apps lose MCatzP too: the window asks first.
  */
-export async function uninstall(): Promise<McatzpUninstallResult> {
-  const o = await options();
-  const r = await hostUninstall(o);
-  const how = r.keptPath ? (/[/\\](Cellar|homebrew|linuxbrew)[/\\]/i.test(r.keptPath) ? 'brew uninstall mcatzp' : /node_modules|[/\\]npm[/\\]|\.npm-global|[/\\]nvm[/\\]|fnm|volta|bun[/\\]bin/i.test(r.keptPath) ? 'npm uninstall -g mcatzp' : null) : null;
-  return { ...r, how };
-}
+export const uninstall = async (): Promise<McatzpUninstallResult> => hostUninstall(await options());
 
 /** The version to update to: only a copy these apps installed, a Homebrew or npm copy updates its own way. Null when up to date. */
 export async function availableUpdate(): Promise<string | null> {

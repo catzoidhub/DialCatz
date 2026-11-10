@@ -479,13 +479,16 @@ export interface McatzpRun {
 }
 
 /** The MCatzP program on this computer and what the site offers it (Settings → MCatzP). */
-/** Uninstall MCatzP (the host package's result): `how` is the command that removes a kept Homebrew / npm copy. */
+/** Uninstall MCatzP (the host package's result, MCatzP 1.0.4). */
 export interface McatzpUninstallResult {
   removedFrom: McatzpTarget['id'][];
   failed: { id: McatzpTarget['id']; error: string }[];
   binary: 'removed' | 'kept' | 'none';
   keptPath: string | null;
-  how: string | null;
+  /** How a kept copy goes: `brew uninstall mcatzp`, `npm uninstall -g mcatzp`, `bun remove -g mcatzp`; null when not known. */
+  removeCommand: string | null;
+  /** Windows: the copy was running, so it was moved into the temp folder (swept by the next install or uninstall). */
+  movedAside: string | null;
 }
 
 export interface McatzpSetup {

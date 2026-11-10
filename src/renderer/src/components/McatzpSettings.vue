@@ -63,14 +63,21 @@ async function uninstallMcatzp() {
   uninstallBusy.value = false;
   askUninstall.value = false;
   if (!r) return;
-  const label = (id: string) => targets.value.find((t) => t.id === id)?.label ?? id;
-  // Assistants whose entry could not be taken out: named, with the reason (host 1.0.3).
-  if (r.failed.length) notify('warning', `MCatzP could not be taken out of ${r.failed.map((f) => `${label(f.id)} (${f.error})`).join(', ')}`);
-  else
-    notify(
-      'success',
-      r.binary === 'kept' ? `MCatzP taken out of the assistants; your copy at ${r.keptPath} stays${r.how ? ` — remove it with ${r.how}` : ''}` : 'MCatzP uninstalled',
-    );
+  // The same words in every Catzoid app (DevCatz 98cb06c, MCatzP 1.0.4): how a kept copy goes, a copy moved aside.
+  notify(
+    'success',
+    r.binary === 'kept'
+      ? `MCatzP taken out of the assistants. Your copy at ${r.keptPath} stays${r.removeCommand ? `: remove it with ${r.removeCommand}` : ''}`
+      : r.movedAside
+        ? 'MCatzP uninstalled. An assistant still has it open: the file goes away once that assistant stops it'
+        : 'MCatzP uninstalled',
+  );
+  // Clients whose entry could not be taken out: an error toast once the success one has been read (one toast at a time here).
+  if (r.failed.length) {
+    const label = (id: string) => targets.value.find((t) => t.id === id)?.label ?? id;
+    const text = `Not taken out of ${r.failed.map((f) => `${label(f.id)} (${f.error})`).join(', ')}: remove its MCatzP entry there by hand`;
+    setTimeout(() => notify('error', text), 3300);
+  }
   settings.value = (await attempt(() => api.settings())) ?? settings.value;
   setup.value = (await attempt(() => api.mcatzpSetup(false))) ?? setup.value;
   void loadTargets();
