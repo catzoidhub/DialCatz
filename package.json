@@ -4,6 +4,7 @@
   "desktopName": "dialcatz.desktop",
   "version": "1.1.0",
   "license": "GPL-3.0-only",
+  "repository": "github:catzoidhub/DialCatz",
   "private": true,
   "description": "DialCatz — an open-source API client: collections, environments, history and team sync through a self-hosted DialCatz Den.",
   "main": "./out/main/index.js",
