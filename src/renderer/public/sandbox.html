@@ -132,6 +132,9 @@
           expect,
           environment: dc.env,
           globals: dc.env,
+          // DialCatz has no collection scope: Postman's collection variables are the same variables (found trying an
+          // imported collection whose test script called pm.collectionVariables.set, 2026-11-10).
+          collectionVariables: dc.env,
           variables: dc.env,
           request: ctx.request,
           iterationData: { get: (k) => data[k], has: (k) => Object.prototype.hasOwnProperty.call(data, k), toObject: () => ({ ...data }) },
