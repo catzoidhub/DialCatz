@@ -10,6 +10,7 @@ import Icon from './Icon.vue';
 import CatMood from './CatMood.vue';
 import { GIT_HOST_ICONS } from '../githosticons';
 import { cloneRequest, gitState } from '../gitstate';
+import GitUpdate from './GitUpdate.vue';
 import InstallGitButton from './InstallGitButton.vue';
 import { attempt, notify } from '../state';
 const api = window.dialcatz;
@@ -264,7 +265,7 @@ const broken = reactive(new Set<string>());
         </li>
       </ul>
       <div class="border-t border-base-300/60 px-4 py-3 text-xs opacity-60">
-        <template v-if="gitState?.version">git {{ gitState.version }} · your own config and credentials. Accounts are shared with the Catzoid apps.</template>
+        <div v-if="gitState?.version" class="space-y-1.5"><div>git {{ gitState.version }} · your own config and credentials. Accounts are shared with the Catzoid apps.</div><GitUpdate /></div>
         <span v-else-if="gitState" class="flex flex-wrap items-center gap-2 text-warning">git is missing <InstallGitButton /></span>
       </div>
     </aside>
