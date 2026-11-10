@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { API_METHODS, uid, type ConnectRequest, type DevCatzSite, type DoCatzProject, type McatzpRun, type McatzpTab, type McatzpTabResponse, type Workspace, type PostmanChoice, type DialCatzApi, type HistoryEntry, type TreeItem, type WireRequest } from '@shared/types';
+import { API_METHODS, uid, type ConnectRequest, type DevCatzSite, type DoCatzProject, type McatzpRun, type McatzpTab, type McatzpTabResponse, type Workspace, type EnvVariable, type PostmanChoice, type DialCatzApi, type HistoryEntry, type TreeItem, type WireRequest } from '@shared/types';
 import { dataDir, store } from './store';
 import { applySettings, setAiKey, setSettings, settings } from './settings';
 import * as http from './http';
@@ -1019,6 +1019,23 @@ function importedFrom(w: Workspace, prefix: string, envName: string, legacy: (na
   return out;
 }
 
+/**
+ * A collection's own variables as an environment named after it, made active when none is (or the active one would
+ * override them). Imported again: the
+ * environment of that name gets the variables it lacks, and its values the user changed stay.
+ */
+function collectionEnvironment(workspaceId: string, w: Workspace, name: string, variables: EnvVariable[]): Workspace {
+  const same = w.environments.find((e) => e.name === name);
+  const merged = same ? [...same.variables, ...variables.filter((v) => !same.variables.some((x) => x.key === v.key))] : variables;
+  w = ws.saveEnvironment(workspaceId, { ...(same ?? { id: uid('e_'), name }), variables: merged });
+  // Made active when none is, or when the active one defines the same names: otherwise the collection's requests would
+  // go where that environment points (the sample "httpbin" has its own baseUrl).
+  const active = w.environments.find((e) => e.id === w.activeEnvironmentId);
+  const shadowed = active && active.name !== name && active.variables.some((v) => v.enabled && variables.some((x) => x.key === v.key));
+  if (!active || shadowed) w = ws.setActiveEnvironment(workspaceId, (same ?? w.environments[w.environments.length - 1]).id);
+  return w;
+}
+
 /** Saves what was found in Postman (export or API) into the workspace: collections, environments, globals. */
 function applyPostman(id: string, found: postman.PostmanFound) {
   let w = ws.load(id);
@@ -1027,6 +1044,7 @@ function applyPostman(id: string, found: postman.PostmanFound) {
   for (const c of found.collections) all.push({ ...c.root, sort: sort++ }, ...c.items);
   if (all.length) w = ws.saveItems(id, all);
   for (const e of found.environments) w = ws.saveEnvironment(id, e);
+  for (const c of found.collections) if (c.variables?.length) w = collectionEnvironment(id, w, c.root.name, c.variables);
   if (found.globals.length) w = ws.saveGlobals(id, [...w.globals.filter((g) => !found.globals.some((x) => x.key === g.key)), ...found.globals]);
   if (!w.activeEnvironmentId && w.environments.length) w = ws.setActiveEnvironment(id, w.environments[0].id);
   if (w.serverId) void srv.sync(id).then(() => send('app:workspaces', null));
@@ -1047,7 +1065,7 @@ function deviceName(): Promise<string> {
 }
 
 function doImport(workspaceId: string, text: string) {
-  const { root, items, baseUrl } = importText(text);
+  const { root, items, baseUrl, variables } = importText(text);
   const w0 = ws.load(workspaceId);
   root.sort = w0.items.filter((i) => i.kind === 'collection').length;
   let w = ws.saveItems(workspaceId, [root, ...items]);
@@ -1056,6 +1074,8 @@ function doImport(workspaceId: string, text: string) {
     w = ws.saveEnvironment(workspaceId, { id: uid('e_'), name: root.name, variables: [{ key: 'baseUrl', value: baseUrl, enabled: true, secret: false }] });
     if (!w.activeEnvironmentId) w = ws.setActiveEnvironment(workspaceId, w.environments[w.environments.length - 1].id);
   }
+  // A Postman collection's own variables: an environment named after it (DialCatz has no collection scope).
+  if (variables?.length) w = collectionEnvironment(workspaceId, w, root.name, variables);
   return { workspace: w, collectionId: root.id, count: items.filter((i) => i.kind === 'request').length };
 }
 

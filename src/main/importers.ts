@@ -1,4 +1,4 @@
-import { emptyBody, HTTP_METHODS, newRequest, uid, type HttpMethod, type KeyValue, type RequestAuth, type RequestSpec, type TreeItem } from '@shared/types';
+import { emptyBody, HTTP_METHODS, newRequest, uid, type HttpMethod, type KeyValue, type RequestAuth, type RequestSpec, type TreeItem, type EnvVariable } from '@shared/types';
 import { parse as parseYaml } from 'yaml';
 import { joinUrl, parseCurl, splitUrl, stripLocalFiles } from '@shared/request';
 
@@ -109,7 +109,18 @@ function pmScripts(ev: unknown): { preRequest?: string; tests?: string } {
   return out;
 }
 
-function fromPostman(doc: Record<string, unknown>): { root: TreeItem; items: TreeItem[] } {
+/**
+ * A Postman collection's own variables (`variable`): DialCatz has no collection scope, so they come in as an environment
+ * named after the collection (doImport / applyPostman). Disabled rows stay disabled; secret-typed ones stay secret.
+ */
+function pmVariables(list: unknown): EnvVariable[] {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((v): v is Record<string, unknown> => !!v && typeof v === 'object' && typeof (v as { key?: unknown }).key === 'string' && !!(v as { key: string }).key)
+    .map((v) => ({ key: String(v.key), value: v.value === undefined || v.value === null ? '' : typeof v.value === 'string' ? v.value : JSON.stringify(v.value), enabled: v.disabled !== true, secret: v.type === 'secret' }));
+}
+
+function fromPostman(doc: Record<string, unknown>): { root: TreeItem; items: TreeItem[]; variables: EnvVariable[] } {
   const info = doc.info as { name?: string; description?: string } | undefined;
   const root: TreeItem = { id: uid('c_'), kind: 'collection', parentId: null, name: info?.name || 'Imported collection', sort: 0, auth: pmAuth(doc.auth as PmAuth), description: describe(info?.description), ...pmScripts(doc.event) };
   if (root.auth?.mode === 'inherit') root.auth = { mode: 'none' };
@@ -128,7 +139,7 @@ function fromPostman(doc: Record<string, unknown>): { root: TreeItem; items: Tre
     });
   };
   walk(doc.item, root.id);
-  return { root, items };
+  return { root, items, variables: pmVariables(doc.variable) };
 }
 
 // ------------------------------------------------------------------ OpenAPI
@@ -310,7 +321,7 @@ function fromDialCatz(doc: DialCatzExport): { root: TreeItem; items: TreeItem[] 
   return { root, items };
 }
 
-export function importText(text: string): { root: TreeItem; items: TreeItem[]; baseUrl?: string } {
+export function importText(text: string): { root: TreeItem; items: TreeItem[]; baseUrl?: string; variables?: EnvVariable[] } {
   const trimmed = text.trim();
   if (trimmed.startsWith('curl')) {
     const spec = parseCurl(trimmed);

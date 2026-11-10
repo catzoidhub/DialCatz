@@ -13,7 +13,8 @@ import { importText } from './importers';
  */
 
 export interface PostmanFound {
-  collections: { root: TreeItem; items: TreeItem[] }[];
+  /** `variables`: the collection's own (Postman `variable`), saved as an environment named after it. */
+  collections: { root: TreeItem; items: TreeItem[]; variables?: EnvVariable[] }[];
   environments: Environment[];
   globals: EnvVariable[];
   skipped: string[];
