@@ -37,6 +37,7 @@ import { Mcatzp } from './mcatzp';
 import * as mcatzpSetup from './mcatzp/install';
 import { MCATZP_TARGETS } from '@catzoid/mcatzp-host';
 import { randomUUID } from 'node:crypto';
+import { systemVersion } from './system';
 
 /**
  * DialCatz — an API client: collections, environments and history on this computer, team workspaces synced
@@ -236,18 +237,6 @@ const mcatzpClient = (id: unknown) => {
   if (!known) throw new Error('Unknown client');
   return known;
 };
-
-/** The OS version for About: on Linux the distribution (/etc/os-release, e.g. "Ubuntu 24.04.3 LTS"), not the kernel (as DBCatz). */
-function systemVersion(): string {
-  if (process.platform !== 'linux') return process.getSystemVersion();
-  try {
-    const name = /^PRETTY_NAME="?([^"\n]+)"?/m.exec(readFileSync('/etc/os-release', 'utf8'))?.[1];
-    if (name) return `${name} (kernel ${process.getSystemVersion()})`;
-  } catch {
-    /* no os-release */
-  }
-  return process.getSystemVersion();
-}
 
 function api(): DialCatzApi {
   return {

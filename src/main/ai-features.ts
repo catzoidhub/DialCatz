@@ -2,6 +2,7 @@ import { HTTP_METHODS, type AskAction, type AskAnswer, type AskContext, type AiT
 import { AiClient } from './ai';
 import { needFeature } from './settings';
 import * as dbcatz from './dbcatz';
+import { systemLabel } from './system';
 
 /**
  * DialCatz's AI features, on the shared connection (ai.ts). What goes out is kept small and without secrets:
@@ -129,8 +130,9 @@ Steps you can propose (each becomes a button; nothing runs on its own):
 - groupItems: put collections or environments (target) into a sidebar group (group name; made when it does not exist): existing ones by id (ids), ones created in this answer by name (names). Groups only arrange the sidebar on this computer.
 - openInDbcatz: open a table in DBCatz, read-only, when the user wants to check the database ("is the user saved?", "show the orders table", "check the database"): conn from the DBCatz connections below, db, table, and col + val for one row (e.g. id = 42) or "" for the whole table. For the open request, prefer its collection's connection and database and the table its last call touched.
 
-Rules: never invent request ids, collection ids or DBCatz connection ids that are not listed. Keep replies short and practical. If the user only asks a question, answer it with no steps. Fill every field of every step (use "" or false where it does not apply).
+Rules: never invent request ids, collection ids or DBCatz connection ids that are not listed. When you mention commands, shortcuts, menus or file paths, use the ones for the user's computer (below) and never guess a path. Keep replies short and practical. If the user only asks a question, answer it with no steps. Fill every field of every step (use "" or false where it does not apply).
 
+The user's computer: ${systemLabel()}
 Workspace: "${str(c.workspace, 120)}"
 Active environment: ${c.environment ? `"${str(c.environment, 120)}"` : 'none'}
 Variables (names only): ${c.variables.slice(0, 200).map((v) => str(v, 80)).join(', ') || 'none'}
