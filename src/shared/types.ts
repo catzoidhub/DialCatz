@@ -430,8 +430,22 @@ export interface DialCatzSettings {
   ai: AiSettings;
   requests: RequestDefaults;
   mcatzp: McatzpSettings;
+  support: SupportState;
 }
-export type DialCatzSettingsPatch = { theme?: Theme; ai?: Partial<Omit<AiSettings, 'keys'>>; requests?: Partial<RequestDefaults>; mcatzp?: Partial<Omit<McatzpSettings, 'clients'>> };
+export type DialCatzSettingsPatch = { theme?: Theme; ai?: Partial<Omit<AiSettings, 'keys'>>; requests?: Partial<RequestDefaults>; mcatzp?: Partial<Omit<McatzpSettings, 'clients'>>; support?: Partial<Omit<SupportState, 'since'>> };
+
+/**
+ * Support Catzoid (Catzoid #94): when this DialCatz first ran with the feature (the corner card waits 7 days after
+ * it; set by the main process), how many times the card was put off with Not now, when that last was, and whether it
+ * is off for good (Don't show again, or the user already joined / donated from it). Settings → About keeps the links
+ * either way. DialCatz's own, per computer.
+ */
+export interface SupportState {
+  since: number | null;
+  later: number;
+  laterAt: number | null;
+  off: boolean;
+}
 
 /** Settings → MCatzP: the local channel an AI client reaches DialCatz through. DialCatz's own, per computer. */
 export interface McatzpSettings {

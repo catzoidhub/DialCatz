@@ -442,6 +442,9 @@ export async function execute(spec: RequestSpec, itemId: string | null, token: s
   return { result, scripts };
 }
 
+/** Requests that got a response in this window's session: Support Catzoid's success moment (Catzoid #94). */
+export const sentOk = ref(0);
+
 export async function sendTab(tab: Tab): Promise<void> {
   if (isWs(tab)) return toggleWs(tab);
   if (tab.sending) {
@@ -458,6 +461,7 @@ export async function sendTab(tab: Tab): Promise<void> {
     const { result: r, scripts } = await execute(plain(tab.spec), tab.itemId, tab.id);
     tab.result = r;
     tab.scripts = scripts;
+    if (r.response) sentOk.value++;
     const entry: HistoryEntry = {
       id: uid('h_'),
       at: tab.sentAt,

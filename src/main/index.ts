@@ -9,7 +9,7 @@ import { hostname, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { API_METHODS, uid, type ConnectRequest, type DevCatzSite, type DoCatzProject, type McatzpRun, type McatzpTab, type McatzpTabResponse, type Workspace, type EnvVariable, type PostmanChoice, type DialCatzApi, type HistoryEntry, type TreeItem, type WireRequest } from '@shared/types';
 import { dataDir, store } from './store';
-import { applySettings, setAiKey, setSettings, settings } from './settings';
+import { applySettings, setAiKey, setSettings, settings, startSupportClock } from './settings';
 import * as http from './http';
 import * as sockets from './ws';
 import * as ws from './workspaces';
@@ -1232,6 +1232,7 @@ if (primary) app.whenReady().then(async () => {
   }
   if (app.isPackaged && !isLinux) app.setAsDefaultProtocolClient('dialcatz');
   ws.ensureDefault();
+  startSupportClock();
   const impl = api() as unknown as Record<string, (...args: unknown[]) => unknown>;
   for (const m of API_METHODS) ipcMain.handle(`dialcatz:${m}`, (_e, ...args) => impl[m](...args));
   ipcMain.handle('dialcatz:pendingConnect', () => pendingConnect);

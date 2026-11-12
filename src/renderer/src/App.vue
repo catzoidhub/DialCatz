@@ -6,6 +6,8 @@ import PopMenu from './components/PopMenu.vue';
 import UpdateDialog from './components/UpdateDialog.vue';
 import ReportDialog from './components/ReportDialog.vue';
 import WelcomeDialog from './components/WelcomeDialog.vue';
+import SupportNudge from './components/SupportNudge.vue';
+import CatHeart from './components/CatHeart.vue';
 import UninstallDialog from './components/UninstallDialog.vue';
 import McatzpPairDialog from './components/McatzpPairDialog.vue';
 import RequestsSection from './components/RequestsSection.vue';
@@ -46,6 +48,13 @@ watch(
   },
 );
 watch(workspace, (w) => w && syncTabsWithWorkspace(w));
+
+/** Support Catzoid (Catzoid #94): the heart in the rail → Settings → About, scrolled to its card. */
+function openSupport() {
+  settingsTab.value = 'about';
+  goSection('settings');
+  setTimeout(() => document.getElementById('support-catzoid')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150);
+}
 
 const offs: (() => void)[] = [];
 function onCommand(cmd: string) {
@@ -264,6 +273,10 @@ onBeforeUnmount(() => offs.forEach((f) => f()));
         </button>
       </div>
       <div class="my-2 w-12 border-t border-base-content/10" />
+      <!-- Support Catzoid (Catzoid #94): small and quiet, always there; no badge, no animation. -->
+      <button class="support-heart no-drag mb-1 grid size-8 shrink-0 place-items-center rounded-[10px]" title="Support Catzoid" aria-label="Support Catzoid" @click="openSupport">
+        <CatHeart class="size-5" />
+      </button>
       <button class="rail-item no-drag" :class="{ 'is-active': section === 'settings' }" style="--rail-c: var(--c-settings)" @click="goSection('settings')">
         <span class="rail-icon relative"><Icon name="settings" class="size-[18px]" /><span v-if="updateDot" class="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-primary ring-2 ring-base-200" title="An update is available" /><span v-else-if="mcatzpUpdate" class="mcatzp-dot absolute -top-0.5 -right-0.5 ring-2 ring-base-200" :title="`MCatzP ${mcatzpUpdate} is available`" /></span>Settings
       </button>
@@ -294,6 +307,7 @@ onBeforeUnmount(() => offs.forEach((f) => f()));
     <UpdateDialog v-if="updateOpen" @close="updateOpen = false" />
     <ReportDialog v-if="reportOpen" :kind="reportOpen" @close="reportOpen = null" />
     <WelcomeDialog v-if="ready" />
+    <SupportNudge v-if="ready" />
     <McatzpPairDialog />
     <UninstallDialog v-if="uninstallOpen" @close="uninstallOpen = false" />
     <div v-if="askCrash" class="toast toast-start toast-bottom z-50">

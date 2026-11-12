@@ -1,5 +1,5 @@
 import { nativeTheme } from 'electron';
-import { AI_FEATURES, AI_PROVIDERS, type AiFeature, type AiProvider, type DialCatzSettings, type DialCatzSettingsPatch, type McatzpSettings, type RequestDefaults, type Theme } from '@shared/types';
+import { AI_FEATURES, AI_PROVIDERS, type AiFeature, type AiProvider, type DialCatzSettings, type DialCatzSettingsPatch, type McatzpSettings, type RequestDefaults, type SupportState, type Theme } from '@shared/types';
 import { AUTO_HEADERS } from '@shared/request';
 import { cleanClients } from './mcatzp/clients';
 import { store } from './store';
@@ -26,6 +26,11 @@ function mcatzpOf(m: Partial<McatzpSettings> | undefined): McatzpSettings {
   return { on: m?.on === true, all: m?.all === true, workspaces: ids(m?.workspaces), values: m?.values !== false, responses: m?.responses !== false, git: m?.git === true, changes: m?.changes !== false, clients };
 }
 
+const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
+function supportOf(x: Partial<SupportState> | undefined): SupportState {
+  return { since: num(x?.since), later: Math.min(9, Math.max(0, Math.round(Number(x?.later) || 0))), laterAt: num(x?.laterAt), off: x?.off === true };
+}
+
 function local(): Stored {
   const s = store.extra<Partial<Stored>>(KEY) ?? {};
   const ai = s.ai ?? ({} as Partial<Stored['ai']>);
@@ -35,6 +40,7 @@ function local(): Stored {
     ai: { enabled: ai.enabled === true, off: Array.isArray(ai.off) ? ai.off.filter((f): f is AiFeature => FEATURES.includes(f)) : [], provider: PROVIDERS.includes(ai.provider as AiProvider) ? (ai.provider as AiProvider) : 'anthropic', models: ai.models ?? {}, baseUrls: ai.baseUrls ?? {} },
     requests: { timeoutMs: Number(r.timeoutMs) || REQUEST_DEFAULTS.timeoutMs, followRedirects: r.followRedirects !== false, insecure: r.insecure === true, autoHeaders: r.autoHeaders && typeof r.autoHeaders === 'object' ? r.autoHeaders : {} },
     mcatzp: mcatzpOf(s.mcatzp),
+    support: supportOf(s.support),
   };
 }
 
@@ -101,11 +107,21 @@ export function setSettings(patch: DialCatzSettingsPatch): DialCatzSettings {
     if (m.changes !== undefined) s.mcatzp.changes = m.changes === true;
     if (m.workspaces !== undefined) s.mcatzp.workspaces = ids(m.workspaces);
   }
+  const sp = patch.support;
+  if (sp) s.support = supportOf({ ...s.support, ...sp, since: s.support.since });
   store.setExtra(KEY, s);
   const conn = ai && (ai.provider !== undefined || ai.models !== undefined || ai.baseUrls !== undefined);
   if (patch.theme !== undefined || conn) writeShared({ ...(patch.theme !== undefined ? { theme: s.theme } : {}), ...(conn ? { ai: { provider: s.ai.provider, models: s.ai.models, baseUrls: s.ai.baseUrls } } : {}) });
   nativeTheme.themeSource = s.theme;
   return settings();
+}
+
+/** Support Catzoid (#94): the corner card counts its 7 days from the first run that knows about it. */
+export function startSupportClock(): void {
+  const s = stored();
+  if (s.support.since) return;
+  s.support = { ...s.support, since: Date.now() };
+  store.setExtra(KEY, s);
 }
 
 /** Approved MCatzP clients: only the main process changes them (a pairing answered, Revoke). */
