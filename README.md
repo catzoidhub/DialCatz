@@ -9,7 +9,7 @@
   <a href="https://catzoid.com/community">Community</a>
 </p>
 
-An API client for macOS, Windows and Linux: REST, GraphQL and WebSocket requests, collections, environments, scripts, tests and a runner — and your team’s own server, [DialCatz Den](https://github.com/catzoidhub/DialCatz-Den), when you want to share them.
+An API client for macOS, Windows and Linux: REST, GraphQL and WebSocket requests, collections, environments, scripts, tests and a runner. Share them with your team through Git, as files in a repository you already have with no server at all, or live through your team’s own server, [DialCatz Den](https://github.com/catzoidhub/DialCatz-Den).
 
 Part of [Catzoid](https://catzoid.com) — free, open-source developer tools with nine lives. All cats, no catch: no
 account, no Pro tier, nothing locked behind a payment.
@@ -19,7 +19,7 @@ account, no Pro tier, nothing locked behind a payment.
 - **Requests** — REST, GraphQL and WebSocket; params, headers, auth, bodies (JSON, form, multipart, binary); paste a cURL command and it becomes a request.
 - **Collections and environments** — folders, variables, pre-request and test scripts, a runner with iterations; results export as JSON or JUnit XML.
 - **Import** — Postman collections and data exports, Postman workspaces with an API key, OpenAPI / Swagger, cURL.
-- **Teams** — a self-hosted [DialCatz Den](https://github.com/catzoidhub/DialCatz-Den): live sync, invite links instead of accounts, environment values that stay on each computer. Or share through Git: a workspace kept as files in your repository.
+- **Teams, two ways** — through Git, with no server: a workspace kept as small YAML files in your repository, reviewed in pull requests and shared with pull and push. Or live through a self-hosted [DialCatz Den](https://github.com/catzoidhub/DialCatz-Den): invite links instead of accounts, a teammate’s change within a second. Either way, environment values stay on each computer. [Git or DialCatz Den?](https://catzoid.com/docs/dialcatz/git#git-or-dialcatz-den)
 - **AI, optional** — explain a response, write tests, generate a body; names and URLs only, never your secrets.
 - **The family** — every [DevCatz](https://github.com/catzoidhub/DevCatz) site is an environment; Check in DBCatz opens the table a request touched.
 
