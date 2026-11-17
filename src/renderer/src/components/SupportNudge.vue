@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import CatHeart from './CatHeart.vue';
+import RatingForm from './RatingForm.vue';
 import { aiOn, askOpen, attempt, sentOk, settings, workspace } from '../state';
 import { openCommunity, openDonate } from '../support';
 
@@ -17,12 +18,24 @@ const tick = setInterval(() => (now.value = Date.now()), 60_000);
 onBeforeUnmount(() => clearInterval(tick));
 
 const shown = ref(false);
+/** Rating in the card (Catzoid #96): stars picked → the review box replaces the buttons; Cancel brings them back. */
+const rating = ref(false);
+const formKey = ref(0);
+function rated(sent: boolean) {
+  shown.value = false;
+  // Sent → the main process turned the card off; queued (offline) → off here too, the rating goes later.
+  if (sent) void attempt(() => window.dialcatz.setSettings({ support: { off: true } })).then((n) => n && (settings.value = n));
+}
+function unrate() {
+  rating.value = false;
+  formKey.value++;
+}
 // Ask DialCatz's ✦ button sits in the same corner when AI is on: the card goes above it.
 const askFab = computed(() => aiOn('ask') && !askOpen.value && !!workspace.value);
 const s = computed(() => settings.value?.support);
 const due = computed(() => {
   const x = s.value;
-  if (!x || x.off || !x.since) return false;
+  if (!x || x.off || x.rating || !x.since) return false;
   if (now.value - x.since < 7 * DAY) return false;
   if (x.later >= 2 || (x.later === 1 && now.value - (x.laterAt ?? 0) < 60 * DAY)) return false;
   return true;
@@ -63,11 +76,14 @@ async function answer(a: 'later' | 'never' | 'community' | 'donate') {
           </p>
         </div>
       </div>
-      <div class="mt-3 flex gap-1.5 pl-14">
+      <div class="mt-3 pl-14">
+        <RatingForm :key="formKey" compact @pick="rating = true" @done="rated" @cancel="unrate" />
+      </div>
+      <div v-if="!rating" class="mt-3 flex gap-1.5 pl-14">
         <button class="btn btn-primary btn-sm" @click="answer('community')">Join the community</button>
         <button class="btn btn-sm" @click="answer('donate')">Support us</button>
       </div>
-      <div class="mt-2 flex justify-end gap-3 pl-14 text-xs">
+      <div v-if="!rating" class="mt-2 flex justify-end gap-3 pl-14 text-xs">
         <button class="link link-hover opacity-60" @click="answer('later')">Not now</button>
         <button class="link link-hover opacity-60" @click="answer('never')">Don't show again</button>
       </div>

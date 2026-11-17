@@ -432,7 +432,7 @@ export interface DialCatzSettings {
   mcatzp: McatzpSettings;
   support: SupportState;
 }
-export type DialCatzSettingsPatch = { theme?: Theme; ai?: Partial<Omit<AiSettings, 'keys'>>; requests?: Partial<RequestDefaults>; mcatzp?: Partial<Omit<McatzpSettings, 'clients'>>; support?: Partial<Omit<SupportState, 'since'>> };
+export type DialCatzSettingsPatch = { theme?: Theme; ai?: Partial<Omit<AiSettings, 'keys'>>; requests?: Partial<RequestDefaults>; mcatzp?: Partial<Omit<McatzpSettings, 'clients'>>; support?: Partial<Pick<SupportState, 'later' | 'laterAt' | 'off' | 'replySeen'>> };
 
 /**
  * Support Catzoid (Catzoid #94): when this DialCatz first ran with the feature (the corner card waits 7 days after
@@ -445,6 +445,23 @@ export interface SupportState {
   later: number;
   laterAt: number | null;
   off: boolean;
+  /** Your rating (Catzoid #96): what the site answered — the cleaned text and whether it is shown yet. Main process only. */
+  rating: SupportRating | null;
+  /** A rating sent without a connection: it goes by itself later. Main process only. */
+  ratingQueued: { rating: number; text: string | null; at: number } | null;
+  /** The `rating.repliedAt` already shown in Settings → About: the dot on the rail's heart goes then. */
+  replySeen: string | null;
+}
+/** One rating of DialCatz (Catzoid #96). status: none = stars only; pending = the text waits for the team. */
+export interface SupportRating {
+  rating: number;
+  text: string | null;
+  status: 'none' | 'pending' | 'approved' | 'hidden';
+  version: string;
+  sentAt: number;
+  /** The Catzoid team's reply (catzoid.com/admin/reviews), plain text with line breaks, and when it was written. */
+  reply?: string | null;
+  repliedAt?: string | null;
 }
 
 /** Settings → MCatzP: the local channel an AI client reaches DialCatz through. DialCatz's own, per computer. */
@@ -925,6 +942,10 @@ export interface UpdatePrefs {
   /** "Skip this version". */
   skipped: string | null;
   lastChecked: number | null;
+  /** What's New opens by itself when a new version is found (Catzoid #97); off = only the dot, Settings and the notification. */
+  dialog: boolean;
+  /** When the dialog last opened by itself: Later brings it back on the next launch or 24 h after this. */
+  promptAt: number | null;
 }
 /** One version's notes from the Catzoid site (`/api/dialcatz/releases`). */
 export interface ReleaseNote {
@@ -1228,12 +1249,18 @@ export interface DialCatzApi {
 
   updateState(): Promise<UpdateState>;
   updateCheck(): Promise<UpdateState>;
+  /** Fetches the release notes again when they are missing (What's New opened). */
+  updateNotes(): Promise<void>;
   updateDownload(): Promise<void>;
   updateCancel(): Promise<void>;
   updateInstall(when: 'now' | 'quit'): Promise<void>;
   updateSkip(version: string): Promise<void>;
   updatePrefs(): Promise<UpdatePrefs>;
-  setUpdatePrefs(patch: Partial<Pick<UpdatePrefs, 'auto' | 'channel' | 'notify'>>): Promise<UpdatePrefs>;
+  setUpdatePrefs(patch: Partial<Pick<UpdatePrefs, 'auto' | 'channel' | 'notify' | 'dialog' | 'promptAt'>>): Promise<UpdatePrefs>;
+  /** Rate DialCatz 1–5 with an optional review (Catzoid #96); queued when offline. */
+  ratingSend(rating: number, text: string | null): Promise<{ sent: boolean; queued: boolean }>;
+  /** Reads this install's review again from the site (the team's reply, the status). */
+  ratingRefresh(): Promise<void>;
   uninstallPlan(): Promise<UninstallPlan>;
   uninstall(removeShared: boolean): Promise<void>;
   reportPreview(draft: ReportDraft): Promise<string>;
@@ -1280,7 +1307,7 @@ export const API_METHODS = [
   'send', 'pickFile', 'pickDataFile', 'saveText', 'cancel', 'wsConnect', 'wsSend', 'wsClose', 'saveResponse', 'history', 'addHistory', 'clearHistory',
   'servers', 'probeServer', 'connectWithToken', 'connectWithCode', 'refreshServer', 'disconnectServer', 'subscribeWorkspace', 'setPresence', 'presence', 'syncWorkspace', 'resolveConflict',
   'openUrl', 'exportWorkspace', 'exportEnvironment', 'importEnvironments', 'dbcatzInfo', 'dbcatzOpen', 'saveDbTarget', 'copyText', 'hostName',
-  'updateState', 'updateCheck', 'updateDownload', 'updateCancel', 'updateInstall', 'updateSkip', 'updatePrefs', 'setUpdatePrefs',
+  'updateState', 'updateCheck', 'updateNotes', 'updateDownload', 'updateCancel', 'updateInstall', 'updateSkip', 'updatePrefs', 'setUpdatePrefs', 'ratingSend', 'ratingRefresh',
   'uninstallPlan', 'uninstall', 'reportPreview', 'reportSend', 'captureWindow', 'reportError', 'reportPrefs', 'setReportPrefs', 'mcatzpActivity', 'mcatzpClearActivity', 'mcatzpRevoke', 'mcatzpSetup', 'mcatzpUpdate', 'mcatzpInstall', 'mcatzpUninstall', 'mcatzpInstallCancel', 'mcatzpApprovals', 'mcatzpTargets', 'mcatzpAddToClient', 'mcatzpRemoveFromClient', 'mcatzpPending', 'mcatzpAnswer', 'mcatzpWindowReply',
 ] as const satisfies readonly (keyof DialCatzApi)[];
 

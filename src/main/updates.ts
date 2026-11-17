@@ -20,7 +20,7 @@ const { autoUpdater } = updaterPkg;
 const KEY = 'updates';
 const FIRST_CHECK = 30_000;
 const EVERY = 6 * 60 * 60_000;
-const DEFAULTS: UpdatePrefs = { auto: true, channel: 'stable', notify: true, skipped: null, lastChecked: null };
+const DEFAULTS: UpdatePrefs = { auto: true, channel: 'stable', notify: true, skipped: null, lastChecked: null, dialog: true, promptAt: null };
 
 let state: UpdateState = { kind: 'idle' };
 let manual = false;
@@ -29,6 +29,8 @@ let notified: string | null = null;
 let timer: NodeJS.Timeout | null = null;
 let send: (s: UpdateState) => void = () => {};
 let onOpen: () => void = () => {};
+/** The window is in front and opens What's New by itself (Catzoid #97): the notification would only repeat it. */
+let inFront: () => boolean = () => false;
 
 export function prefs(): UpdatePrefs {
   const p = store.extra<Partial<UpdatePrefs>>(KEY) ?? {};
@@ -38,6 +40,8 @@ export function prefs(): UpdatePrefs {
     notify: p.notify !== false,
     skipped: typeof p.skipped === 'string' ? p.skipped : null,
     lastChecked: typeof p.lastChecked === 'number' ? p.lastChecked : null,
+    dialog: p.dialog !== false,
+    promptAt: typeof p.promptAt === 'number' ? p.promptAt : null,
   };
 }
 function savePrefs(patch: Partial<UpdatePrefs>): UpdatePrefs {
@@ -46,11 +50,13 @@ function savePrefs(patch: Partial<UpdatePrefs>): UpdatePrefs {
   return next;
 }
 
-export function setPrefs(patch: Partial<Pick<UpdatePrefs, 'auto' | 'channel' | 'notify'>>): UpdatePrefs {
+export function setPrefs(patch: Partial<Pick<UpdatePrefs, 'auto' | 'channel' | 'notify' | 'dialog' | 'promptAt'>>): UpdatePrefs {
   const clean: Partial<UpdatePrefs> = {};
   if (typeof patch.auto === 'boolean') clean.auto = patch.auto;
   if (patch.channel === 'stable' || patch.channel === 'beta') clean.channel = patch.channel;
   if (typeof patch.notify === 'boolean') clean.notify = patch.notify;
+  if (typeof patch.dialog === 'boolean') clean.dialog = patch.dialog;
+  if (typeof patch.promptAt === 'number' && Number.isFinite(patch.promptAt)) clean.promptAt = patch.promptAt;
   const next = savePrefs(clean);
   schedule();
   return next;
@@ -98,25 +104,68 @@ function cmp(a: string, b: string): number {
   return 0;
 }
 
-/** The notes of every version after the installed one up to the new one (the site's releases list), newest first. */
+/**
+ * The notes of every version after the installed one up to the new one (the site's releases list), newest first; else
+ * the yml's own notes (empty for our builds). "Sometimes no notes" (user, 2026-11-18, all four apps): one slow or failed
+ * request, or the site's GitHub cache not having the new release yet, left What's New empty until the next check 6 h
+ * later. Now three tries here, and refetches while the newest version's notes are missing (retryNotes, refreshNotes).
+ */
 async function notesBetween(from: string, to: string, info: UpdateInfo): Promise<ReleaseNote[]> {
-  try {
-    const r = await fetch(`${siteBase()}/api/dialcatz/releases`, { signal: AbortSignal.timeout(10_000) });
-    if (r.ok) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, attempt * 3000));
+    try {
+      const r = await fetch(`${siteBase()}/api/dialcatz/releases`, { signal: AbortSignal.timeout(15_000) });
+      if (!r.ok) continue;
       const list = (await r.json()) as { version: string; date: string; notes: string }[];
       const picked = list.filter((x) => cmp(x.version, from) > 0 && cmp(x.version, to) <= 0).map((x) => ({ version: x.version, date: x.date, notes: x.notes ?? '' }));
       if (picked.length) return picked.sort((a, b) => cmp(b.version, a.version));
+      break; // answered, but without this release yet: retryNotes picks it up
+    } catch {
+      /* next try */
     }
-  } catch {
-    /* the site's list is a nicety: the yml's own notes below */
   }
   const own = typeof info.releaseNotes === 'string' ? info.releaseNotes : Array.isArray(info.releaseNotes) ? info.releaseNotes.map((n) => n.note ?? '').join('\n\n') : '';
   return [{ version: info.version, date: info.releaseDate ?? '', notes: own.replace(/<[^>]+>/g, '') }];
 }
 
+let lastInfo: UpdateInfo | null = null;
+let notesTimer: NodeJS.Timeout | null = null;
+
+/** The offered version's notes are missing (see notesBetween). */
+const notesMissing = () => {
+  const s = state;
+  return s.kind === 'available' && !s.notes.find((n) => n.version === s.version)?.notes.trim();
+};
+
+function stopNotes() {
+  if (notesTimer) clearInterval(notesTimer);
+  notesTimer = null;
+}
+
+/** Fetches the notes again while they are missing: every 5 minutes for an hour (retryNotes), and when What's New opens. */
+export async function refreshNotes(): Promise<void> {
+  const info = lastInfo;
+  if (!info || !notesMissing() || state.kind !== 'available') return stopNotes();
+  const { version, current: from } = state;
+  const notes = await notesBetween(from, version, info);
+  if (info !== lastInfo || state.kind !== 'available' || state.version !== version) return;
+  if (notes.some((n) => n.notes.trim())) set({ ...state, notes });
+  if (!notesMissing()) stopNotes();
+}
+
+function retryNotes() {
+  stopNotes();
+  if (!notesMissing()) return;
+  let left = 12;
+  notesTimer = setInterval(() => {
+    if (--left < 0) return stopNotes();
+    void refreshNotes();
+  }, 5 * 60_000);
+}
+
 function notify(version: string) {
   const p = prefs();
-  if (manual || !p.notify || notified === version || !Notification.isSupported()) return;
+  if (manual || !p.notify || notified === version || (p.dialog && inFront()) || !Notification.isSupported()) return;
   notified = version;
   const n = new Notification({ title: `DialCatz ${version} is available`, body: 'Click to see what’s new.' });
   n.on('click', () => onOpen());
@@ -142,6 +191,8 @@ export async function check(byUser: boolean): Promise<UpdateState> {
     } else {
       const zip = info.files?.find((f) => f.url.endsWith('.zip')) ?? info.files?.[0];
       set({ kind: 'available', version: info.version, current: app.getVersion(), size: zip?.size ?? null, notes: await notesBetween(app.getVersion(), info.version, info) });
+      lastInfo = info;
+      retryNotes();
       notify(info.version);
     }
   } catch (e) {
@@ -202,10 +253,14 @@ function schedule() {
   timer = setInterval(() => void check(false), EVERY);
 }
 
-/** Wires the updater: `onState` reaches the window, `open` shows it with the What's New dialog (a notification click). */
-export function init(onState: (s: UpdateState) => void, open: () => void): void {
+/**
+ * Wires the updater: `onState` reaches the window, `open` shows it with the What's New dialog (a notification click),
+ * `front` says whether the window is visible and focused.
+ */
+export function init(onState: (s: UpdateState) => void, open: () => void, front: () => boolean = () => false): void {
   send = onState;
   onOpen = open;
+  inFront = front;
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.logger = null;

@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { activeTab, activeTabId, mcatzpAsk, mcatzpUpdate, mcatzpCommand, mcatzpInstalling, mcatzpOpen, mcatzpRefresh, mcatzpRun, mcatzpTabResponse, mcatzpTabs, plain, notify, selectWorkspace, aiOn, askOpen, connectRequest as connect, goSection, importRequest, loadHistory, onWsEvent, presence, loadSettings, loadWorkspaces, reloadWorkspace, restoreTabs, section, sendTab, settings, settingsTab, syncTabsWithWorkspace, updateState, updateOpen, reportOpen, uninstallOpen, tabs, toast, workspace, type Section } from './state';
+import { activeTab, activeTabId, mcatzpAsk, mcatzpUpdate, mcatzpCommand, mcatzpInstalling, mcatzpOpen, mcatzpRefresh, mcatzpRun, mcatzpTabResponse, mcatzpTabs, plain, notify, selectWorkspace, aiOn, askOpen, connectRequest as connect, goSection, importRequest, loadHistory, onWsEvent, presence, loadSettings, loadWorkspaces, reloadWorkspace, restoreTabs, section, sendTab, settings, settingsTab, syncTabsWithWorkspace, updateState, updateOpen, updateOpenAuto, reportOpen, uninstallOpen, tabs, toast, workspace, type Section } from './state';
 import { backIndex, backList, canBack, canForward, forwardList, goBack, goForward, goTo, navApply, navPrune, navVisit, type NavEntry } from './nav';
 import PopMenu from './components/PopMenu.vue';
 import UpdateDialog from './components/UpdateDialog.vue';
 import ReportDialog from './components/ReportDialog.vue';
 import WelcomeDialog from './components/WelcomeDialog.vue';
 import SupportNudge from './components/SupportNudge.vue';
+import UpdatePrompt from './components/UpdatePrompt.vue';
 import CatHeart from './components/CatHeart.vue';
 import UninstallDialog from './components/UninstallDialog.vue';
 import McatzpPairDialog from './components/McatzpPairDialog.vue';
@@ -49,6 +50,11 @@ watch(
 );
 watch(workspace, (w) => w && syncTabsWithWorkspace(w));
 
+/** The Catzoid team replied to this install's rating and it was not seen in Settings → About yet (Catzoid #96). */
+const replyDot = computed(() => {
+  const x = settings.value?.support;
+  return !!x?.rating?.repliedAt && x.rating.repliedAt !== x.replySeen;
+});
 /** Support Catzoid (Catzoid #94): the heart in the rail → Settings → About, scrolled to its card. */
 function openSupport() {
   settingsTab.value = 'about';
@@ -68,10 +74,12 @@ function onCommand(cmd: string) {
       goSection('settings');
       break;
     case 'checkUpdates':
+      updateOpenAuto.value = false;
       updateOpen.value = true;
       if (!['available', 'downloading', 'verifying', 'downloaded'].includes(updateState.value.kind)) void api.updateCheck();
       break;
     case 'whatsNew':
+      updateOpenAuto.value = false;
       updateOpen.value = true;
       break;
     case 'reportBug':
@@ -274,7 +282,8 @@ onBeforeUnmount(() => offs.forEach((f) => f()));
       </div>
       <div class="my-2 w-12 border-t border-base-content/10" />
       <!-- Support Catzoid (Catzoid #94): small and quiet, always there; no badge, no animation. -->
-      <button class="support-heart no-drag mb-1 grid size-8 shrink-0 place-items-center rounded-[10px]" title="Support Catzoid" aria-label="Support Catzoid" @click="openSupport">
+      <button class="support-heart no-drag relative mb-1 grid size-8 shrink-0 place-items-center rounded-[10px]" :title="replyDot ? 'The Catzoid team replied to your rating' : 'Support Catzoid'" :aria-label="replyDot ? 'The Catzoid team replied to your rating' : 'Support Catzoid'" @click="openSupport">
+        <span v-if="replyDot" class="absolute top-0.5 right-0.5 size-2 rounded-full bg-primary ring-2 ring-base-200" />
         <CatHeart class="size-5" />
       </button>
       <button class="rail-item no-drag" :class="{ 'is-active': section === 'settings' }" style="--rail-c: var(--c-settings)" @click="goSection('settings')">
@@ -308,6 +317,7 @@ onBeforeUnmount(() => offs.forEach((f) => f()));
     <ReportDialog v-if="reportOpen" :kind="reportOpen" @close="reportOpen = null" />
     <WelcomeDialog v-if="ready" />
     <SupportNudge v-if="ready" />
+    <UpdatePrompt v-if="ready" />
     <McatzpPairDialog />
     <UninstallDialog v-if="uninstallOpen" @close="uninstallOpen = false" />
     <div v-if="askCrash" class="toast toast-start toast-bottom z-50">

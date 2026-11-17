@@ -30,6 +30,7 @@ import * as datafile from './datafile';
 import * as ai from './ai-features';
 import { siteBase } from './shared';
 import * as updates from './updates';
+import * as reviews from './reviews';
 import * as uninstall from './uninstall';
 import * as reports from './reports';
 import { mergeRoutes } from './routemerge';
@@ -824,12 +825,15 @@ function api(): DialCatzApi {
 
     updateState: async () => updates.current(),
     updateCheck: () => updates.check(true),
+    updateNotes: () => updates.refreshNotes(),
     updateDownload: () => updates.download(),
     updateCancel: async () => updates.cancelDownload(),
     updateInstall: async (when) => updates.install(when === 'quit' ? 'quit' : 'now'),
     updateSkip: async (version) => updates.skip(String(version)),
     updatePrefs: async () => updates.prefs(),
     setUpdatePrefs: async (patch) => updates.setPrefs(patch ?? {}),
+    ratingSend: (rating, text) => reviews.send(Number(rating), typeof text === 'string' ? text : null),
+    ratingRefresh: () => reviews.refresh(),
     uninstallPlan: async () => uninstall.plan(),
     uninstall: (removeShared) => uninstall.run(removeShared === true),
     reportPreview: async (draft) => reports.preview(draft),
@@ -1279,7 +1283,10 @@ if (primary) app.whenReady().then(async () => {
       win?.focus();
       send('app:command', 'whatsNew');
     },
+    () => !!win && !win.isDestroyed() && win.isVisible() && win.isFocused(),
   );
+  // Ratings sent without a connection go by themselves (Catzoid #96).
+  reviews.start(() => send('app:settings', settings()));
   const link = process.argv.find((a) => a.startsWith('dialcatz://'));
   if (link) handleLink(link);
   // Team workspaces: refresh identities, then sync every minute while the app runs.

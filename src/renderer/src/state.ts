@@ -110,6 +110,8 @@ export const mcatzpUpdate = ref<string | null>(null);
 /** The update check / download (Catzoid #54) and whether its dialog is open. */
 export const updateState = ref<import('@shared/types').UpdateState>({ kind: 'idle' });
 export const updateOpen = ref(false);
+/** What's New was opened by itself (UpdatePrompt, Catzoid #97): the dialog offers "Don't open this on its own". */
+export const updateOpenAuto = ref(false);
 /** The Report a Bug / Send Feedback dialog (Catzoid #65), and the Uninstall dialog (#55). */
 export const reportOpen = ref<import('@shared/types').ReportKind | null>(null);
 export const uninstallOpen = ref(false);

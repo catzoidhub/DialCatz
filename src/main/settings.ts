@@ -1,5 +1,5 @@
 import { nativeTheme } from 'electron';
-import { AI_FEATURES, AI_PROVIDERS, type AiFeature, type AiProvider, type DialCatzSettings, type DialCatzSettingsPatch, type McatzpSettings, type RequestDefaults, type SupportState, type Theme } from '@shared/types';
+import { AI_FEATURES, AI_PROVIDERS, type AiFeature, type AiProvider, type DialCatzSettings, type DialCatzSettingsPatch, type McatzpSettings, type RequestDefaults, type SupportRating, type SupportState, type Theme } from '@shared/types';
 import { AUTO_HEADERS } from '@shared/request';
 import { cleanClients } from './mcatzp/clients';
 import { store } from './store';
@@ -27,8 +27,20 @@ function mcatzpOf(m: Partial<McatzpSettings> | undefined): McatzpSettings {
 }
 
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
+const STATUSES: SupportRating['status'][] = ['none', 'pending', 'approved', 'hidden'];
+const stars = (v: unknown) => Math.round(Number(v)) >= 1 && Math.round(Number(v)) <= 5;
 function supportOf(x: Partial<SupportState> | undefined): SupportState {
-  return { since: num(x?.since), later: Math.min(9, Math.max(0, Math.round(Number(x?.later) || 0))), laterAt: num(x?.laterAt), off: x?.off === true };
+  const r = x?.rating;
+  const q = x?.ratingQueued;
+  return {
+    since: num(x?.since),
+    later: Math.min(9, Math.max(0, Math.round(Number(x?.later) || 0))),
+    laterAt: num(x?.laterAt),
+    off: x?.off === true,
+    rating: r && stars(r.rating) ? { rating: Math.round(r.rating), text: typeof r.text === 'string' ? r.text : null, status: STATUSES.includes(r.status) ? r.status : 'pending', version: String(r.version ?? ''), sentAt: num(r.sentAt) ?? Date.now(), reply: typeof r.reply === 'string' ? r.reply.slice(0, 2000) : null, repliedAt: typeof r.repliedAt === 'string' ? r.repliedAt : null } : null,
+    replySeen: typeof x?.replySeen === 'string' ? x.replySeen.slice(0, 64) : null,
+    ratingQueued: q && stars(q.rating) ? { rating: Math.round(q.rating), text: typeof q.text === 'string' ? q.text : null, at: num(q.at) ?? Date.now() } : null,
+  };
 }
 
 function local(): Stored {
@@ -108,7 +120,7 @@ export function setSettings(patch: DialCatzSettingsPatch): DialCatzSettings {
     if (m.workspaces !== undefined) s.mcatzp.workspaces = ids(m.workspaces);
   }
   const sp = patch.support;
-  if (sp) s.support = supportOf({ ...s.support, ...sp, since: s.support.since });
+  if (sp) s.support = supportOf({ ...s.support, ...(sp.later !== undefined ? { later: sp.later } : {}), ...(sp.laterAt !== undefined ? { laterAt: sp.laterAt } : {}), ...(sp.off !== undefined ? { off: sp.off } : {}), ...(sp.replySeen !== undefined ? { replySeen: sp.replySeen } : {}) });
   store.setExtra(KEY, s);
   const conn = ai && (ai.provider !== undefined || ai.models !== undefined || ai.baseUrls !== undefined);
   if (patch.theme !== undefined || conn) writeShared({ ...(patch.theme !== undefined ? { theme: s.theme } : {}), ...(conn ? { ai: { provider: s.ai.provider, models: s.ai.models, baseUrls: s.ai.baseUrls } } : {}) });
@@ -121,6 +133,13 @@ export function startSupportClock(): void {
   const s = stored();
   if (s.support.since) return;
   s.support = { ...s.support, since: Date.now() };
+  store.setExtra(KEY, s);
+}
+
+/** Support Catzoid's rating state (Catzoid #96): only the main process writes it (reviews.ts). */
+export function setSupport(patch: Partial<SupportState>): void {
+  const s = stored();
+  s.support = supportOf({ ...s.support, ...patch });
   store.setExtra(KEY, s);
 }
 
