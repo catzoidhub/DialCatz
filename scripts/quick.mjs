@@ -19,9 +19,13 @@ if (running()) {
   if (running()) spawnSync('pkill', ['-f', PROC]);
 }
 
-// 2. Build the .app (signed with the Developer ID when it is in the keychain; not notarized).
+// 2. Build the .app (signed with the Developer ID when it is in the keychain; not notarized). A local build needs no
+// secure timestamp: when Apple's timestamp server is out of reach (seen 2026-11-18, every codesign failed with "A
+// timestamp was expected but was not found"), the build signs without one rather than failing.
+const tsReachable = spawnSync('curl', ['-s', '-o', '/dev/null', '--max-time', '5', 'http://timestamp.apple.com/ts01']).status === 0;
+if (!tsReachable) console.log("Apple's timestamp server does not answer: signing this local build without a timestamp.");
 run('bun', ['run', 'build']);
-run('node_modules/.bin/electron-builder', ['--mac', 'dir', '--arm64', '-c.mac.notarize=false'], { env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: process.env.CSC_IDENTITY_AUTO_DISCOVERY ?? 'true' } });
+run('node_modules/.bin/electron-builder', ['--mac', 'dir', '--arm64', '-c.mac.notarize=false', ...(tsReachable ? [] : ['-c.mac.timestamp=none'])], { env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: process.env.CSC_IDENTITY_AUTO_DISCOVERY ?? 'true' } });
 if (!existsSync(BUILT)) throw new Error(`${BUILT} was not built`);
 
 // 3. Install.
