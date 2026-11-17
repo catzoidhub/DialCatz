@@ -166,6 +166,7 @@ export const MCATZP_COVERAGE: Record<keyof DialCatzApi, string> = {
   updatePrefs: 'tool: get_settings',
   setUpdatePrefs: "tool: set_update_prefs",
   ratingSend: "never: a rating goes out in the user's name",
+  setCloseGuard: 'not a tool: the window telling DialCatz a run is going',
   ratingRefresh: "not a tool: About reading the team's reply; get_settings shows it",
   uninstallPlan: 'never: goes with uninstall',
   uninstall: 'never: the app removing itself',

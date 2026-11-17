@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { uid, type TreeItem } from '@shared/types';
-import { envFor, execute, notify, plain, workspace } from '../state';
+import { envFor, execute, notify, plain, runnerRunning, workspace } from '../state';
 import CatMood from './CatMood.vue';
 
 /**
@@ -65,6 +65,8 @@ function dropData() {
 const delay = ref(0);
 const stopOnFail = ref(false);
 const running = ref(false);
+watch(running, (on) => (runnerRunning.value = on));
+onBeforeUnmount(() => (runnerRunning.value = false));
 const stop = ref(false);
 const rows = ref<Row[]>([]);
 const token = uid('run_');

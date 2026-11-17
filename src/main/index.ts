@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, screen, shell } from 'electron';
 import { offerAppImageInstall } from './appimage';
 import { checkGitUpdate, installGit, updateGit } from './gitinstall';
 import { isLinux, isWin } from './platform';
@@ -68,6 +68,28 @@ function titleBarOverlay(): { color: string; symbolColor: string; height: number
 }
 if (isWin || isLinux) nativeTheme.on('updated', () => win && !win.isDestroyed() && win.setTitleBarOverlay(titleBarOverlay()));
 
+/**
+ * The window's size and place (Catzoid #95, as DevCatz 4348466): closing the window ends its renderer (it always did in
+ * DialCatz; the app stays in the Dock on macOS), so the next window comes back where the last one was. x / y only when
+ * they still fit a display (a monitor unplugged meanwhile), else the size alone; maximized again when it was.
+ */
+type Bounds = { x: number; y: number; width: number; height: number; maximized?: boolean };
+const MIN = { width: 920, height: 560 };
+function savedBounds(): Partial<Bounds> {
+  const b = store.extra<Bounds>('windowBounds');
+  if (!b || !(b.width >= MIN.width) || !(b.height >= MIN.height)) return {};
+  const fits = screen.getAllDisplays().some(({ workArea: a }) => b.x >= a.x - 50 && b.y >= a.y - 50 && b.x + b.width <= a.x + a.width + 50 && b.y + b.height <= a.y + a.height + 50);
+  return fits ? b : { width: b.width, height: b.height, maximized: b.maximized };
+}
+function saveBounds(w: BrowserWindow): void {
+  if (w.isDestroyed() || w.isMinimized() || w.isFullScreen()) return;
+  const maximized = w.isMaximized();
+  store.setExtra('windowBounds', { ...(maximized ? w.getNormalBounds() : w.getBounds()), maximized });
+}
+/** What closing the window would stop (a collection run in the window), from the window itself; null = nothing. */
+let closeGuard: string | null = null;
+let quitting = false;
+
 function createWindow(): void {
   if (win && !win.isDestroyed()) {
     if (win.isMinimized()) win.restore();
@@ -76,11 +98,13 @@ function createWindow(): void {
     return;
   }
   const mac = process.platform === 'darwin';
+  const at = savedBounds();
   win = new BrowserWindow({
-    width: 1320,
-    height: 840,
-    minWidth: 920,
-    minHeight: 560,
+    width: at.width ?? 1320,
+    height: at.height ?? 840,
+    ...(at.x !== undefined && at.y !== undefined ? { x: at.x, y: at.y } : {}),
+    minWidth: MIN.width,
+    minHeight: MIN.height,
     title: 'DialCatz',
     ...(mac ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 18, y: 18 }, vibrancy: 'sidebar' as const, backgroundColor: '#00000000' } : {}),
     // Windows and Linux (#87): no menu bar; the system buttons sit over the top right corner (Catzoid #76), the menu is
@@ -93,8 +117,25 @@ function createWindow(): void {
   });
   const w = win;
   windowListens = false;
-  w.once('ready-to-show', () => w.show());
-  w.on('closed', () => ((win = null), (windowListens = false)));
+  w.once('ready-to-show', () => {
+    if (at.maximized) w.maximize();
+    w.show();
+  });
+  w.on('close', (e) => {
+    // A collection run lives in the window: closing it stops the run, so ask first (not when quitting).
+    if (closeGuard && !quitting) {
+      const pick = dialog.showMessageBoxSync(w, { type: 'question', buttons: ['Keep the window open', 'Close and stop it'], defaultId: 0, cancelId: 0, message: closeGuard, detail: 'Closing the window stops it. Requests and results already done stay in History.' });
+      if (pick === 0) return e.preventDefault();
+      closeGuard = null;
+    }
+    saveBounds(w);
+  });
+  w.on('closed', () => {
+    if (win === w) (win = null), (windowListens = false);
+    closeGuard = null;
+    // WebSocket connections belong to their tabs in the window: they close with it (the tabs reopen idle).
+    sockets.closeAll();
+  });
   // A reload starts over; an iframe in a response's preview must not (did-start-loading fires for those too).
   w.webContents.on('did-start-navigation', (_e, _url, isInPlace, isMainFrame) => {
     if (isMainFrame && !isInPlace) windowListens = false;
@@ -172,6 +213,8 @@ app.on('open-url', (e, url) => {
 });
 app.on('activate', () => createWindow());
 app.on('before-quit', () => {
+  quitting = true;
+  if (win && !win.isDestroyed()) saveBounds(win);
   mcatzp?.quit();
   sockets.closeAll();
   live.stopAll();
@@ -834,6 +877,7 @@ function api(): DialCatzApi {
     setUpdatePrefs: async (patch) => updates.setPrefs(patch ?? {}),
     ratingSend: (rating, text) => reviews.send(Number(rating), typeof text === 'string' ? text : null),
     ratingRefresh: () => reviews.refresh(),
+    setCloseGuard: async (text) => void (closeGuard = typeof text === 'string' && text ? text.slice(0, 200) : null),
     uninstallPlan: async () => uninstall.plan(),
     uninstall: (removeShared) => uninstall.run(removeShared === true),
     reportPreview: async (draft) => reports.preview(draft),

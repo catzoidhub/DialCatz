@@ -1261,6 +1261,8 @@ export interface DialCatzApi {
   ratingSend(rating: number, text: string | null): Promise<{ sent: boolean; queued: boolean }>;
   /** Reads this install's review again from the site (the team's reply, the status). */
   ratingRefresh(): Promise<void>;
+  /** What closing the window would stop (a collection run), or null: closing then asks first (Catzoid #95). */
+  setCloseGuard(text: string | null): Promise<void>;
   uninstallPlan(): Promise<UninstallPlan>;
   uninstall(removeShared: boolean): Promise<void>;
   reportPreview(draft: ReportDraft): Promise<string>;
@@ -1307,7 +1309,7 @@ export const API_METHODS = [
   'send', 'pickFile', 'pickDataFile', 'saveText', 'cancel', 'wsConnect', 'wsSend', 'wsClose', 'saveResponse', 'history', 'addHistory', 'clearHistory',
   'servers', 'probeServer', 'connectWithToken', 'connectWithCode', 'refreshServer', 'disconnectServer', 'subscribeWorkspace', 'setPresence', 'presence', 'syncWorkspace', 'resolveConflict',
   'openUrl', 'exportWorkspace', 'exportEnvironment', 'importEnvironments', 'dbcatzInfo', 'dbcatzOpen', 'saveDbTarget', 'copyText', 'hostName',
-  'updateState', 'updateCheck', 'updateNotes', 'updateDownload', 'updateCancel', 'updateInstall', 'updateSkip', 'updatePrefs', 'setUpdatePrefs', 'ratingSend', 'ratingRefresh',
+  'updateState', 'updateCheck', 'updateNotes', 'updateDownload', 'updateCancel', 'updateInstall', 'updateSkip', 'updatePrefs', 'setUpdatePrefs', 'ratingSend', 'ratingRefresh', 'setCloseGuard',
   'uninstallPlan', 'uninstall', 'reportPreview', 'reportSend', 'captureWindow', 'reportError', 'reportPrefs', 'setReportPrefs', 'mcatzpActivity', 'mcatzpClearActivity', 'mcatzpRevoke', 'mcatzpSetup', 'mcatzpUpdate', 'mcatzpInstall', 'mcatzpUninstall', 'mcatzpInstallCancel', 'mcatzpApprovals', 'mcatzpTargets', 'mcatzpAddToClient', 'mcatzpRemoveFromClient', 'mcatzpPending', 'mcatzpAnswer', 'mcatzpWindowReply',
 ] as const satisfies readonly (keyof DialCatzApi)[];
 

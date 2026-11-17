@@ -537,6 +537,8 @@ export function mcatzpTabResponse(id: string | null): McatzpTabResponse | null {
 
 /** The collection run a client started last. */
 export const mcatzpRun = ref<McatzpRun | null>(null);
+/** A collection run in the Runner dialog (Catzoid #95: closing the window asks first while one goes). */
+export const runnerRunning = ref(false);
 let stopRun = false;
 /** Tabs being sent for a client: what stops when it gives up. */
 const clientSends = new Set<string>();

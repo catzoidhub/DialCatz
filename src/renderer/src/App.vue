@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { activeTab, activeTabId, mcatzpAsk, mcatzpUpdate, mcatzpCommand, mcatzpInstalling, mcatzpOpen, mcatzpRefresh, mcatzpRun, mcatzpTabResponse, mcatzpTabs, plain, notify, selectWorkspace, aiOn, askOpen, connectRequest as connect, goSection, importRequest, loadHistory, onWsEvent, presence, loadSettings, loadWorkspaces, reloadWorkspace, restoreTabs, section, sendTab, settings, settingsTab, syncTabsWithWorkspace, updateState, updateOpen, updateOpenAuto, reportOpen, uninstallOpen, tabs, toast, workspace, type Section } from './state';
+import { activeTab, activeTabId, mcatzpAsk, mcatzpUpdate, mcatzpCommand, mcatzpInstalling, mcatzpOpen, mcatzpRefresh, mcatzpRun, runnerRunning, mcatzpTabResponse, mcatzpTabs, plain, notify, selectWorkspace, aiOn, askOpen, connectRequest as connect, goSection, importRequest, loadHistory, onWsEvent, presence, loadSettings, loadWorkspaces, reloadWorkspace, restoreTabs, section, sendTab, settings, settingsTab, syncTabsWithWorkspace, updateState, updateOpen, updateOpenAuto, reportOpen, uninstallOpen, tabs, toast, workspace, type Section } from './state';
 import { backIndex, backList, canBack, canForward, forwardList, goBack, goForward, goTo, navApply, navPrune, navVisit, type NavEntry } from './nav';
 import PopMenu from './components/PopMenu.vue';
 import UpdateDialog from './components/UpdateDialog.vue';
@@ -55,6 +55,11 @@ const replyDot = computed(() => {
   const x = settings.value?.support;
   return !!x?.rating?.repliedAt && x.rating.repliedAt !== x.replySeen;
 });
+// A collection run lives in this window (Runner, or one an AI client started): closing the window asks first (#95).
+watch(
+  () => runnerRunning.value || (!!mcatzpRun.value && !mcatzpRun.value.finished),
+  (on) => void api.setCloseGuard(on ? 'A collection run is going.' : null).catch(() => undefined),
+);
 /** Support Catzoid (Catzoid #94): the heart in the rail → Settings → About, scrolled to its card. */
 function openSupport() {
   settingsTab.value = 'about';
