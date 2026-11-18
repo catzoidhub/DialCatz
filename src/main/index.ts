@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, screen, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, screen, session, shell } from 'electron';
 import { offerAppImageInstall } from './appimage';
 import { checkGitUpdate, installGit, updateGit } from './gitinstall';
 import { isLinux, isWin } from './platform';
@@ -50,6 +50,10 @@ import { systemVersion } from './system';
  *   dialcatz://connect?server=<url>&code=<code>       join a team server with a one-time invite code; the window
  *                                                    shows the server address and asks before anything is sent
  */
+
+// Chromium's HTTP cache has no useful limit of its own: `bun run dev` shares this data folder, and every Vite reload
+// (main.css?t=…) left a copy behind, 1.2 GB by 2026-11. Requests go through Node, so the cache only serves the window.
+app.commandLine.appendSwitch('disk-cache-size', String(64 * 1024 * 1024));
 
 let win: BrowserWindow | null = null;
 let pendingConnect: ConnectRequest | null = null;
@@ -1281,6 +1285,15 @@ if (primary) app.whenReady().then(async () => {
   if (app.isPackaged && !isLinux) app.setAsDefaultProtocolClient('dialcatz');
   ws.ensureDefault();
   startSupportClock();
+  // Once: the cap only trims a cache Chromium opens, and the window's file:// pages never open it, so the dev-mode
+  // copies left before the cap (up to 1.2 GB) would stay forever. The V8 Code Cache has no size switch at all and
+  // only grows under `bun run dev` (129 MB by 2026-11), so dev mode empties it on every start.
+  const caches = session.defaultSession;
+  if (!store.extra<boolean>('cachesCleared')) {
+    void Promise.all([caches.clearCache(), caches.clearCodeCaches({})])
+      .then(() => store.setExtra('cachesCleared', true))
+      .catch(() => {});
+  } else if (!app.isPackaged) void caches.clearCodeCaches({}).catch(() => {});
   const impl = api() as unknown as Record<string, (...args: unknown[]) => unknown>;
   for (const m of API_METHODS) ipcMain.handle(`dialcatz:${m}`, (_e, ...args) => impl[m](...args));
   ipcMain.handle('dialcatz:pendingConnect', () => pendingConnect);
