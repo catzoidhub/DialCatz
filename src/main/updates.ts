@@ -233,8 +233,10 @@ export function cancelDownload(): void {
 export function install(when: 'now' | 'quit'): void {
   if (state.kind !== 'downloaded') return;
   if (when === 'now') {
-    // isSilent false, isForceRunAfter true: the new version opens after the swap.
-    setImmediate(() => autoUpdater.quitAndInstall(false, true));
+    // isForceRunAfter true: the new version opens after the swap. Silent on Windows: the installer is the assisted
+    // NSIS one (oneClick false), and run without /S it showed its "Who should this application be installed for?"
+    // page and waited for a click while DialCatz was already gone (seen in the VM, 1.2.2 → 1.2.3, 2026-11-18).
+    setImmediate(() => autoUpdater.quitAndInstall(process.platform === 'win32', true));
   } else {
     autoUpdater.autoInstallOnAppQuit = true;
     set({ ...state, onQuit: true });
