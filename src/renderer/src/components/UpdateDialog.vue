@@ -3,7 +3,8 @@ import { currentOS } from '@shared/platform';
 import type { ReleaseNote } from '@shared/types';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import CatMood from './CatMood.vue';
-import { appVersion, tabs, updateOpenAuto, updateState } from '../state';
+import { appVersion, settings, tabs, updateOpenAuto, updateState } from '../state';
+import { openCommunity, openDonate } from '../support';
 import dialcatzLogo from '../assets/logos/dialcatz.png';
 
 /**
@@ -99,6 +100,11 @@ async function skip() {
  * the dialog opened by itself, the notes arrived after it) and Chromium then kept it scrolled to the end, so it goes
  * back to the top whenever its size changes, until the user scrolls it.
  */
+/**
+ * Support Catzoid at the end of What's New (Catzoid #94, as DevCatz 058fc2e): one quiet line, the same links as Settings →
+ * About. Gone once the corner card is done with (joined, donated, rated or "Don't show again": support.off).
+ */
+const supportLine = computed(() => !settings.value?.support?.off);
 const notesBox = ref<HTMLElement | null>(null);
 let touched = false;
 const toTop = () => !touched && notesBox.value && (notesBox.value.scrollTop = 0);
@@ -160,6 +166,11 @@ const quitWord = currentOS === 'mac' ? 'quit' : 'close DialCatz';
             <button type="button" class="link link-hover" @click="api.openUrl(`${site}/dialcatz/download#versions`)">Read them on the site</button>
           </p>
         </section>
+        <p v-if="supportLine" class="border-t border-base-300/60 pt-3 text-xs opacity-60">
+          Catzoid is free and open source.
+          <button type="button" class="link" @click="openCommunity">Joining the community</button> already helps a lot — or
+          <button type="button" class="link" @click="openDonate">support us</button> if you like.
+        </p>
       </div>
 
       <!-- Download -->
