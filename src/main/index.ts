@@ -37,6 +37,7 @@ import { mergeRoutes } from './routemerge';
 import { specApply, specDiff, withBase, type Fresh, type SpecPick } from './specsync';
 import { fetchSpecText, freshFor, hashText, readSpecFile } from './specsource';
 import * as mock from './mock';
+import { scanFolder } from './specscan';
 import * as dclink from './devcatzlink';
 import { browsersState, openWeb, refreshBrowsers } from './browsers';
 import { Mcatzp } from './mcatzp';
@@ -617,6 +618,25 @@ function api(): DialCatzApi {
       return w;
     },
     specStale: async (id) => specStale(id),
+    specScanFolder: async (id) => {
+      const r = await openDialog(win, { title: 'Choose a project folder to look for OpenAPI files in', properties: ['openDirectory'] });
+      if (r.canceled || !r.filePaths.length) return null;
+      const folder = r.filePaths[0];
+      const found = scanFolder(folder);
+      scanned = new Set(found.map((f) => resolvePath(f.file)));
+      const items = ws.load(id).items;
+      return { folder, found: found.map((f) => ({ ...f, collection: items.find((i) => i.kind === 'collection' && i.spec?.kind === 'file' && resolvePath(i.spec.path) === resolvePath(f.file))?.name ?? null })) };
+    },
+    specImportFile: async (id, file) => {
+      // Only a file the folder scan found: the window never names an arbitrary path to read.
+      const f = resolvePath(String(file));
+      if (!scanned.has(f)) throw new Error('Look in the folder again first');
+      const text = readSpecFile(f);
+      importSpec(text);
+      const r = doImport(id, text, { kind: 'file', path: f });
+      if (r.workspace.serverId) void srv.sync(id).then(() => send('app:workspaces', null));
+      return r;
+    },
     browsers: async () => {
       await refreshBrowsers().catch(() => false);
       return browsersState();
@@ -1278,6 +1298,9 @@ async function siteSpecOf(col: TreeItem): Promise<{ siteId: string; specFile: st
 }
 
 // ---------------------------------------------------------------- a collection follows its spec (#92)
+
+/** The files the last project-folder scan found (specImportFile reads only these). */
+let scanned = new Set<string>();
 
 /** The spec each review read, so Apply takes exactly what the review showed. */
 const specCache = new Map<string, { fresh: Fresh; hash?: string }>();

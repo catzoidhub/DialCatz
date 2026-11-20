@@ -1263,6 +1263,13 @@ export interface DialCatzApi {
   specStale(workspaceId: string): Promise<string[]>;
   /** The browsers installed here and the system default (looked at again each call). */
   browsers(): Promise<BrowsersState>;
+  /**
+   * Import → OpenAPI in a project: the user picks a folder; its OpenAPI / Swagger files, each with the collection that
+   * already follows it in this workspace (null: cancelled).
+   */
+  specScanFolder(workspaceId: string): Promise<{ folder: string; found: { file: string; rel: string; title: string; version: string; format: string; operations: number; collection: string | null }[] } | null>;
+  /** Imports one file the last specScanFolder found, as a collection that follows it. */
+  specImportFile(workspaceId: string, file: string): Promise<{ workspace: Workspace; collectionId: string; count: number }>;
   /** #94: mock servers running now. */
   mockList(): Promise<MockState[]>;
   /** #94: starts (or returns) the collection's mock server on 127.0.0.1; `port` 0 or left out: the one used last, else a free one. */
@@ -1455,7 +1462,7 @@ export const API_METHODS = [
   'workspaces', 'workspace', 'createWorkspace', 'renameWorkspace', 'deleteWorkspace', 'openFolderWorkspace', 'useFolder', 'stopUsingFolder', 'revealFolder', 'folderGitStatus', 'folderGitDiff', 'folderGitCommit', 'folderGitPull', 'folderGitPush', 'folderGitInit', 'folderGitAbortMerge',
   'gitState', 'gitInstall', 'gitUpdateCheck', 'gitUpdate', 'gitWatch', 'gitRepoAdd', 'gitRepoRemove', 'gitRepoLog', 'gitRevealRepo', 'gitOpenWorkspace', 'gitPickFolder', 'gitStatus', 'gitInit', 'gitDiff', 'gitStage', 'gitUnstage', 'gitDiscard', 'gitCommit', 'gitSync', 'gitCancel', 'gitLog', 'gitShow', 'gitBranches', 'gitBranch', 'gitStashes', 'gitStash', 'gitTags', 'gitTag', 'gitOperation', 'gitSquash', 'gitCherryPick', 'gitRevert', 'gitReset', 'gitRestoreFile', 'gitOpenFile', 'gitIgnoreSuggestions', 'gitIgnoreAdd', 'gitignoreRead', 'gitignoreSave', 'gitSetIdentity', 'gitAddRemote', 'gitWorktrees', 'gitWorktreeAdd', 'gitWorktreeRemove', 'gitWorktreePrune', 'gitPulls', 'gitCreatePull', 'gitCheckoutPull', 'gitAddAccount', 'gitRemoveAccount', 'gitRepos', 'gitSshKeys', 'gitSshGenerate', 'gitSshAddToAccount', 'gitClone', 'gitCancelClone', 'gitDismissClone', 'gitAccounts', 'gitCreateRemoteRepo', 'gitDevCatzAccounts', 'gitImportDevCatz', 'folderGitConnect', 'createFolderWorkspace', 'pickFolder', 'teamAdminUrl', 'appMenu', 'menuShortcuts', 'menuKey',
   'saveItems', 'deleteItems',
-  'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'specCheck', 'specApply', 'specFollow', 'specUnfollow', 'specStale', 'browsers', 'mockList', 'mockEnvironmentRestore', 'mockStart', 'mockStop', 'mockEnvironment', 'mockSiteSpec', 'mockSiteImport', 'devcatzLinks', 'devcatzLinkSet', 'mockOpenInDevCatz', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'importedBefore', 'docatzProjects', 'docatzImport', 'docatzOpen', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection',
+  'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'specCheck', 'specApply', 'specFollow', 'specUnfollow', 'specStale', 'browsers', 'specScanFolder', 'specImportFile', 'mockList', 'mockEnvironmentRestore', 'mockStart', 'mockStop', 'mockEnvironment', 'mockSiteSpec', 'mockSiteImport', 'devcatzLinks', 'devcatzLinkSet', 'mockOpenInDevCatz', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'importedBefore', 'docatzProjects', 'docatzImport', 'docatzOpen', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection',
   'aiModels', 'aiTest', 'aiAsk', 'aiExplain', 'aiTests', 'aiBody', 'aiCancel',
   'send', 'pickFile', 'pickDataFile', 'saveText', 'cancel', 'wsConnect', 'wsSend', 'wsClose', 'saveResponse', 'history', 'addHistory', 'clearHistory',
   'servers', 'probeServer', 'connectWithToken', 'connectWithCode', 'refreshServer', 'disconnectServer', 'subscribeWorkspace', 'setPresence', 'presence', 'syncWorkspace', 'resolveConflict',

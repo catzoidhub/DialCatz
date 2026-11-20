@@ -109,6 +109,8 @@ export const MCATZP_COVERAGE: Record<keyof DialCatzApi, string> = {
   specUnfollow: 'tool: unfollow_spec',
   specStale: "not a tool: the tree's “spec changed” mark; check_collection_spec reads the spec itself",
   browsers: 'tool: list_browsers',
+  specScanFolder: "not a tool: the user picks the folder in a dialog; a client uses import_file or follow_spec",
+  specImportFile: "not a tool: imports what the user's folder pick found; a client uses import_file or follow_spec",
   mockList: 'tool: list_mocks',
   mockStart: 'tool: start_mock',
   mockStop: 'tool: stop_mock',

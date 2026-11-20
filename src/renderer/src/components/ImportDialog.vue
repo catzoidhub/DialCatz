@@ -15,7 +15,7 @@ import { openDownload } from '../download';
  * and Postman last) and shows the form once one is picked; a link from DevCatz / DoCatz or the Postman shortcut opens
  * its form straight away.
  */
-type Mode = 'choose' | 'file' | 'postman' | 'devcatz' | 'docatz';
+type Mode = 'choose' | 'file' | 'project' | 'postman' | 'devcatz' | 'docatz';
 const props = withDefaults(defineProps<{ tab?: Mode; siteId?: string; project?: string; service?: string }>(), { tab: 'choose', siteId: '', project: '', service: '' });
 const emit = defineEmits<{ done: [collectionId: string | null]; cancel: [] }>();
 const api = window.dialcatz;
@@ -67,6 +67,39 @@ async function fromFile() {
 }
 const fromText = () => guard(async () => finish(await api.importText(workspace.value!.id, text.value)));
 
+// ---------------------------------------------------------------- OpenAPI in a project (no DevCatz needed)
+
+type Found = NonNullable<Awaited<ReturnType<typeof api.specScanFolder>>>;
+const scan = ref<Found | null>(null);
+const picked = ref(new Set<string>());
+async function pickFolder() {
+  const r = await guard(() => api.specScanFolder(workspace.value!.id));
+  if (!r) return;
+  scan.value = r;
+  // New ones start ticked; one the workspace already follows does not.
+  picked.value = new Set(r.found.filter((f) => !f.collection).map((f) => f.file));
+}
+function tick(file: string) {
+  const s = new Set(picked.value);
+  if (s.has(file)) s.delete(file);
+  else s.add(file);
+  picked.value = s;
+}
+async function importPicked() {
+  let last: string | null = null;
+  let n = 0;
+  for (const f of scan.value!.found.filter((x) => picked.value.has(x.file))) {
+    const r = await guard(() => api.specImportFile(workspace.value!.id, f.file));
+    if (!r) return;
+    use(r.workspace);
+    last = r.collectionId;
+    n++;
+  }
+  if (!n) return;
+  notify('success', n === 1 ? 'Imported: the collection keeps following its OpenAPI file' : `Imported ${n} collections: each keeps following its OpenAPI file`);
+  emit('done', last);
+}
+
 // ---------------------------------------------------------------- Postman
 
 const summary = ref<PostmanSummary | null>(null);
@@ -74,7 +107,7 @@ async function migrate(how: 'files' | 'folder') {
   const r = await guard(() => api.postmanReadExport(how));
   if (r) choose(r);
 }
-const TITLES = { choose: 'Import', file: 'Import a file or text', postman: 'Move from Postman', devcatz: 'Import from DevCatz', docatz: 'Import from DoCatz' } as const;
+const TITLES = { choose: 'Import', file: 'Import a file or text', project: 'OpenAPI in a project', postman: 'Move from Postman', devcatz: 'Import from DevCatz', docatz: 'Import from DoCatz' } as const;
 /** Files picked under "File or paste" that hold more than one collection: the same pick-what-comes-in list. */
 const bundle = ref(false);
 const title = computed(() => (bundle.value && mode.value === 'postman' ? 'Import — choose what comes in' : TITLES[mode.value]));
@@ -322,6 +355,14 @@ async function importProject() {
             </span>
             <Icon name="chevron" class="size-4 shrink-0 opacity-40" />
           </button>
+          <button class="opt-card" @click="pickMode('project')">
+            <span class="opt-card-icon"><Icon name="folder" class="size-5" /></span>
+            <span class="min-w-0 flex-1">
+              <span class="opt-card-title">OpenAPI in a project</span>
+              <span class="opt-card-text">Pick a project folder: DialCatz finds its OpenAPI / Swagger files, and each collection keeps following its file</span>
+            </span>
+            <Icon name="chevron" class="size-4 shrink-0 opacity-40" />
+          </button>
           <button class="opt-card" @click="pickMode('devcatz')">
             <span class="opt-card-icon"><img :src="devcatzLogo" alt="" draggable="false" /></span>
             <span class="min-w-0 flex-1">
@@ -355,6 +396,26 @@ async function importProject() {
         <button class="btn btn-sm gap-2" :disabled="busy" @click="fromFile"><Icon name="file" class="size-4" />Choose a file…</button>
         <div class="divider my-0 text-xs opacity-50">or paste</div>
         <textarea v-model="text" class="textarea selectable h-44 w-full font-mono text-xs" placeholder="{ &quot;info&quot;: …, &quot;item&quot;: [ … ] }   openapi: 3.0.0 …   curl https://api.example.com/users" spellcheck="false" />
+      </template>
+
+      <!-- OpenAPI in a project -->
+      <template v-else-if="mode === 'project'">
+        <p class="text-sm opacity-70">DialCatz looks through the folder for OpenAPI 3 and Swagger 2 files (JSON or YAML), leaving out dependencies and build output. Each one you import becomes a collection that follows its file: when the file changes, DialCatz offers the changes.</p>
+        <button class="btn btn-sm gap-2" :disabled="busy" @click="pickFolder"><span v-if="busy && !scan" class="loading loading-spinner loading-xs" /><Icon v-else name="folder" class="size-4" />{{ scan ? 'Choose another folder…' : 'Choose a project folder…' }}</button>
+        <template v-if="scan">
+          <p class="truncate font-mono text-xs opacity-60" :title="scan.folder">{{ scan.folder }}</p>
+          <p v-if="!scan.found.length" class="text-sm">No OpenAPI or Swagger file in there. If the API serves one (for example <code>/openapi.json</code>), paste its address under File or paste.</p>
+          <div v-else class="max-h-72 space-y-1 overflow-y-auto">
+            <label v-for="f in scan.found" :key="f.file" class="flex cursor-pointer items-start gap-3 rounded-lg px-2 py-1.5 hover:bg-base-200">
+              <input type="checkbox" class="checkbox checkbox-sm checkbox-primary mt-0.5" :checked="picked.has(f.file)" @change="tick(f.file)" />
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-sm font-medium">{{ f.title }}<span v-if="f.version" class="font-normal opacity-50"> · {{ f.version }}</span></span>
+                <span class="block truncate font-mono text-xs opacity-60">{{ f.rel }}</span>
+                <span class="block text-xs opacity-50">{{ f.format }} · {{ f.operations }} {{ f.operations === 1 ? 'request' : 'requests' }}<template v-if="f.collection"> · already followed by “{{ f.collection }}”</template></span>
+              </span>
+            </label>
+          </div>
+        </template>
       </template>
 
       <!-- Postman -->
@@ -581,6 +642,7 @@ async function importProject() {
         <button v-if="mode === 'postman' && pmChoice && !summary" class="btn btn-ghost btn-sm mr-auto" :disabled="busy" @click="pmBack">Back</button>
         <button class="btn btn-ghost btn-sm" :disabled="busy" @click="emit('cancel')">{{ summary ? 'Close' : 'Cancel' }}</button>
         <button v-if="mode === 'file'" class="btn btn-primary btn-sm" :disabled="busy || !text.trim()" @click="fromText"><span v-if="busy" class="loading loading-spinner loading-xs" />Import</button>
+        <button v-if="mode === 'project' && scan?.found.length" class="btn btn-primary btn-sm" :disabled="busy || !picked.size" @click="importPicked"><span v-if="busy" class="loading loading-spinner loading-xs" />Import {{ picked.size || '' }}</button>
         <button v-else-if="mode === 'postman' && summary" class="btn btn-primary btn-sm" @click="emit('done', null)">Done</button>
         <button v-else-if="mode === 'postman' && pmChoice" class="btn btn-primary btn-sm" :disabled="busy || pmNothing" @click="pmImport">
           <span v-if="busy" class="loading loading-spinner loading-xs" />{{ pmChoice.token ? 'Import' : 'Move' }} {{ plural(pmPick.collections.length, 'collection') }}<template v-if="pmPick.environments.length"> and {{ plural(pmPick.environments.length, 'environment') }}</template>
