@@ -2,7 +2,7 @@
 import CodeEditor from './CodeEditor.vue';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { emptyLayout, uid, type ExportFormat, type RequestAuth, type SidebarLayout, type SpecReview, type TreeItem, type Workspace } from '@shared/types';
-import { attempt, closeTab, collectionAsk, defaultEnvironment, freshRequest, importRequest, newTab, notify, openItem, plain, presenceByItem, readOnly, refreshMocks, refreshSpecStale, devcatzInstalled, devcatzLinks, refreshDevcatzLinks, section, specAsk, specStale, syncTabsWithWorkspace, tabs, workspace } from '../state';
+import { attempt, closeTab, collectionAsk, defaultEnvironment, freshRequest, importRequest, newTab, notify, openItem, plain, presenceByItem, readOnly, refreshMocks, refreshSpecStale, devcatzInstalled, devcatzLinks, docatzInstalled, docatzLinks, refreshDevcatzLinks, section, specAsk, specStale, syncTabsWithWorkspace, tabs, workspace } from '../state';
 import TreeNode, { type DropTarget } from './TreeNode.vue';
 import PromptDialog from './PromptDialog.vue';
 import ConfirmDialog from './ConfirmDialog.vue';
@@ -13,6 +13,7 @@ import CopyCollectionDialog from './CopyCollectionDialog.vue';
 import SpecReviewDialog from './SpecReviewDialog.vue';
 import MockDialog from './MockDialog.vue';
 import DevcatzLinkDialog from './DevcatzLinkDialog.vue';
+import DocatzLinkDialog from './DocatzLinkDialog.vue';
 import Icon from './Icon.vue';
 import CopyName from './CopyName.vue';
 import { store } from '../store';
@@ -255,7 +256,7 @@ function remove(item: TreeItem) {
 }
 
 // Export: DialCatz's own file, or a Postman v2.1 collection for people who open it in Postman.
-const exporting = ref<{ item: TreeItem; format: ExportFormat } | null>(null);
+const exporting = ref<{ item: TreeItem; format: ExportFormat | 'openapi' } | null>(null);
 function exportIt(item: TreeItem) {
   exporting.value = { item, format: 'dialcatz' };
 }
@@ -286,6 +287,11 @@ const reviewing = ref<{ review: SpecReview; name: string } | null>(null);
 const mocking = ref<TreeItem | null>(null);
 /** The collection whose "Link to DevCatz" dialog is open. */
 const linking = ref<TreeItem | null>(null);
+const linkingDocatz = ref<TreeItem | null>(null);
+async function unlinkDocatz(item: TreeItem) {
+  await apply(() => api.docatzLinkSet(workspace.value!.id, item.id, null, ''), `“${item.name}” is no longer linked to DoCatz`);
+  void refreshDevcatzLinks();
+}
 async function unlinkDevcatz(item: TreeItem) {
   await apply(() => api.devcatzLinkSet(workspace.value!.id, item.id, null, ''), `“${item.name}” is no longer linked to DevCatz`);
   void refreshDevcatzLinks();
@@ -643,6 +649,16 @@ const SORTS: { id: SidebarLayout['sortBy']; label: string }[] = [
             </ul>
           </details>
         </li>
+        <li v-if="docatzInstalled">
+          <details>
+            <summary>DoCatz</summary>
+            <ul>
+              <li v-if="docatzLinks[menu.item.id]" class="menu-title max-w-48 truncate normal-case">{{ docatzLinks[menu.item.id].here ? `${docatzLinks[menu.item.id].project}${docatzLinks[menu.item.id].service ? ` · ${docatzLinks[menu.item.id].service}` : ''}` : 'Project not on this computer' }}</li>
+              <li><button :disabled="readOnly" @click="run((i) => (linkingDocatz = i))">{{ docatzLinks[menu.item.id] ? 'Link to another service…' : 'Link to a DoCatz service…' }}</button></li>
+              <li v-if="docatzLinks[menu.item.id]"><button :disabled="readOnly" @click="run(unlinkDocatz)">Unlink</button></li>
+            </ul>
+          </details>
+        </li>
         <li><button @click="run((i) => (copying = i))">Copy to workspace…</button></li>
         <li><button @click="run(exportIt)">Export…</button></li>
       </template>
@@ -709,10 +725,13 @@ const SORTS: { id: SidebarLayout['sortBy']; label: string }[] = [
         <div class="seg seg-choice w-full" role="radiogroup" aria-label="Format">
           <button type="button" role="radio" class="seg-item flex-1 normal-case" :class="{ 'is-active': exporting.format === 'dialcatz' }" :aria-checked="exporting.format === 'dialcatz'" @click="exporting.format = 'dialcatz'">DialCatz format</button>
           <button type="button" role="radio" class="seg-item flex-1 normal-case" :class="{ 'is-active': exporting.format === 'postman' }" :aria-checked="exporting.format === 'postman'" @click="exporting.format = 'postman'">Postman format</button>
+          <button type="button" role="radio" class="seg-item flex-1 normal-case" :class="{ 'is-active': exporting.format === 'openapi' }" :aria-checked="exporting.format === 'openapi'" @click="exporting.format = 'openapi'">OpenAPI</button>
         </div>
         <p v-if="exporting.format === 'dialcatz'" class="text-sm opacity-70"><span class="font-mono text-xs">{{ exporting.item.name }}.dialcatz_collection.json</span> — everything DialCatz keeps (settings, scripts, descriptions), for DialCatz's Import.</p>
+        <p v-else-if="exporting.format === 'openapi'" class="text-sm opacity-70"><span class="font-mono text-xs">{{ exporting.item.name }}.openapi.yaml</span> — an OpenAPI 3 document made from the requests: paths and path parameters, query parameters and headers, bodies (with a schema read from JSON ones), auth, and the responses a spec describes. The start of a contract; review it before sharing.</p>
         <p v-else class="text-sm opacity-70"><span class="font-mono text-xs">{{ exporting.item.name }}.postman_collection.json</span> — a Postman Collection v2.1 with folders, requests, bodies, auth, scripts and descriptions. Postman and DialCatz both import it.</p>
-        <p class="text-xs opacity-50">Auth values in the collection go into the file as they are. Files picked for multipart or binary bodies stay out.</p>
+        <p v-if="exporting.format === 'openapi'" class="text-xs opacity-50">Auth goes in as its kind only (bearer, basic, API key), never its values. Values written as <code v-pre>{{variables}}</code> stay out of the examples.</p>
+        <p v-else class="text-xs opacity-50">Auth values in the collection go into the file as they are. Files picked for multipart or binary bodies stay out.</p>
         <div class="modal-action">
           <button class="btn btn-ghost btn-sm" @click="exporting = null">Cancel</button>
           <button class="btn btn-primary btn-sm gap-1.5" @click="doExport"><Icon name="upload" class="size-4" />Export…</button>
@@ -721,6 +740,7 @@ const SORTS: { id: SidebarLayout['sortBy']; label: string }[] = [
       <div class="modal-backdrop" @click="exporting = null" />
     </dialog>
     <CopyCollectionDialog v-if="copying" :collection="copying" @close="copying = null" />
+    <DocatzLinkDialog v-if="linkingDocatz" :collection="linkingDocatz" @close="linkingDocatz = null" />
     <DevcatzLinkDialog v-if="linking" :collection="linking" @close="linking = null" />
     <MockDialog v-if="mocking" :collection="mocking" @close="mocking = null" />
     <SpecReviewDialog v-if="reviewing" :review="reviewing.review" :name="reviewing.name" :workspace-id="workspace!.id" @close="reviewing = null" @done="specDone" />

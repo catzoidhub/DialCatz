@@ -5,6 +5,7 @@ import { attempt, goSection, mocks, notify, openItem, refreshMocks, setWorkspace
 import CatMood from './CatMood.vue';
 import Icon from './Icon.vue';
 import devcatzLogo from '../assets/logos/devcatz.svg';
+import docatzLogo from '../assets/logos/docatz.png';
 
 /**
  * A mock server made from a collection's spec (#94): a stand-in for the API on this computer, so a frontend can work
@@ -98,7 +99,12 @@ async function copy(text = m.value!.url) {
   await navigator.clipboard.writeText(text);
   notify('success', 'Address copied');
 }
-const openDevCatz = () => attempt(() => api.mockOpenInDevCatz(ws.value, props.collection.id));
+const openIn = (which: 'devcatz' | 'docatz') => attempt(() => api.mockOpenIn(ws.value, props.collection.id, which));
+/** The domains DevCatz and DoCatz give it (each only once that app serves it). */
+const domains = computed(() => [
+  ...(m.value?.devcatz ? [{ which: 'devcatz' as const, app: 'DevCatz', logo: devcatzLogo, ...m.value.devcatz }] : []),
+  ...(m.value?.docatz ? [{ which: 'docatz' as const, app: 'DoCatz', logo: docatzLogo, ...m.value.docatz }] : []),
+]);
 /** Addresses open in the browser chosen in Settings → Open with (shared with the Catzoid apps). */
 const openWeb = (url: string) => void attempt(() => api.openUrl(url));
 const mockEnvName = computed(() => `Mock · ${props.collection.name}`);
@@ -165,16 +171,16 @@ onBeforeUnmount(() => clearInterval(timer));
             <button class="mock-url" :title="`Open ${m.url} in your browser`" @click="openWeb(m.url)"><span class="truncate">{{ m.url }}</span><Icon name="link" class="size-3.5 shrink-0 opacity-50" /></button>
             <button class="btn btn-ghost btn-sm" title="Copy the address" @click="copy()"><Icon name="copy" class="size-4" /></button>
           </div>
-          <!-- DevCatz installed and serving it: its own domain (HTTP and HTTPS), and its page there. -->
-          <div v-if="m.devcatz" class="mock-domain space-y-2">
+          <!-- DevCatz / DoCatz installed and serving it: its own domain (HTTP and HTTPS), and its page there. -->
+          <div v-for="d in domains" :key="d.which" class="mock-domain space-y-2">
             <div class="flex items-center gap-2">
-              <img :src="devcatzLogo" alt="" class="size-5 shrink-0 rounded" />
-              <span class="min-w-0 flex-1 text-xs opacity-70">Its own domain, from DevCatz</span>
-              <button class="btn btn-sm gap-1.5" @click="openDevCatz"><img :src="devcatzLogo" alt="" class="size-4" />Open in DevCatz</button>
+              <img :src="d.logo" alt="" class="size-5 shrink-0 rounded" />
+              <span class="min-w-0 flex-1 text-xs opacity-70">Its own domain, from {{ d.app }}</span>
+              <button class="btn btn-sm gap-1.5" @click="openIn(d.which)"><img :src="d.logo" alt="" class="size-4 rounded-sm" />Open in {{ d.app }}</button>
             </div>
             <div class="flex items-center gap-2">
-              <button class="mock-url" :title="`Open ${m.devcatz.url} in your browser`" @click="openWeb(m.devcatz.url)"><span class="truncate">{{ m.devcatz.url }}</span><Icon name="link" class="size-3.5 shrink-0 opacity-50" /></button>
-              <button class="btn btn-ghost btn-sm" title="Copy the domain" @click="copy(m.devcatz.url)"><Icon name="copy" class="size-4" /></button>
+              <button class="mock-url" :title="`Open ${d.url} in your browser`" @click="openWeb(d.url)"><span class="truncate">{{ d.url }}</span><Icon name="link" class="size-3.5 shrink-0 opacity-50" /></button>
+              <button class="btn btn-ghost btn-sm" title="Copy the domain" @click="copy(d.url)"><Icon name="copy" class="size-4" /></button>
             </div>
           </div>
           <p class="text-xs opacity-60">Point your frontend at this address. Add the header <code>Prefer: code=404</code> to get another response the spec describes.</p>

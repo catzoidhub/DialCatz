@@ -23,6 +23,8 @@ export interface BridgeMock {
   /** From a DevCatz site's spec file: the site's id and the file's path in it, as DevCatz sent it (forward slashes). */
   siteId?: string;
   specFile?: string;
+  /** From a DoCatz compose project's service: its project, service and OpenAPI file (relative to the compose folder). */
+  docatz?: { project: string; service: string; specFile?: string };
 }
 
 let mcatzpEntry: BridgeEntry | undefined;

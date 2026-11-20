@@ -78,7 +78,7 @@ function specDoc(spec: RequestSpec): Record<string, unknown> {
 function itemDoc(i: TreeItem): Record<string, unknown> {
   const base = { id: i.id, name: i.name, sort: i.sort, description: i.description };
   if (i.kind === 'request') return compact({ ...base, request: i.request ? specDoc(i.request) : undefined });
-  return compact({ ...base, auth: i.auth, preRequest: i.preRequest, tests: i.tests, ...(i.kind === 'collection' ? { insecure: i.insecure, environmentId: i.environmentId, origin: i.origin, spec: i.spec, devcatz: i.devcatz } : {}) });
+  return compact({ ...base, auth: i.auth, preRequest: i.preRequest, tests: i.tests, ...(i.kind === 'collection' ? { insecure: i.insecure, environmentId: i.environmentId, origin: i.origin, spec: i.spec, devcatz: i.devcatz, docatz: i.docatz } : {}) });
 }
 
 const yaml = (o: unknown) => stringify(o, { lineWidth: 0 });
@@ -210,6 +210,10 @@ function containerFrom(d: Record<string, unknown>, kind: 'collection' | 'folder'
   if (kind === 'collection' && d.insecure === true) item.insecure = true;
   if (kind === 'collection' && (typeof d.environmentId === 'string' || d.environmentId === null)) item.environmentId = d.environmentId as string | null;
   if (kind === 'collection' && typeof d.origin === 'string' && d.origin) item.origin = str(d.origin, 300);
+  if (kind === 'collection' && d.docatz && typeof d.docatz === 'object') {
+    const l = d.docatz as Record<string, unknown>;
+    if (typeof l.project === 'string') item.docatz = { project: str(l.project, 64), service: str(l.service, 64), ...(l.specFile ? { specFile: str(l.specFile, 400) } : {}), ...(l.repo ? { repo: str(l.repo, 300) } : {}) };
+  }
   // The DevCatz pairing (devcatzlink.ts); in a site's own repository the Git remote finds the site on every computer.
   if (kind === 'collection' && d.devcatz && typeof d.devcatz === 'object') {
     const l = d.devcatz as Record<string, unknown>;

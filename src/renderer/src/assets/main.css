@@ -95,6 +95,8 @@
   --c-team: oklch(66% 0.15 300);
   /* DevCatz's own primary (its main.css), for collections paired with a DevCatz site. */
   --devcatz: oklch(57% 0.2 283);
+  /* DoCatz's primary, deepened for an icon on light surfaces. */
+  --docatz: oklch(58% 0.13 240);
   --c-settings: oklch(from var(--color-base-content) l c h / 0.9);
 }
 /* Dark surfaces: the system's dark mode (unless Light is picked), or Dark picked by hand. */
@@ -105,6 +107,7 @@
     --shadow-card: 0 1px 2px oklch(0 0 0 / 0.3), 0 10px 30px -18px oklch(0 0 0 / 0.6);
     --primary-ink: var(--color-primary);
     --devcatz: oklch(72% 0.15 283);
+    --docatz: oklch(77% 0.11 238);
   }
 }
 :root[data-theme='dark'] {
@@ -113,6 +116,7 @@
   --shadow-card: 0 1px 2px oklch(0 0 0 / 0.3), 0 10px 30px -18px oklch(0 0 0 / 0.6);
   --primary-ink: var(--color-primary);
   --devcatz: oklch(72% 0.15 283);
+  --docatz: oklch(77% 0.11 238);
 }
 /* Primary-coloured text: the soft teal is for fills; text takes the deeper ink. */
 .text-primary,
@@ -850,10 +854,17 @@ body.is-resizing * {
   color: var(--devcatz);
   opacity: 1 !important;
 }
+.tree-icon.is-docatz {
+  color: var(--docatz);
+  opacity: 1 !important;
+}
 .tree-icon-wrap.is-away {
   border-radius: 5px;
   outline: 1px dashed oklch(from var(--devcatz) l c h / 0.6);
   outline-offset: 1px;
+}
+.tree-icon-wrap.is-docatz.is-away {
+  outline-color: oklch(from var(--docatz) l c h / 0.6);
 }
 .tree-mock {
   flex-shrink: 0;

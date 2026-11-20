@@ -59,13 +59,20 @@ export const collectionAsk = ref<{ id: string; mock: boolean } | null>(null);
 export const devcatzLinks = ref<Record<string, { site: string | null; app: string; here: boolean }>>({});
 /** Link / Unlink and the tree's DevCatz mark show only when DevCatz is installed here. */
 export const devcatzInstalled = ref(false);
+/** The same for DoCatz projects' services (docatzlink.ts). */
+export const docatzLinks = ref<Record<string, { project: string | null; service: string; here: boolean }>>({});
+export const docatzInstalled = ref(false);
+/** Both pairings, each only while its app is installed here. */
 export async function refreshDevcatzLinks(): Promise<void> {
   const w = workspace.value;
   if (!w) return;
-  devcatzInstalled.value = (await api.devcatzSites().catch(() => null))?.installed === true;
-  if (!devcatzInstalled.value) return void (devcatzLinks.value = {});
-  const links = await api.devcatzLinks(w.id).catch(() => null);
-  if (links && workspace.value?.id === w.id) devcatzLinks.value = links;
+  const [dev, doc] = await Promise.all([api.devcatzSites().catch(() => null), api.docatzProjects().catch(() => null)]);
+  devcatzInstalled.value = dev?.installed === true;
+  docatzInstalled.value = doc?.installed === true;
+  const [links, dlinks] = await Promise.all([devcatzInstalled.value ? api.devcatzLinks(w.id).catch(() => null) : {}, docatzInstalled.value ? api.docatzLinks(w.id).catch(() => null) : {}]);
+  if (workspace.value?.id !== w.id) return;
+  if (links) devcatzLinks.value = links;
+  if (dlinks) docatzLinks.value = dlinks;
 }
 /** #94: mock servers running now (the tree marks their collections). */
 export const mocks = ref<MockState[]>([]);

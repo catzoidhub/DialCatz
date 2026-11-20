@@ -30,6 +30,9 @@ export const PROJECT_NAME = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 interface Bridge {
   schema: number;
   engine?: 'running' | 'stopped';
+  proxy?: { httpPort?: number; httpsPort?: number };
+  /** DialCatz's mock servers DoCatz serves under a domain of its own (#94), as DevCatz does. */
+  dialcatzMocks?: { workspaceId: string; collectionId: string; domain: string; url: string }[];
   containers?: { name: string; project: string | null; service: string | null; state: string; url: string | null; inner?: string | null; dir?: string | null; framework?: string | null; library?: string | null }[];
 }
 
@@ -132,6 +135,34 @@ function docker(args: string[], timeout = 90_000): Promise<string> {
   );
 }
 
+/**
+ * Ports DoCatz holds on this computer (#94: a mock never takes one): its proxy's, the one in each container's
+ * address, and the host ports its running containers publish (DoCatz's own docker; skipped when the engine is down).
+ */
+export async function usedPorts(): Promise<Set<number>> {
+  const out = new Set<number>();
+  const add = (n: unknown) => typeof n === 'number' && Number.isInteger(n) && n > 0 && n < 65536 && out.add(n);
+  const b = bridge();
+  add(b?.proxy?.httpPort);
+  add(b?.proxy?.httpsPort);
+  for (const c of b?.containers ?? []) {
+    const port = c.url?.match(/^[a-z]+:\/\/[^/]+:(\d+)/i)?.[1];
+    if (port) add(Number(port));
+  }
+  if (b?.engine === 'running') {
+    const ps = await docker(['ps', '--format', '{{.Ports}}'], 5000).catch(() => '');
+    for (const m of ps.matchAll(/:(\d+)->/g)) add(Number(m[1]));
+  }
+  return out;
+}
+
+/** The domain DoCatz gives a DialCatz mock, and its docatz:// page; null without DoCatz, or before it serves it. */
+export function mockDomain(workspaceId: string, collectionId: string): { domain: string; url: string; link: string } | null {
+  const m = bridge()?.dialcatzMocks?.find((x) => x.workspaceId === workspaceId && x.collectionId === collectionId);
+  if (!m || !/^[a-z0-9.-]{1,253}$/i.test(m.domain) || !/^https?:\/\//.test(m.url)) return null;
+  return { domain: m.domain, url: m.url, link: `docatz://mocks?${new URLSearchParams({ workspace: workspaceId, collection: collectionId })}` };
+}
+
 const SPEC_FILES = ['openapi.json', 'openapi.yaml', 'openapi.yml', 'swagger.json', 'swagger.yaml', 'swagger.yml'];
 /** A service's own folders in the compose folder (<service>, apps/<service>, services/<service>) and their docs/. */
 const ownFolders = (service: string) => [service, join('apps', service), join('services', service)].flatMap((f) => [f, join(f, 'docs')]);
@@ -140,6 +171,12 @@ const hasOwnSpec = (dir: string | null, service: string) => !!dir && ownFolders(
 
 /** OpenAPI files lying in the compose folder: the service's own folders first, then the top level and the usual docs
  * folders, then each app of a monorepo (apps/*). */
+/** The OpenAPI file a service's routes come from, relative to the compose folder (forward slashes); null when none. */
+export function specFileOf(p: DoCatzProject, service?: string): string | null {
+  const f = fileSpec(p.dir, service);
+  return f ? f.from.split(/[\\/]/).join('/') : null;
+}
+
 function fileSpec(dir: string | null, service?: string): { api: NonNullable<ReturnType<typeof parseSpec>>; from: string } | null {
   if (!dir) return null;
   let apps: string[] = [];

@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { connect } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import type { MockState, TreeItem } from '@shared/types';
 import { matchRoute, methodsOn, mockBody, pickResponse, preferredCode, routePath, type MockRoute } from '@shared/specmock';
@@ -44,7 +45,7 @@ export function routesOf(items: TreeItem[], collectionId: string): MockRoute[] {
 const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'mock';
 
 function publish(): void {
-  setBridgeMocks([...running.values()].map((r) => ({ name: r.state.name, slug: slug(r.state.name), workspaceId: r.state.workspaceId, collectionId: r.state.collectionId, url: r.state.url, port: r.state.port, startedAt: r.startedAt, ...(r.state.siteId ? { siteId: r.state.siteId, specFile: r.state.specFile } : {}) })));
+  setBridgeMocks([...running.values()].map((r) => ({ name: r.state.name, slug: slug(r.state.name), workspaceId: r.state.workspaceId, collectionId: r.state.collectionId, url: r.state.url, port: r.state.port, startedAt: r.startedAt, ...(r.state.siteId ? { siteId: r.state.siteId, specFile: r.state.specFile } : {}), ...(r.state.docatzOf ? { docatz: r.state.docatzOf } : {}) })));
 }
 
 function cors(req: IncomingMessage, res: ServerResponse): void {
@@ -105,6 +106,20 @@ function handler(r: { state: MockState }, load: Load) {
   };
 }
 
+/**
+ * Something answers on the port already (a container publishing it on every address, another server): binding
+ * 127.0.0.1 could still succeed beside it, so it is skipped.
+ */
+function answers(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const s = connect({ host: '127.0.0.1', port });
+    const done = (v: boolean) => (s.destroy(), resolve(v));
+    s.setTimeout(300, () => done(false));
+    s.once('connect', () => done(true));
+    s.once('error', () => done(false));
+  });
+}
+
 function listen(server: Server, port: number): Promise<number> {
   return new Promise((resolve, reject) => {
     const fail = (e: Error) => (server.off('listening', ok), reject(e));
@@ -116,7 +131,7 @@ function listen(server: Server, port: number): Promise<number> {
 }
 
 /** Starts the collection's mock (or gives the running one). `port`: that port only; none: 4010 and up. */
-export async function start(workspaceId: string, collectionId: string, name: string, load: Load, port?: number, site?: { siteId: string; specFile: string } | null, reserved: Set<number> = new Set()): Promise<MockState> {
+export async function start(workspaceId: string, collectionId: string, name: string, load: Load, port?: number, meta?: { siteId?: string; specFile?: string; docatz?: MockState['docatzOf'] } | null, reserved: Set<number> = new Set()): Promise<MockState> {
   const k = key(workspaceId, collectionId);
   const have = running.get(k);
   if (have) return have.state;
@@ -124,11 +139,12 @@ export async function start(workspaceId: string, collectionId: string, name: str
   if (!w) throw new Error('That collection is gone');
   const routes = routesOf(w.items, collectionId).length;
   if (!routes) throw new Error(`No request in “${name}” has responses from a spec yet. Import it from an OpenAPI document, or use Spec → Check for changes once to bring them in.`);
-  const r: Running = { server: createServer(), state: { workspaceId, collectionId, name, url: '', port: 0, routes, hits: [], ...(site ? site : {}) }, startedAt: Date.now() };
+  const r: Running = { server: createServer(), state: { workspaceId, collectionId, name, url: '', port: 0, routes, hits: [], ...(meta?.siteId ? { siteId: meta.siteId, specFile: meta.specFile } : {}), ...(meta?.docatz ? { docatzOf: meta.docatz } : {}) }, startedAt: Date.now() };
   r.server.on('request', handler(r, load));
   let got = 0;
   if (port) {
-    if (reserved.has(port)) throw new Error(`DevCatz uses port ${port}. Pick another, or leave it empty for a free one.`);
+    if (reserved.has(port)) throw new Error(`Port ${port} belongs to DevCatz or DoCatz. Pick another, or leave it empty for a free one.`);
+    if (await answers(port)) throw new Error(`Something already answers on port ${port}. Pick another, or leave it empty for a free one.`);
     try {
       got = await listen(r.server, port);
     } catch (e) {
@@ -139,7 +155,7 @@ export async function start(workspaceId: string, collectionId: string, name: str
     const taken = new Set([...running.values()].map((x) => x.state.port));
     for (const p of reserved) taken.add(p);
     for (let p = FIRST_PORT; p <= LAST_PORT && !got; p++) {
-      if (taken.has(p)) continue;
+      if (taken.has(p) || (await answers(p))) continue;
       got = await listen(r.server, p).catch(() => 0);
     }
     if (!got) got = await listen(r.server, 0);

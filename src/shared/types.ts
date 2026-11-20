@@ -108,6 +108,8 @@ export interface TreeItem {
   spec?: SpecLink;
   /** Collections: the DevCatz site (and app) it is paired with; see main/devcatzlink.ts. */
   devcatz?: DevcatzLink;
+  /** Collections: the DoCatz compose project (and service) it is paired with; see main/docatzlink.ts. */
+  docatz?: DocatzLink;
   /** Requests made from a spec (#92): the request as the spec made it, so an update can tell the user's edits apart. */
   specBase?: SpecBase;
   /** Requests made from a spec (#93): the responses the spec describes, to check a response against. */
@@ -121,6 +123,16 @@ export interface TreeItem {
   dirty?: boolean;
   updatedBy?: string;
   updatedAt?: string;
+}
+
+/** A collection paired with a DoCatz compose project's service (main/docatzlink.ts). */
+export interface DocatzLink {
+  project: string;
+  service: string;
+  /** The OpenAPI file its routes come from, relative to the compose folder (forward slashes). */
+  specFile?: string;
+  /** The compose folder's Git remote ("github.com/owner/repo"), to find the project on another computer. */
+  repo?: string;
 }
 
 /** A collection paired with a DevCatz site's app (main/devcatzlink.ts). */
@@ -182,6 +194,10 @@ export interface MockState {
   specFile?: string;
   /** DevCatz serves it under a domain of its own (DevCatz installed and has picked it up): that domain and its page. */
   devcatz?: { domain: string; url: string; link: string };
+  /** The same from DoCatz. */
+  docatz?: { domain: string; url: string; link: string };
+  /** The DoCatz project and service the collection is paired with (bridge.json: DoCatz matches mocks on them). */
+  docatzOf?: { project: string; service: string; specFile?: string };
 }
 
 /** One difference between a collection and its spec (#92). `key` is the route ("GET /users/:"). */
@@ -1289,8 +1305,14 @@ export interface DialCatzApi {
   devcatzLinkSet(workspaceId: string, collectionId: string, siteId: string | null, app: string): Promise<Workspace>;
   /** #94: imports the site's spec file as a collection that follows it. */
   mockSiteImport(workspaceId: string, siteId: string, spec: string): Promise<{ workspace: Workspace; collectionId: string }>;
-  /** #94: the mock's page in DevCatz (devcatz://mocks?workspace=&collection=). */
-  mockOpenInDevCatz(workspaceId: string, collectionId: string): Promise<void>;
+  /** #94: the mock's page in DevCatz or DoCatz (devcatz:// / docatz://mocks?workspace=&collection=). */
+  mockOpenIn(workspaceId: string, collectionId: string, which: 'devcatz' | 'docatz'): Promise<void>;
+  /** #94, DoCatz's "Create mock server" (dialcatz://mock?docatz=&service=): the collection paired with that service anywhere on this computer. */
+  mockServiceSpec(project: string, service: string): Promise<{ project: string; service: string; found: { workspaceId: string; collectionId: string; name: string } | null }>;
+  /** Collections paired with a DoCatz project's service (main/docatzlink.ts). */
+  docatzLinks(workspaceId: string): Promise<Record<string, { project: string | null; service: string; here: boolean }>>;
+  /** Pairs a collection with a DoCatz project's service (project null: unpairs it). */
+  docatzLinkSet(workspaceId: string, collectionId: string, project: string | null, service: string): Promise<Workspace>;
   /** #94: back to the environment the collection used before mockEnvironment (also done when the mock stops). */
   mockEnvironmentRestore(workspaceId: string, collectionId: string): Promise<Workspace>;
   /** #94: an environment "Mock · <collection>" whose baseUrl is the mock, made active. */
@@ -1337,7 +1359,8 @@ export interface DialCatzApi {
   /** Moves the picked collections, environments (and globals) of those workspaces here (progress on onPostmanProgress). */
   migratePostmanApi(workspaceId: string, key: string, postmanWorkspaceIds: string[], pick: PostmanPick): Promise<{ workspace: Workspace; summary: PostmanSummary }>;
   /** Saves a collection as a DialCatz file (`.dialcatz_collection.json`) or a Postman v2.1 collection (false: cancelled). */
-  exportCollection(workspaceId: string, collectionId: string, format?: ExportFormat): Promise<boolean>;
+  /** 'openapi' (#95): an OpenAPI 3 YAML document made from the collection's requests. */
+  exportCollection(workspaceId: string, collectionId: string, format?: ExportFormat | 'openapi'): Promise<boolean>;
 
   /** Sends a request in its wire form (variables, auth and body already resolved by the window: shared/request.ts). */
   send(wire: WireRequest, token: string, options?: SendOptions): Promise<SendResult>;
@@ -1462,7 +1485,7 @@ export const API_METHODS = [
   'workspaces', 'workspace', 'createWorkspace', 'renameWorkspace', 'deleteWorkspace', 'openFolderWorkspace', 'useFolder', 'stopUsingFolder', 'revealFolder', 'folderGitStatus', 'folderGitDiff', 'folderGitCommit', 'folderGitPull', 'folderGitPush', 'folderGitInit', 'folderGitAbortMerge',
   'gitState', 'gitInstall', 'gitUpdateCheck', 'gitUpdate', 'gitWatch', 'gitRepoAdd', 'gitRepoRemove', 'gitRepoLog', 'gitRevealRepo', 'gitOpenWorkspace', 'gitPickFolder', 'gitStatus', 'gitInit', 'gitDiff', 'gitStage', 'gitUnstage', 'gitDiscard', 'gitCommit', 'gitSync', 'gitCancel', 'gitLog', 'gitShow', 'gitBranches', 'gitBranch', 'gitStashes', 'gitStash', 'gitTags', 'gitTag', 'gitOperation', 'gitSquash', 'gitCherryPick', 'gitRevert', 'gitReset', 'gitRestoreFile', 'gitOpenFile', 'gitIgnoreSuggestions', 'gitIgnoreAdd', 'gitignoreRead', 'gitignoreSave', 'gitSetIdentity', 'gitAddRemote', 'gitWorktrees', 'gitWorktreeAdd', 'gitWorktreeRemove', 'gitWorktreePrune', 'gitPulls', 'gitCreatePull', 'gitCheckoutPull', 'gitAddAccount', 'gitRemoveAccount', 'gitRepos', 'gitSshKeys', 'gitSshGenerate', 'gitSshAddToAccount', 'gitClone', 'gitCancelClone', 'gitDismissClone', 'gitAccounts', 'gitCreateRemoteRepo', 'gitDevCatzAccounts', 'gitImportDevCatz', 'folderGitConnect', 'createFolderWorkspace', 'pickFolder', 'teamAdminUrl', 'appMenu', 'menuShortcuts', 'menuKey',
   'saveItems', 'deleteItems',
-  'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'specCheck', 'specApply', 'specFollow', 'specUnfollow', 'specStale', 'browsers', 'specScanFolder', 'specImportFile', 'mockList', 'mockEnvironmentRestore', 'mockStart', 'mockStop', 'mockEnvironment', 'mockSiteSpec', 'mockSiteImport', 'devcatzLinks', 'devcatzLinkSet', 'mockOpenInDevCatz', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'importedBefore', 'docatzProjects', 'docatzImport', 'docatzOpen', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection',
+  'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'specCheck', 'specApply', 'specFollow', 'specUnfollow', 'specStale', 'browsers', 'specScanFolder', 'specImportFile', 'mockList', 'mockEnvironmentRestore', 'mockStart', 'mockStop', 'mockEnvironment', 'mockSiteSpec', 'mockSiteImport', 'devcatzLinks', 'devcatzLinkSet', 'mockOpenIn', 'mockServiceSpec', 'docatzLinks', 'docatzLinkSet', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'importedBefore', 'docatzProjects', 'docatzImport', 'docatzOpen', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection',
   'aiModels', 'aiTest', 'aiAsk', 'aiExplain', 'aiTests', 'aiBody', 'aiCancel',
   'send', 'pickFile', 'pickDataFile', 'saveText', 'cancel', 'wsConnect', 'wsSend', 'wsClose', 'saveResponse', 'history', 'addHistory', 'clearHistory',
   'servers', 'probeServer', 'connectWithToken', 'connectWithCode', 'refreshServer', 'disconnectServer', 'subscribeWorkspace', 'setPresence', 'presence', 'syncWorkspace', 'resolveConflict',

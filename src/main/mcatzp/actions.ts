@@ -183,11 +183,11 @@ export function readActions(api: DialCatzApi, scopes: Scopes, win: WindowReads):
       const w = await workspaceOf(a.workspace);
       const groups = new Map(w.layout.groups.map((g) => [g.id, g.name]));
       const favorites = new Set(w.layout.favorites);
-      const links = await api.devcatzLinks(w.id);
+      const [links, dlinks] = await Promise.all([api.devcatzLinks(w.id), api.docatzLinks(w.id)]);
       return reply({
         collections: w.items.filter((i) => i.kind === 'collection').sort((x, y) => x.sort - y.sort).map((c) => {
           const inside = underCollection(w.items, c.id);
-          return { id: c.id, name: c.name, requests: inside.filter((i) => i.kind === 'request').length, folders: inside.filter((i) => i.kind === 'folder').length, group: groups.get(w.layout.groupOf[c.id]) ?? null, favorite: favorites.has(c.id), environment: c.environmentId === null ? null : (w.environments.find((e) => e.id === c.environmentId)?.name ?? 'the default'), ...(c.origin ? { importedFrom: c.origin } : {}), ...(links[c.id] ? { devcatz: links[c.id] } : {}) };
+          return { id: c.id, name: c.name, requests: inside.filter((i) => i.kind === 'request').length, folders: inside.filter((i) => i.kind === 'folder').length, group: groups.get(w.layout.groupOf[c.id]) ?? null, favorite: favorites.has(c.id), environment: c.environmentId === null ? null : (w.environments.find((e) => e.id === c.environmentId)?.name ?? 'the default'), ...(c.origin ? { importedFrom: c.origin } : {}), ...(links[c.id] ? { devcatz: links[c.id] } : {}), ...(dlinks[c.id] ? { docatz: dlinks[c.id] } : {}) };
         }),
       });
     }),
@@ -274,7 +274,7 @@ export function readActions(api: DialCatzApi, scopes: Scopes, win: WindowReads):
       const b = await api.browsers();
       return reply({ systemDefault: b.systemDefault?.name ?? null, browsers: b.list.map((x) => ({ name: x.name, path: x.path })) });
     }),
-    read('list_mocks', 'Mock servers', 'The mock servers DialCatz runs now (start_mock): collection, address, how many requests they answer, and their latest calls.', OBJECT(), async () => reply({ mocks: (await api.mockList()).map((m) => ({ workspace: m.workspaceId, collection: m.collectionId, name: m.name, url: m.url, ...(m.devcatz ? { domain: m.devcatz.url } : {}), routes: m.routes, latest: m.hits.slice(0, 10) })) })),
+    read('list_mocks', 'Mock servers', 'The mock servers DialCatz runs now (start_mock): collection, address, how many requests they answer, and their latest calls.', OBJECT(), async () => reply({ mocks: (await api.mockList()).map((m) => ({ workspace: m.workspaceId, collection: m.collectionId, name: m.name, url: m.url, ...(m.devcatz ? { domain: m.devcatz.url } : m.docatz ? { domain: m.docatz.url } : {}), routes: m.routes, latest: m.hits.slice(0, 10) })) })),
     read('list_dbcatz_connections', 'DBCatz connections', 'The connections Check in DBCatz can use: names and engines from DBCatz, never a password.', OBJECT(), async () => {
       const r = await api.dbcatzInfo();
       return reply({ installed: r.installed, connections: r.connections.map((c) => ({ id: c.id, name: c.name, engine: c.engine, database: c.database, source: c.source })) });

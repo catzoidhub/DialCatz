@@ -73,6 +73,19 @@ const offs: (() => void)[] = [];
 // ---- DevCatz's "Create mock server" (#94): the collection that follows the site's spec, or an import asked first.
 const mockImportAsk = ref<{ siteId: string; spec: string; site: string } | null>(null);
 const mockImporting = ref(false);
+/** The same from DoCatz: a project's service no collection is paired with yet; its routes are imported first. */
+const mockServiceAsk = ref<{ project: string; service: string } | null>(null);
+async function importServiceMock() {
+  const a = mockServiceAsk.value!;
+  if (!workspace.value) return;
+  mockImporting.value = true;
+  const r = await attempt(() => api.docatzImport(workspace.value!.id, a.project, { environment: true, envVars: false, routes: true, service: a.service || undefined }));
+  mockImporting.value = false;
+  mockServiceAsk.value = null;
+  if (!r?.collectionId) return;
+  setWorkspace(r.workspace);
+  await startSiteMock(r.workspace.id, r.collectionId);
+}
 async function startSiteMock(workspaceId: string, collectionId: string) {
   if (workspace.value?.id !== workspaceId) await selectWorkspace(workspaceId);
   goSection('requests');
@@ -286,6 +299,14 @@ onMounted(async () => {
   // "Open in DialCatz" from DoCatz (an API container's page): the import on that project, that service as baseUrl.
   offs.push(api.onDoCatz(({ project, service }) => (importRequest.value = { tab: 'docatz', project, service })));
   offs.push(
+    api.onMockService(async ({ project, service }) => {
+      const r = await attempt(() => api.mockServiceSpec(project, service));
+      if (!r) return;
+      if (r.found) return void startSiteMock(r.found.workspaceId, r.found.collectionId);
+      mockServiceAsk.value = r;
+    }),
+  );
+  offs.push(
     api.onMockSpec(async ({ siteId, spec, app }) => {
       const r = await attempt(() => api.mockSiteSpec(siteId, spec, app));
       if (!r) return;
@@ -369,6 +390,15 @@ onBeforeUnmount(() => offs.forEach((f) => f()));
     <UpdateDialog v-if="updateOpen" @close="updateOpen = false" />
     <ReportDialog v-if="reportOpen" :kind="reportOpen" @close="reportOpen = null" />
     <WelcomeDialog v-if="ready" />
+    <ConfirmDialog
+      v-if="mockServiceAsk"
+      title="Make a mock server?"
+      :text="`DoCatz asks for a mock of ${mockServiceAsk.service || 'the API service'} in ${mockServiceAsk.project}. No collection is paired with it yet: DialCatz imports its routes into “${workspace?.name ?? 'this workspace'}” (with the project's environment), then starts its mock.`"
+      confirm="Import and start"
+      :busy="mockImporting"
+      @ok="importServiceMock"
+      @cancel="mockServiceAsk = null"
+    />
     <ConfirmDialog
       v-if="mockImportAsk"
       title="Make a mock server?"

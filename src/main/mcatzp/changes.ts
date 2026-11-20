@@ -360,6 +360,15 @@ export function changeActions(api: DialCatzApi, scopes: Scopes, command: WindowC
       await api.mockStop(w.id, collectionOf(w, a.collection).id);
       return done({ stopped: true });
     }),
+    asked('link_docatz_service', 'Pair with a DoCatz service', "Pairs a collection with a DoCatz compose project's service, so importing its routes, DoCatz's Open in DialCatz and Create mock server all find it (project: its name from list_docatz_projects; leave project out to unpair).", { workspace: WORKSPACE, collection: COLLECTION, project: S('The compose project (list_docatz_projects); left out: unpair.'), service: S("The service ('' or left out: its API service).", 64) }, ['workspace', 'collection'], async (a) => {
+      const w = await writeOf(a.workspace);
+      const c = collectionOf(w, a.collection);
+      return q(a.project ? `Pair ${c.name} with a DoCatz service?` : `Unpair ${c.name} from DoCatz?`, [...fact('Project', a.project ?? null), ...fact('Service', a.service ?? null)], { workspaceId: w.id, section: 'requests' });
+    }, async (a) => {
+      const w = await writeOf(a.workspace);
+      await api.docatzLinkSet(w.id, collectionOf(w, a.collection).id, a.project ? String(a.project) : null, String(a.service ?? ''));
+      return done({});
+    }),
     asked('link_devcatz_site', 'Pair with a DevCatz site', "Pairs a collection with a DevCatz site's app, so importing the site's routes, DevCatz's Open in DialCatz and Create mock server all find it (site: its id from list_devcatz_sites; leave site out to unpair).", { workspace: WORKSPACE, collection: COLLECTION, site: S("The site's id (list_devcatz_sites); left out: unpair."), app: S("The app's folder in the site ('' or left out: the site's API app).", 200) }, ['workspace', 'collection'], async (a) => {
       const w = await writeOf(a.workspace);
       const c = collectionOf(w, a.collection);
@@ -744,13 +753,13 @@ export function changeActions(api: DialCatzApi, scopes: Scopes, command: WindowC
       const r = await api.importEnvironments((await writeOf(a.workspace)).id);
       return done(r ? { names: r.names, skipped: r.skipped.length } : { cancelled: true });
     }),
-    asked('export_collection', 'Export a collection', 'Saves a collection as a DialCatz or Postman file; the user picks where in a dialog.', { workspace: WORKSPACE, collection: COLLECTION, format: FORMAT }, ['workspace', 'collection'], async (a) => {
+    asked('export_collection', 'Export a collection', 'Saves a collection as a DialCatz or Postman file, or as an OpenAPI 3 document (YAML) made from its requests; the user picks where in a dialog.', { workspace: WORKSPACE, collection: COLLECTION, format: { type: 'string', enum: ['dialcatz', 'postman', 'openapi'] } }, ['workspace', 'collection'], async (a) => {
       const w = await workspaceOf(a.workspace);
       return q(`Export ${collectionOf(w, a.collection).name}?`, [{ label: 'Where', value: 'You pick it next' }, ...fact('Format', a.format)], null);
     }, async (a) => {
       await windowUp();
       const w = await workspaceOf(a.workspace);
-      return done({ saved: await api.exportCollection(w.id, collectionOf(w, a.collection).id, a.format as 'dialcatz' | 'postman' | undefined) });
+      return done({ saved: await api.exportCollection(w.id, collectionOf(w, a.collection).id, a.format as 'dialcatz' | 'postman' | 'openapi' | undefined) });
     }),
     asked('export_environment', 'Export an environment', 'Saves an environment as a file; the user picks where in a dialog. Secret values never go through this: exporting those stays in the app.', { workspace: WORKSPACE, environment: ENVIRONMENT, values: { type: 'boolean', description: 'Non-secret values too; names only otherwise.' }, format: FORMAT }, ['workspace', 'environment'], async (a) => {
       const w = await workspaceOf(a.workspace);

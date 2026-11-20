@@ -37,8 +37,11 @@ import { mergeRoutes } from './routemerge';
 import { specApply, specDiff, withBase, type Fresh, type SpecPick } from './specsync';
 import { fetchSpecText, freshFor, hashText, readSpecFile } from './specsource';
 import * as mock from './mock';
+import { toOpenApi } from './openapi-export';
+import { stringify as toYaml } from 'yaml';
 import { scanFolder } from './specscan';
 import * as dclink from './devcatzlink';
+import * as dklink from './docatzlink';
 import { browsersState, openWeb, refreshBrowsers } from './browsers';
 import { Mcatzp } from './mcatzp';
 import * as mcatzpSetup from './mcatzp/install';
@@ -55,6 +58,7 @@ import { systemVersion } from './system';
  *                                                    as baseUrl (asks before importing)
  *   dialcatz://open?workspace=<id>&collection=<id>[&mock=1]  that collection (and its Mock server panel), from DevCatz
  *   dialcatz://mock?site=<DevCatz site id>&spec=<path in the site>  its mock server (asks before importing the spec)
+ *   dialcatz://mock?docatz=<project>[&service=<service>]  its mock server (asks before importing its routes)
  *   dialcatz://connect?server=<url>&code=<code>       join a team server with a one-time invite code; the window
  *                                                    shows the server address and asks before anything is sent
  */
@@ -199,6 +203,14 @@ function handleLink(raw: string): void {
       const project = u.searchParams.get('docatz')!;
       const service = u.searchParams.get('service') ?? '';
       if (docatz.PROJECT_NAME.test(project)) sendLink('app:docatz', { project, service: /^[a-z0-9][a-z0-9_.-]{0,62}$/.test(service) ? service : '' });
+      return;
+    }
+    if (u.hostname === 'mock' && u.searchParams.get('docatz')) {
+      // From DoCatz's "Create mock server" (#94): a compose project's service. The window reuses the collection paired
+      // with it, or asks before importing its routes, then starts its mock.
+      const project = u.searchParams.get('docatz')!;
+      const service = u.searchParams.get('service') ?? '';
+      if (docatz.PROJECT_NAME.test(project) && /^[a-z0-9][a-z0-9_.-]{0,62}$|^$/.test(service)) sendLink('app:mockService', { project, service });
       return;
     }
     if (u.hostname === 'mock') {
@@ -643,13 +655,9 @@ function api(): DialCatzApi {
     },
     mockList: async () => mock.list().map((m) => {
       const d = devcatz.mockDomain(m.workspaceId, m.collectionId);
-      return d ? { ...m, devcatz: d } : m;
+      const k = docatz.mockDomain(m.workspaceId, m.collectionId);
+      return { ...m, ...(d ? { devcatz: d } : {}), ...(k ? { docatz: k } : {}) };
     }),
-    mockOpenInDevCatz: async (id, collectionId) => {
-      const d = devcatz.mockDomain(String(id), String(collectionId));
-      if (!d) throw new Error('DevCatz has not picked this mock up yet');
-      await shell.openExternal(d.link);
-    },
     mockStart: async (id, collectionId, port) => {
       const { col } = specCollection(id, String(collectionId));
       const p = Number(port) || undefined;
@@ -658,7 +666,7 @@ function api(): DialCatzApi {
         const w = ws.load(id);
         const c = w.items.find((i) => i.id === col.id);
         return c ? { items: w.items, name: c.name } : null;
-      }, p, await siteSpecOf(col), devcatz.usedPorts());
+      }, p, await mockMeta(col), new Set([...devcatz.usedPorts(), ...(await docatz.usedPorts())]));
     },
     mockSiteSpec: async (siteId, spec, appArg) => {
       const { site, file } = siteSpecFile(String(siteId), String(spec));
@@ -678,6 +686,47 @@ function api(): DialCatzApi {
         }
       }
       return { site: site.name, file, found: fallback };
+    },
+    mockServiceSpec: async (project, service) => {
+      const p = docatz.project(String(project));
+      const svc = dklink.serviceOf(p, String(service ?? ''));
+      for (const s of ws.list()) {
+        let items: TreeItem[];
+        try {
+          items = ws.load(s.id).items;
+        } catch {
+          continue;
+        }
+        for (const col of items.filter((i) => i.kind === 'collection'))
+          if (await dklink.linkedTo(col, p, svc)) return { project: p.name, service: svc, found: { workspaceId: s.id, collectionId: col.id, name: col.name } };
+      }
+      return { project: p.name, service: svc, found: null };
+    },
+    docatzLinks: async (id) => {
+      const out: Record<string, { project: string | null; service: string; here: boolean }> = {};
+      for (const c of ws.load(id).items.filter((i) => i.kind === 'collection')) {
+        const l = dklink.linkOf(c);
+        if (!l) continue;
+        const p = await dklink.projectOf(l);
+        out[c.id] = { project: p?.name ?? null, service: p ? dklink.serviceOf(p, l.service) : l.service, here: !!p };
+      }
+      return out;
+    },
+    docatzLinkSet: async (id, collectionId, project, service) => {
+      const { col } = specCollection(id, String(collectionId));
+      const next: TreeItem = { ...col };
+      if (project === null) {
+        delete next.docatz;
+        if (next.origin?.startsWith('docatz:')) delete next.origin;
+      } else next.docatz = await dklink.makeLink(docatz.project(String(project)), String(service ?? ''));
+      const w = ws.saveItems(id, [next]);
+      if (w.serverId) void srv.sync(id).then(() => send('app:workspaces', null));
+      return w;
+    },
+    mockOpenIn: async (id, collectionId, which) => {
+      const d = which === 'docatz' ? docatz.mockDomain(String(id), String(collectionId)) : devcatz.mockDomain(String(id), String(collectionId));
+      if (!d) throw new Error(`${which === 'docatz' ? 'DoCatz' : 'DevCatz'} has not picked this mock up yet`);
+      await shell.openExternal(d.link);
     },
     devcatzLinks: async (id) => {
       const out: Record<string, { site: string | null; app: string; here: boolean }> = {};
@@ -788,8 +837,13 @@ function api(): DialCatzApi {
       if (from === 'docatz') {
         const p = docatz.projects().find((x) => x.name === key);
         if (!p) return [];
+        const paired: { collectionId: string; name: string; key: string; requests: number }[] = [];
+        for (const c of w.items.filter((i) => i.kind === 'collection' && !i.origin?.startsWith(`docatz:${p.name}:`))) {
+          const l = dklink.linkOf(c);
+          if (l && (await dklink.linkedTo(c, p, l.service))) paired.push({ collectionId: c.id, name: c.name, key: dklink.serviceOf(p, l.service), requests: countRequests(w, c.id) });
+        }
         // Before origins were kept: "<project>" (one service) or "<project> · <service>".
-        return importedFrom(w, `docatz:${p.name}:`, `DoCatz · ${p.name}`, (n) => (n === p.name ? (docatz.pickService(p)?.service ?? '') : n.startsWith(`${p.name} · `) ? n.slice(p.name.length + 3) : null)).map((x) => ({ collectionId: x.col.id, name: x.col.name, key: x.key, requests: countRequests(w, x.col.id) }));
+        return [...paired, ...importedFrom(w, `docatz:${p.name}:`, `DoCatz · ${p.name}`, (n) => (n === p.name ? (docatz.pickService(p)?.service ?? '') : n.startsWith(`${p.name} · `) ? n.slice(p.name.length + 3) : null)).map((x) => ({ collectionId: x.col.id, name: x.col.name, key: x.key, requests: countRequests(w, x.col.id) }))];
       }
       const site = devcatz.sites().find((x) => x.id === key);
       if (!site) return [];
@@ -826,8 +880,16 @@ function api(): DialCatzApi {
         skipped = got.skipped;
         // Imported before: the new routes join that collection, the user's requests stay as they are.
         for (const r of got.collections) {
-          const placed = placeRoutes(id, w, r, `docatz:${p.name}:${r.service}`, envName, what.into?.[r.service] ?? undefined);
+          const origin = `docatz:${p.name}:${r.service}`;
+          // Paired already (another computer's copy: the same Git remote): the routes go there.
+          let into = what.into?.[r.service] ?? undefined;
+          if (!into && !w.items.some((i) => i.kind === 'collection' && i.origin === origin)) {
+            for (const c of w.items.filter((i) => i.kind === 'collection')) if (await dklink.linkedTo(c, p, r.service)) (into = c.id);
+          }
+          const placed = placeRoutes(id, w, r, origin, envName, into);
           w = placed.w;
+          const col = w.items.find((i) => i.id === placed.collectionId);
+          if (col) w = ws.saveItems(id, [{ ...col, docatz: await dklink.makeLink(p, r.service) }]);
           collectionIds.push(placed.collectionId);
           requests += placed.requests;
           merged ||= placed.merged;
@@ -961,6 +1023,19 @@ function api(): DialCatzApi {
     },
     exportCollection: async (id, collectionId, format) => {
       const w = ws.load(id);
+      if (format === 'openapi') {
+        // #95: the start of a contract. The URL's leading {{variable}} becomes the server, from the collection's environment.
+        const col = w.items.find((i) => i.id === collectionId && i.kind === 'collection');
+        if (!col) throw new Error('That collection is gone');
+        const envId = col.environmentId === undefined ? w.activeEnvironmentId : col.environmentId;
+        const vars = new Map((w.environments.find((e) => e.id === envId)?.variables ?? []).filter((v) => v.enabled && !v.secret).map((v) => [v.key.trim(), v.value]));
+        const out = toOpenApi(w.items, collectionId, vars);
+        const name = col.name.replace(/[^\w.-]+/g, '-');
+        const r = await saveDialog(win, { defaultPath: join(app.getPath('downloads'), `${name}.openapi.yaml`), filters: [{ name: 'OpenAPI (YAML)', extensions: ['yaml', 'yml'] }] });
+        if (r.canceled || !r.filePath) return false;
+        writeFileSync(r.filePath, toYaml(out.doc, { lineWidth: 0 }));
+        return true;
+      }
       const postmanFormat = format === 'postman';
       const data = postmanFormat ? toPostman(w.items, collectionId) : exportCollection(w.items, collectionId);
       const name = (w.items.find((i) => i.id === collectionId)?.name ?? 'collection').replace(/[^\w.-]+/g, '-');
@@ -1277,6 +1352,16 @@ function siteSpecFile(siteId: string, spec: string): { site: DevCatzSite; file: 
   if (!rel || rel.startsWith('..') || isAbsolute(rel)) throw new Error('That is not a spec file of the site');
   if (!existsSync(file)) throw new Error(`${spec} is not in ${site.name} any more`);
   return { site, file };
+}
+
+/** What bridge.json says a mock belongs to: its DevCatz site + spec file, and its DoCatz project + service. */
+async function mockMeta(col: TreeItem): Promise<{ siteId?: string; specFile?: string; docatz?: { project: string; service: string; specFile?: string } }> {
+  const site = await siteSpecOf(col);
+  const l = dklink.linkOf(col);
+  const p = l ? await dklink.projectOf(l) : null;
+  const svc = p && l ? dklink.serviceOf(p, l.service) : '';
+  const file = p ? (docatz.specFileOf(p, svc) ?? l?.specFile) : undefined;
+  return { ...(site ?? {}), ...(p ? { docatz: { project: p.name, service: svc, ...(file ? { specFile: file } : {}) } } : {}) };
 }
 
 /** The DevCatz site and spec file a collection is paired with, for bridge.json (DevCatz matches mocks on them). */
