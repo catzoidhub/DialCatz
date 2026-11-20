@@ -3,6 +3,7 @@ import { newRequest, uid, type ConnectRequest, type McatzpAsk, type McatzpInstal
 import { AUTO_HEADERS, buildVars, effectiveAuth, interpolate, nameFromUrl, toWire, type Vars } from '@shared/request';
 import { store } from './store';
 import { requestContext, responseContext, runScript, type ScriptResult } from './scripts';
+import { checkResponse } from '@shared/speccheck';
 
 /**
  * The window's state: settings, the workspace on screen, open request tabs and their responses. Everything that
@@ -440,7 +441,7 @@ async function runChain(chain: { from: string | null; code: string }[], ctx: () 
  * changes are saved before the request is built), send, then test scripts in the same order. Used by request tabs
  * and the collection runner; the runner passes its iteration's data row, which wins over environment variables.
  */
-export async function execute(spec: RequestSpec, itemId: string | null, token: string, data?: Record<string, string>): Promise<{ result: SendResult; scripts: { pre?: ScriptResult; tests?: ScriptResult } }> {
+export async function execute(spec: RequestSpec, itemId: string | null, token: string, data?: Record<string, string>, opts: { checkSpec?: boolean } = {}): Promise<{ result: SendResult; scripts: { pre?: ScriptResult; tests?: ScriptResult } }> {
   const scripts: { pre?: ScriptResult; tests?: ScriptResult } = {};
   const vars = () => new Map([...varsFor(itemId), ...Object.entries(data ?? {})]);
   const wireNow = () => toWire(spec, vars(), effectiveAuth(spec.auth, inheritedAuth(itemId)), { version: appVersion.value });
@@ -455,6 +456,13 @@ export async function execute(spec: RequestSpec, itemId: string | null, token: s
   }
   const tests = [...scriptChain(itemId, 'tests'), ...(spec.tests?.trim() ? [{ from: null, code: spec.tests }] : [])];
   if (result.response) scripts.tests = await runChain(tests, () => ({ request: requestContext(wire), response: responseContext(result.response!), vars: Object.fromEntries(vars()), data }), itemId);
+  // #93: the runner's "Check responses against the spec" counts as one more test.
+  const specResponses = opts.checkSpec ? workspace.value?.items.find((i) => i.id === itemId)?.specResponses : undefined;
+  if (result.response && specResponses?.length) {
+    const c = checkResponse(specResponses, result.response);
+    scripts.tests ??= { tests: [], logs: [], changes: {}, error: null };
+    scripts.tests.tests.push({ name: 'Response matches the spec', pass: !c.issues.length, ...(c.issues.length ? { error: c.issues.slice(0, 5).join('; ') + (c.issues.length > 5 ? ` (and ${c.issues.length - 5} more)` : '') } : {}) });
+  }
   return { result, scripts };
 }
 
@@ -614,14 +622,14 @@ function requestsUnder(rootId: string): TreeItem[] {
   return out;
 }
 
-async function runForClient(target: string, iterations: number, delay: number, stopOnFail: boolean): Promise<void> {
+async function runForClient(target: string, iterations: number, delay: number, stopOnFail: boolean, checkSpec: boolean): Promise<void> {
   const list = requestsUnder(target);
   const run = mcatzpRun.value!;
   stopRun = false;
   outer: for (let it = 1; it <= iterations; it++) {
     for (const item of list) {
       if (stopRun) break outer;
-      const { result, scripts } = await execute(plain(item.request!), item.id, RUN_TOKEN);
+      const { result, scripts } = await execute(plain(item.request!), item.id, RUN_TOKEN, undefined, { checkSpec });
       const tests = [...(scripts.pre?.tests ?? []), ...(scripts.tests?.tests ?? [])];
       const error = result.error ?? scripts.pre?.error ?? scripts.tests?.error ?? undefined;
       const failed = tests.filter((t) => !t.pass);
@@ -670,7 +678,7 @@ export async function mcatzpCommand(what: string, a: Record<string, unknown>): P
     const list = requestsUnder(root.id);
     const iterations = Number(a.iterations) || 1;
     mcatzpRun.value = { id: uid('run_'), target: root.name, total: list.length * iterations, finished: false, stopped: false, rows: [] };
-    void runForClient(root.id, iterations, Number(a.delay) || 0, a.stopOnFail === true).catch((e: Error) => {
+    void runForClient(root.id, iterations, Number(a.delay) || 0, a.stopOnFail === true, a.checkSpec === true).catch((e: Error) => {
       if (mcatzpRun.value) mcatzpRun.value.finished = true;
       notify('error', e.message);
     });

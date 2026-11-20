@@ -1,4 +1,4 @@
-import { emptyBody, HTTP_METHODS, newRequest, uid, type HttpMethod, type KeyValue, type RequestAuth, type RequestSpec, type TreeItem, type EnvVariable } from '@shared/types';
+import { emptyBody, HTTP_METHODS, newRequest, uid, type HttpMethod, type KeyValue, type RequestAuth, type RequestSpec, type SpecResponse, type TreeItem, type EnvVariable } from '@shared/types';
 import { parse as parseYaml } from 'yaml';
 import { joinUrl, parseCurl, splitUrl, stripLocalFiles } from '@shared/request';
 
@@ -252,6 +252,40 @@ function openApiBody(op: Record<string, unknown>, params: Record<string, unknown
 }
 
 /** An operation for the browser: it answers with an HTML page, or only redirects (a form post). */
+/**
+ * A schema with every $ref replaced by what it points to (#93), so it can be checked without the document. Deeper than
+ * 12 levels, or a $ref back into itself, becomes {} (anything goes there).
+ */
+function inline(s: unknown, doc: Record<string, unknown>, depth = 0, seen: string[] = []): unknown {
+  if (!s || typeof s !== 'object') return s;
+  if (Array.isArray(s)) return s.map((x) => inline(x, doc, depth + 1, seen));
+  const o = s as Record<string, unknown>;
+  if (typeof o.$ref === 'string') {
+    if (depth > 12 || seen.includes(o.$ref) || !o.$ref.startsWith('#/')) return {};
+    const target = o.$ref.slice(2).split('/').reduce<unknown>((x, k) => (x as Record<string, unknown>)?.[k.replace(/~1/g, '/').replace(/~0/g, '~')], doc);
+    return inline(target, doc, depth + 1, [...seen, o.$ref]);
+  }
+  if (depth > 12) return {};
+  // Only what a check reads: documentation (description, example, xml …) stays out.
+  const keep = ['type', 'nullable', 'properties', 'required', 'items', 'enum', 'const', 'additionalProperties', 'allOf', 'oneOf', 'anyOf', 'format'];
+  return Object.fromEntries(Object.entries(o).filter(([k]) => keep.includes(k)).map(([k, v]) => [k, k === 'properties' && v && typeof v === 'object' ? Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([pk, pv]) => [pk, inline(pv, doc, depth + 1, seen)])) : inline(v, doc, depth + 1, seen)]));
+}
+
+/** The responses an operation describes (#93): OpenAPI 3 `content`, or Swagger 2 `schema` with `produces`. */
+function specResponses(op: Record<string, unknown>, doc: Record<string, unknown>): SpecResponse[] {
+  const produces = ((op.produces ?? doc.produces) as string[] | undefined) ?? [];
+  return Object.entries((op.responses ?? {}) as Record<string, Record<string, unknown>>).map(([status, r0]) => {
+    const r = (r0?.$ref ? inline(r0, doc) : r0) as Record<string, unknown> | undefined;
+    const content = (r?.content ?? null) as Record<string, { schema?: unknown }> | null;
+    const types = content ? Object.keys(content) : r?.schema ? produces : [];
+    const raw = content ? (Object.entries(content).find(([t]) => /json/i.test(t))?.[1]?.schema ?? Object.values(content)[0]?.schema) : r?.schema;
+    let schema = raw ? (inline(raw, doc) as Record<string, unknown>) : undefined;
+    // A schema too big to keep next to every request is left out: the status and content type are still checked.
+    if (schema && JSON.stringify(schema).length > 200_000) schema = undefined;
+    return { status: String(status).toUpperCase(), types, ...(schema ? { schema } : {}) };
+  });
+}
+
 function isWebOp(op: Record<string, unknown>): boolean {
   const responses = Object.entries((op.responses ?? {}) as Record<string, { content?: Record<string, unknown> }>);
   if (!responses.length) return false;
@@ -300,7 +334,8 @@ function fromOpenApi(doc: Record<string, unknown>): { root: TreeItem; items: Tre
     const urlPath = path.replace(/\{([^}]+)\}/g, ':$1');
     const spec: RequestSpec = { ...newRequest(), method: method(m), url: joinUrl(`{{baseUrl}}${urlPath}`, query), params: query, headers };
     spec.body = openApiBody(op, params, doc);
-    items.push({ id: uid('r_'), kind: 'request', parentId, name: String(op.summary ?? op.operationId ?? `${m.toUpperCase()} ${path}`).slice(0, 200), sort: n++, request: spec, description: op.description as string | undefined });
+    const responses = specResponses(op, doc);
+    items.push({ id: uid('r_'), kind: 'request', parentId, name: String(op.summary ?? op.operationId ?? `${m.toUpperCase()} ${path}`).slice(0, 200), sort: n++, request: spec, description: op.description as string | undefined, ...(responses.length ? { specResponses: responses } : {}) });
   }
   return { root, items, baseUrl: base || undefined };
 }

@@ -64,6 +64,9 @@ function dropData() {
 }
 const delay = ref(0);
 const stopOnFail = ref(false);
+/** #93: requests imported from an OpenAPI document know their responses; each response is checked as one more test. */
+const withSpec = computed(() => requests.value.filter((r) => picked.value.has(r.id) && r.specResponses?.length).length);
+const checkSpec = ref(requests.value.some((r) => r.specResponses?.length));
 const running = ref(false);
 watch(running, (on) => (runnerRunning.value = on));
 onBeforeUnmount(() => (runnerRunning.value = false));
@@ -90,7 +93,7 @@ async function run() {
       if (stop.value) break outer;
       const row0 = data.value?.rows[(it - 1) % data.value.rows.length];
       const at = new Date().toISOString();
-      const { result, scripts } = await execute(plain(item.request!), item.id, token, row0);
+      const { result, scripts } = await execute(plain(item.request!), item.id, token, row0, { checkSpec: checkSpec.value });
       const tests = [...(scripts.pre?.tests ?? []), ...(scripts.tests?.tests ?? [])];
       const row: Row = {
         key: `${it}-${item.id}`,
@@ -186,6 +189,7 @@ const tone = (r: Row) => (r.error || r.failed ? 'is-bad' : (r.status ?? 0) >= 40
           <div class="opt-row"><span class="label-caps">Iterations</span><input v-model.number="iterations" type="number" min="1" :max="data ? 10000 : 100" class="input input-sm w-20" /></div>
           <div class="opt-row"><span class="label-caps">Delay (ms)</span><input v-model.number="delay" type="number" min="0" max="60000" step="100" class="input input-sm w-20" /></div>
           <div class="opt-row"><span class="label-caps">Stop on failure</span><input v-model="stopOnFail" type="checkbox" class="toggle toggle-sm toggle-primary" /></div>
+          <div v-if="withSpec" class="opt-row" :title="`${withSpec} of the picked requests came from an OpenAPI spec: their status, content type and body shape are checked as a test`"><span class="flex flex-col"><span class="label-caps">Check against the spec</span><span class="text-xs opacity-50">{{ withSpec }} {{ withSpec === 1 ? 'request' : 'requests' }}</span></span><input v-model="checkSpec" type="checkbox" class="toggle toggle-sm toggle-primary" /></div>
         </div>
       </div>
 

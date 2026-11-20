@@ -172,6 +172,7 @@ function updated(mine: TreeItem, f: TreeItem): TreeItem {
       body: take('body') ? f.request!.body : r.body,
     },
     specBase: fb,
+    specResponses: f.specResponses,
   };
 }
 
@@ -193,16 +194,22 @@ export function specApply(items: TreeItem[], collection: TreeItem, fresh: Fresh,
       if (update.has(c.key)) {
         save.push(updated(mine, f));
         updatedN++;
-      } else save.push({ ...mine, specBase: baseOf(f) }); // seen: not offered again until the spec changes it
+      } else save.push({ ...mine, specBase: baseOf(f), specResponses: f.specResponses }); // seen: not offered again until the spec changes it
     } else if (c.kind === 'removed') {
       if (drop.has(c.key)) remove.push(mine.id);
-      else save.push({ ...mine, specBase: undefined }); // kept: from now on the user's own
+      else save.push({ ...mine, specBase: undefined, specResponses: undefined }); // kept: from now on the user's own
     }
   }
   // Requests that match the spec but were imported before #92: remember what the spec made.
   for (const [key, mine] of m.mine) {
     const f = m.fresh.get(key);
-    if (f && !mine.specBase && !changes.some((c) => c.requestId === mine.id)) save.push({ ...mine, specBase: baseOf(f) });
+    if (f && !mine.specBase && !changes.some((c) => c.requestId === mine.id)) save.push({ ...mine, specBase: baseOf(f), specResponses: f.specResponses });
+  }
+  // The responses the spec describes are the spec's alone (#93): refreshed on every request it still has.
+  for (const [key, mine] of m.mine) {
+    const f = m.fresh.get(key);
+    if (!f || save.some((i) => i.id === mine.id) || JSON.stringify(mine.specResponses ?? null) === JSON.stringify(f.specResponses ?? null)) continue;
+    save.push({ ...mine, specResponses: f.specResponses });
   }
   const picked = { root: fresh.root, items: fresh.items.filter((i) => i.kind !== 'request' || (i.request && add.has(keyOf(i)) && changes.some((c) => c.kind === 'added' && c.key === keyOf(i)))) };
   const merged = mergeRoutes(items, collection, picked);

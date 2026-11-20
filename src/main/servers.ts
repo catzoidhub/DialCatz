@@ -219,7 +219,7 @@ function ensureLocalWorkspaces(conn: ServerConnection): void {
 
 
 function itemToChange(i: TreeItem): Change {
-  return { id: i.id, kind: i.kind, parentId: i.parentId, name: i.name, sort: i.sort, data: { request: stripLocalFiles(i.request), auth: i.auth, description: i.description, ...(i.insecure ? { insecure: true } : {}), ...(i.environmentId !== undefined ? { environmentId: i.environmentId } : {}), ...(i.origin ? { origin: i.origin } : {}), ...(i.spec ? { spec: i.spec } : {}), ...(i.specBase ? { specBase: i.specBase } : {}), ...(i.preRequest ? { preRequest: i.preRequest } : {}), ...(i.tests ? { tests: i.tests } : {}) }, deleted: false, baseRevision: i.rev ?? 0 };
+  return { id: i.id, kind: i.kind, parentId: i.parentId, name: i.name, sort: i.sort, data: { request: stripLocalFiles(i.request), auth: i.auth, description: i.description, ...(i.insecure ? { insecure: true } : {}), ...(i.environmentId !== undefined ? { environmentId: i.environmentId } : {}), ...(i.origin ? { origin: i.origin } : {}), ...(i.spec ? { spec: i.spec } : {}), ...(i.specBase ? { specBase: i.specBase } : {}), ...(i.specResponses ? { specResponses: i.specResponses } : {}), ...(i.preRequest ? { preRequest: i.preRequest } : {}), ...(i.tests ? { tests: i.tests } : {}) }, deleted: false, baseRevision: i.rev ?? 0 };
 }
 function envToChange(e: Environment): Change {
   return { id: e.id, kind: 'environment', parentId: null, name: e.name, sort: 0, data: { variables: e.variables.map((v) => ({ key: v.key, enabled: v.enabled, secret: v.secret })), ...(e.shared ? { shared: e.shared } : {}) }, deleted: false, baseRevision: e.rev ?? 0 };
@@ -265,6 +265,7 @@ function applyRemote(w: Workspace, r: RemoteItem): void {
     // #92: the spec a collection follows, and what the spec made of each request (both sync: teammates see the same updates).
     ...(r.data.spec && typeof r.data.spec === 'object' ? { spec: r.data.spec as TreeItem['spec'] } : {}),
     ...(r.data.specBase && typeof r.data.specBase === 'object' ? { specBase: r.data.specBase as TreeItem['specBase'] } : {}),
+    ...(Array.isArray(r.data.specResponses) ? { specResponses: r.data.specResponses as TreeItem['specResponses'] } : {}),
     // "Check in DBCatz" settings belong to this computer: keep them.
     ...(i >= 0 && w.items[i].database ? { database: w.items[i].database } : {}),
     ...(i >= 0 && w.items[i].dbTable ? { dbTable: w.items[i].dbTable } : {}),

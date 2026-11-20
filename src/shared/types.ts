@@ -108,6 +108,8 @@ export interface TreeItem {
   spec?: SpecLink;
   /** Requests made from a spec (#92): the request as the spec made it, so an update can tell the user's edits apart. */
   specBase?: SpecBase;
+  /** Requests made from a spec (#93): the responses the spec describes, to check a response against. */
+  specResponses?: SpecResponse[];
   /** Collections: where "Check in DBCatz" looks. This computer only (connections differ per computer): never synced. */
   database?: { conn: string; db: string };
   /** Requests: the table "Check in DBCatz" opens when the guess from the URL is wrong. This computer only. */
@@ -137,6 +139,16 @@ export interface SpecBase {
   headers: KeyValue[];
   body: RequestBody;
   description?: string;
+}
+
+/**
+ * A response an OpenAPI operation describes (#93): its status ("200", "2XX" or "default"), content types, and body
+ * schema with every $ref followed (a JSON Schema / OpenAPI schema object; left out when the spec has none or it is huge).
+ */
+export interface SpecResponse {
+  status: string;
+  types: string[];
+  schema?: Record<string, unknown>;
 }
 
 /** One difference between a collection and its spec (#92). `key` is the route ("GET /users/:"). */

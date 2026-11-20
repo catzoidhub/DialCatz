@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { Tab } from '../state';
-import { aiOn, history, isWs, notify, plain, section } from '../state';
+import { aiOn, history, isWs, notify, plain, section, workspace } from '../state';
+import { checkResponse } from '@shared/speccheck';
 import type { ExplainAnswer } from '@shared/types';
 import { prettyJson, prettyXml } from '../highlight';
 import { base64ToBytes, bytesAsText, decodeBase64, hexDump, parseSetCookies, prettyHtml, sniff, tableOf } from '../formats';
@@ -22,7 +23,7 @@ import WsLog from './WsLog.vue';
  */
 const props = defineProps<{ tab: Tab }>();
 
-type Pane = 'body' | 'headers' | 'cookies' | 'tests' | 'sent';
+type Pane = 'body' | 'headers' | 'cookies' | 'tests' | 'spec' | 'sent';
 type View = 'tree' | 'pretty' | 'raw' | 'preview' | 'table' | 'base64' | 'hex';
 type Kind = 'json' | 'xml' | 'html' | 'image' | 'pdf' | 'text' | 'binary';
 const pane = ref<Pane>('body');
@@ -218,6 +219,11 @@ const cookies = computed(() => (r.value ? parseSetCookies(r.value.headers) : [])
 const scriptTests = computed(() => [...(props.tab.scripts?.pre?.tests ?? []), ...(props.tab.scripts?.tests?.tests ?? [])]);
 const passed = computed(() => scriptTests.value.filter((t) => t.pass).length);
 const hasScripts = computed(() => !!(props.tab.scripts?.pre || props.tab.scripts?.tests));
+
+/** #93: the response against what the request's spec describes (requests imported from an OpenAPI document). */
+const specResponses = computed(() => workspace.value?.items.find((i) => i.id === props.tab.itemId)?.specResponses ?? null);
+const specResult = computed(() => (r.value && specResponses.value?.length ? checkResponse(specResponses.value, r.value) : null));
+watch(specResult, (c) => !c && pane.value === 'spec' && (pane.value = 'body'));
 watch(
   () => props.tab.scripts,
   (sc) => {
@@ -344,6 +350,9 @@ function closeDecoded() {
           <button v-if="hasScripts" role="tab" class="seg-item" :class="{ 'is-active': pane === 'tests' }" @click="pane = 'tests'">
             Tests<span v-if="scriptTests.length" class="pane-count" :class="{ 'is-bad': passed < scriptTests.length }">{{ passed }}/{{ scriptTests.length }}</span>
           </button>
+          <button v-if="specResult" role="tab" class="seg-item" :class="{ 'is-active': pane === 'spec' }" :title="specResult.issues.length ? 'Differs from the spec' : 'Matches the spec'" @click="pane = 'spec'">
+            Spec<span class="pane-count" :class="{ 'is-bad': specResult.issues.length }">{{ specResult.issues.length ? specResult.issues.length : '✓' }}</span>
+          </button>
           <button role="tab" class="seg-item normal-case" :class="{ 'is-active': pane === 'sent' }" @click="pane = 'sent'">Sent request</button>
         </div>
       </div>
@@ -434,6 +443,20 @@ function closeDecoded() {
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <div v-else-if="pane === 'spec' && specResult" class="min-h-0 flex-1 space-y-3 overflow-auto px-4 py-3">
+        <div class="test-row" :class="specResult.issues.length ? 'is-fail' : 'is-pass'">
+          <span class="test-badge">{{ specResult.issues.length ? 'DIFFERS' : 'MATCHES' }}</span>
+          <span class="min-w-0 flex-1">
+            <span class="font-medium">{{ specResult.issues.length ? `${specResult.issues.length} ${specResult.issues.length === 1 ? 'difference' : 'differences'} from the spec` : 'The response matches the spec' }}</span>
+            <span class="block text-xs opacity-60">{{ specResult.matched ? `Checked against the spec's ${specResult.matched === 'DEFAULT' ? 'default' : specResult.matched} response: status, content type and body shape.` : 'The spec lists no response for this status.' }}</span>
+          </span>
+        </div>
+        <ul v-if="specResult.issues.length" class="selectable space-y-1 font-mono text-xs">
+          <li v-for="(i, n) in specResult.issues" :key="n" class="rounded-lg bg-base-200 px-3 py-1.5">{{ i }}</li>
+        </ul>
+        <p class="text-xs opacity-50">Formats, lengths and patterns are not checked. The collection runner can check every response this way.</p>
       </div>
 
       <div v-else-if="pane === 'tests'" class="min-h-0 flex-1 space-y-3 overflow-auto px-4 py-3">

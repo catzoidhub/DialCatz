@@ -486,7 +486,7 @@ export function changeActions(api: DialCatzApi, scopes: Scopes, command: WindowC
       return windowSend('sendNew', { workspaceId: w.id, spec: specFrom(a), name: a.name ?? `${String(a.method)} ${String(a.url)}` }, a, ctx.signal);
     }),
     stopper('cancel_send', 'Stop sending', 'Stops a request being sent (tab id from list_open_tabs). Asks nothing: it only stops.', { tab: S('The tab.') }, ['tab'], async (a) => done(await command('cancelSend', { tab: String(a.tab) }, 3000))),
-    asked('run_collection', 'Run a collection', 'Every request of a collection or folder in order, with its scripts, in its environment. Answers within seconds; the run goes on: get_run_results shows how far it is, stop_run stops it. Tell the user how it went.', { workspace: WORKSPACE, target: S('The collection or folder (id or name).'), iterations: { type: 'integer', minimum: 1, maximum: 1000 }, delay_ms: { type: 'integer', minimum: 0, maximum: 60_000 }, stop_on_failure: { type: 'boolean' } }, ['workspace', 'target'], async (a) => {
+    asked('run_collection', 'Run a collection', 'Every request of a collection or folder in order, with its scripts, in its environment. Answers within seconds; the run goes on: get_run_results shows how far it is, stop_run stops it. Tell the user how it went.', { workspace: WORKSPACE, target: S('The collection or folder (id or name).'), iterations: { type: 'integer', minimum: 1, maximum: 1000 }, delay_ms: { type: 'integer', minimum: 0, maximum: 60_000 }, stop_on_failure: { type: 'boolean' }, check_spec: { type: 'boolean', description: 'Check each response of a request imported from an OpenAPI spec against it (status, content type, body shape), as one more test.' } }, ['workspace', 'target'], async (a) => {
       const w = await workspaceOf(a.workspace);
       const t = containerOf(w, a.target);
       const inside = underCollection(w.items, t.id).filter((i) => i.kind === 'request' && i.request);
@@ -494,11 +494,11 @@ export function changeActions(api: DialCatzApi, scopes: Scopes, command: WindowC
       const list = await secrets();
       const facts = inside.map((i) => sendFacts(w, i.request!, i, list));
       const uniq = (label: string) => [...new Set(facts.flatMap((f) => f.filter((x) => x.label === label).map((x) => x.value)))].join(', ');
-      return q(`Run ${t.name}?`, [{ label: 'Requests', value: `${inside.length}, ${inside.filter((i) => !['GET', 'HEAD', 'OPTIONS'].includes(i.request!.method)).length} of them can change something` }, ...fact('Times', a.iterations), ...fact('Goes to', uniq('Goes to')), ...fact('Carries', uniq('Carries')), ...fact('Script', uniq('Script'))], { workspaceId: w.id, section: 'requests' });
+      return q(`Run ${t.name}?`, [{ label: 'Requests', value: `${inside.length}, ${inside.filter((i) => !['GET', 'HEAD', 'OPTIONS'].includes(i.request!.method)).length} of them can change something` }, ...fact('Times', a.iterations), ...fact('Checks', a.check_spec ? 'Responses against the spec' : null), ...fact('Goes to', uniq('Goes to')), ...fact('Carries', uniq('Carries')), ...fact('Script', uniq('Script'))], { workspaceId: w.id, section: 'requests' });
     }, async (a) => {
       const w = await workspaceOf(a.workspace);
       const t = containerOf(w, a.target);
-      return done(await command('run', { workspaceId: w.id, target: t.id, iterations: a.iterations ?? 1, delay: a.delay_ms ?? 0, stopOnFail: a.stop_on_failure === true }, 5000));
+      return done(await command('run', { workspaceId: w.id, target: t.id, iterations: a.iterations ?? 1, delay: a.delay_ms ?? 0, stopOnFail: a.stop_on_failure === true, checkSpec: a.check_spec === true }, 5000));
     }),
     stopper('stop_run', 'Stop the run', 'Stops the collection run. Asks nothing: it only stops.', {}, [], async () => done(await command('stopRun', {}, 3000))),
     asked('websocket_connect', 'Connect a WebSocket', 'Opens a saved WebSocket request (a ws:// or wss:// URL) in a tab and connects it. get_response gives its messages.', { workspace: WORKSPACE, request: REQUEST }, ['workspace', 'request'], async (a) => {
