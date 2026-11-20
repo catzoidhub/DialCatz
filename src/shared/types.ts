@@ -68,6 +68,11 @@ export interface RequestSpec {
   /** ws:// / wss:// requests (#98): speak Socket.IO over the connection (handshake, ping, events by name). */
   socketIo?: boolean;
   /**
+   * ws:// / wss:// requests (#99): speak Pusher (Reverb, Sockudo, Soketi): the channels to join on Connect, the app
+   * secret for private / presence channels (a {{variable}}), the user id a presence channel joins as.
+   */
+  pusher?: { channels?: string[]; secret?: string; userId?: string };
+  /**
    * grpc:// / grpcs:// requests (#98): the service and method, and the .proto files (paths on this computer) when the
    * server offers no reflection. The message is body.raw (JSON); headers are the call's metadata.
    */
@@ -1440,9 +1445,11 @@ export interface DialCatzApi {
   grpcPickProto(): Promise<string[] | null>;
   /** #98: one gRPC call; the answer comes back as a response (JSON body, metadata and trailers as headers). */
   grpcCall(request: { url: string; service: string; method: string; message: string; metadata: [string, string][]; protoFiles?: string[]; insecure?: boolean }, token: string): Promise<SendResult>;
-  wsConnect(token: string, url: string, headers: [string, string][], protocols: string[], options?: { socketIo?: boolean }): Promise<void>;
-  /** `event` (Socket.IO): the event name; data is then its args (a JSON list, other JSON, or text). */
-  wsSend(token: string, data: string, event?: string): Promise<void>;
+  wsConnect(token: string, url: string, headers: [string, string][], protocols: string[], options?: { socketIo?: boolean; pusher?: boolean }): Promise<void>;
+  /** `event` (Socket.IO): the event name; data is then its args (a JSON list, other JSON, or text). Pusher: a client event on `channel`. */
+  wsSend(token: string, data: string, event?: string, channel?: string): Promise<void>;
+  /** #99: joins or leaves a channel on a Pusher connection (private / presence signed with `secret`). */
+  wsPusherChannel(token: string, action: 'subscribe' | 'unsubscribe', channel: string, options?: { secret?: string; userId?: string }): Promise<void>;
   wsClose(token: string): Promise<void>;
   /** Saves the last response body to a file. */
   saveResponse(token: string, suggestedName: string): Promise<boolean>;
@@ -1548,7 +1555,7 @@ export const API_METHODS = [
   'saveItems', 'deleteItems',
   'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'specCheck', 'specApply', 'specFollow', 'specUnfollow', 'specStale', 'browsers', 'specScanFolder', 'specImportFile', 'mockList', 'mockEnvironmentRestore', 'mockStart', 'mockStop', 'mockEnvironment', 'mockSiteSpec', 'mockSiteImport', 'devcatzLinks', 'devcatzLinkSet', 'mockOpenIn', 'mockServiceSpec', 'docatzLinks', 'docatzLinkSet', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'importedBefore', 'docatzProjects', 'docatzImport', 'docatzOpen', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection',
   'aiModels', 'aiTest', 'aiAsk', 'aiExplain', 'aiTests', 'aiBody', 'aiCancel',
-  'send', 'grpcDescribe', 'grpcPickProto', 'grpcCall', 'pickFile', 'pickDataFile', 'saveText', 'cancel', 'wsConnect', 'wsSend', 'wsClose', 'saveResponse', 'history', 'addHistory', 'clearHistory',
+  'send', 'grpcDescribe', 'grpcPickProto', 'grpcCall', 'pickFile', 'pickDataFile', 'saveText', 'cancel', 'wsConnect', 'wsSend', 'wsPusherChannel', 'wsClose', 'saveResponse', 'history', 'addHistory', 'clearHistory',
   'servers', 'probeServer', 'connectWithToken', 'connectWithCode', 'refreshServer', 'disconnectServer', 'subscribeWorkspace', 'setPresence', 'presence', 'syncWorkspace', 'resolveConflict',
   'openUrl', 'exportWorkspace', 'exportEnvironment', 'importEnvironments', 'dbcatzInfo', 'dbcatzOpen', 'saveDbTarget', 'copyText', 'hostName',
   'updateState', 'updateCheck', 'updateNotes', 'updateDownload', 'updateCancel', 'updateInstall', 'updateSkip', 'updatePrefs', 'setUpdatePrefs', 'ratingSend', 'ratingRefresh', 'setCloseGuard',

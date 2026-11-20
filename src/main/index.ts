@@ -60,6 +60,7 @@ import { systemVersion } from './system';
  *   dialcatz://open?workspace=<id>&collection=<id>[&mock=1]  that collection (and its Mock server panel), from DevCatz
  *   dialcatz://mock?site=<DevCatz site id>&spec=<path in the site>  its mock server (asks before importing the spec)
  *   dialcatz://mock?docatz=<project>[&service=<service>]  its mock server (asks before importing its routes)
+ *   dialcatz://ws?url=<ws url>&mode=raw|socketio|pusher[&channel=…][&secret={{VAR}}][&name=…]  a WebSocket tab
  *   dialcatz://connect?server=<url>&code=<code>       join a team server with a one-time invite code; the window
  *                                                    shows the server address and asks before anything is sent
  */
@@ -204,6 +205,17 @@ function handleLink(raw: string): void {
       const project = u.searchParams.get('docatz')!;
       const service = u.searchParams.get('service') ?? '';
       if (docatz.PROJECT_NAME.test(project)) sendLink('app:docatz', { project, service: /^[a-z0-9][a-z0-9_.-]{0,62}$/.test(service) ? service : '' });
+      return;
+    }
+    if (u.hostname === 'ws') {
+      // #99, from DevCatz / DoCatz (Open in DialCatz on a socket server): a new WebSocket tab, ready but not connected.
+      // A secret never travels in a link: only a {{variable}} naming it does.
+      const url = u.searchParams.get('url') ?? '';
+      const mode = u.searchParams.get('mode') ?? 'raw';
+      const secret = u.searchParams.get('secret') ?? '';
+      const channels = u.searchParams.getAll('channel').filter((c) => /^[\w\-=@,.;]{1,164}$/.test(c)).slice(0, 20);
+      const name = (u.searchParams.get('name') ?? '').slice(0, 80);
+      if (/^wss?:\/\/[^\s]{1,2000}$/i.test(url) && ['raw', 'socketio', 'pusher'].includes(mode)) sendLink('app:openWs', { url, mode, channels, name, secret: /^\{\{[\w.-]{1,100}\}\}$/.test(secret) ? secret : '' });
       return;
     }
     if (u.hostname === 'mock' && u.searchParams.get('docatz')) {
@@ -1125,8 +1137,9 @@ function api(): DialCatzApi {
         return { error: (e as Error).message, sent };
       }
     },
-    wsConnect: async (token, url, headers, protocols, options) => sockets.connect(String(token), String(url), (Array.isArray(headers) ? headers : []).map(([k, v]) => [String(k), String(v)] as [string, string]), (Array.isArray(protocols) ? protocols : []).map(String), { socketIo: options?.socketIo === true }),
-    wsSend: async (token, data, event) => sockets.send(String(token), String(data), event === undefined ? undefined : String(event)),
+    wsConnect: async (token, url, headers, protocols, options) => sockets.connect(String(token), String(url), (Array.isArray(headers) ? headers : []).map(([k, v]) => [String(k), String(v)] as [string, string]), (Array.isArray(protocols) ? protocols : []).map(String), { socketIo: options?.socketIo === true, pusher: options?.pusher === true }),
+    wsSend: async (token, data, event, channel) => sockets.send(String(token), String(data), event === undefined ? undefined : String(event), channel === undefined ? undefined : String(channel)),
+    wsPusherChannel: async (token, action, channel, o) => sockets.pusherChannel(String(token), action === 'unsubscribe' ? 'unsubscribe' : 'subscribe', String(channel), { secret: o?.secret ? String(o.secret) : undefined, userId: o?.userId ? String(o.userId) : undefined }),
     wsClose: async (token) => sockets.close(String(token)),
     saveResponse: async (token, suggestedName) => {
       const body = http.lastBody(token);

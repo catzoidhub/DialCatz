@@ -41,6 +41,8 @@ const bridge = {
   onDoCatz: (cb: (link: { project: string; service: string }) => void) => on('app:docatz', cb),
   /** dialcatz://mock?docatz=<project>&service=<service> from DoCatz's "Create mock server" (#94). */
   onMockService: (cb: (link: { project: string; service: string }) => void) => on('app:mockService', cb),
+  /** dialcatz://ws?url=&mode=raw|socketio|pusher&channel=… (#99): a WebSocket tab, ready to connect. */
+  onOpenWs: (cb: (link: { url: string; mode: 'raw' | 'socketio' | 'pusher'; channels: string[]; name: string; secret: string }) => void) => on('app:openWs', cb),
   /** dialcatz://mock?site=<id>&spec=<path> from DevCatz's "Create mock server" (#94). */
   onMockSpec: (cb: (link: { siteId: string; spec: string; app: string }) => void) => on('app:mockSpec', cb),
   /** dialcatz://open?workspace=<id>&collection=<id>[&mock=1] from DevCatz's mock page (#94). */

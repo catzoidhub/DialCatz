@@ -48,7 +48,7 @@ const method = computed(() => props.item.request?.method ?? 'GET');
 const kindLabel = computed(() => {
   const r = props.item.request;
   if (!r) return null;
-  return /^grpcs?:\/\//i.test(r.url) ? 'gRPC' : /^wss?:\/\//i.test(r.url) ? (r.socketIo ? 'SIO' : 'WS') : null;
+  return /^grpcs?:\/\//i.test(r.url) ? 'gRPC' : /^wss?:\/\//i.test(r.url) ? (r.pusher ? 'PSH' : r.socketIo ? 'SIO' : 'WS') : null;
 });
 const short: Record<string, string> = { DELETE: 'DEL', OPTIONS: 'OPT', PATCH: 'PATCH' };
 

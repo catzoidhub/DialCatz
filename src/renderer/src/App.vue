@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { activeTab, activeTabId, mcatzpAsk, mcatzpUpdate, mcatzpCommand, mcatzpInstalling, mcatzpOpen, mcatzpRefresh, mcatzpRun, runnerRunning, mcatzpTabResponse, mcatzpTabs, plain, notify, selectWorkspace, aiOn, askOpen, connectRequest as connect, goSection, importRequest, loadHistory, onWsEvent, onSseEvent, presence, loadSettings, loadWorkspaces, reloadWorkspace, restoreTabs, section, sendTab, settings, settingsTab, syncTabsWithWorkspace, updateState, updateOpen, collectionAsk, workspaces, attempt, refreshMocks, setWorkspace, updateOpenAuto, reportOpen, uninstallOpen, tabs, toast, workspace, type Section } from './state';
+import { activeTab, activeTabId, mcatzpAsk, mcatzpUpdate, mcatzpCommand, mcatzpInstalling, mcatzpOpen, mcatzpRefresh, mcatzpRun, runnerRunning, mcatzpTabResponse, mcatzpTabs, plain, notify, selectWorkspace, aiOn, askOpen, connectRequest as connect, goSection, importRequest, loadHistory, onWsEvent, onSseEvent, presence, loadSettings, loadWorkspaces, reloadWorkspace, restoreTabs, section, sendTab, settings, settingsTab, syncTabsWithWorkspace, updateState, updateOpen, collectionAsk, workspaces, attempt, newTab, freshRequest, refreshMocks, setWorkspace, updateOpenAuto, reportOpen, uninstallOpen, tabs, toast, workspace, type Section } from './state';
 import { backIndex, backList, canBack, canForward, forwardList, goBack, goForward, goTo, navApply, navPrune, navVisit, type NavEntry } from './nav';
 import PopMenu from './components/PopMenu.vue';
 import UpdateDialog from './components/UpdateDialog.vue';
@@ -299,6 +299,15 @@ onMounted(async () => {
   mcatzpAsk.value = await api.mcatzpPending();
   // "Open in DialCatz" from DoCatz (an API container's page): the import on that project, that service as baseUrl.
   offs.push(api.onDoCatz(({ project, service }) => (importRequest.value = { tab: 'docatz', project, service })));
+  offs.push(
+    api.onOpenWs(({ url, mode, channels, name, secret }) => {
+      // #99: a WebSocket / Socket.IO / Pusher tab from DevCatz or DoCatz, ready for Connect (save it to keep it).
+      if (!workspace.value) return;
+      const spec = { ...freshRequest(), method: 'GET' as const, url, ...(mode === 'socketio' ? { socketIo: true } : {}), ...(mode === 'pusher' ? { pusher: { channels, ...(secret ? { secret } : {}) } } : {}) };
+      goSection('requests');
+      newTab(spec, name || (mode === 'pusher' ? 'Pusher' : mode === 'socketio' ? 'Socket.IO' : 'WebSocket'));
+    }),
+  );
   offs.push(
     api.onMockService(async ({ project, service }) => {
       const r = await attempt(() => api.mockServiceSpec(project, service));

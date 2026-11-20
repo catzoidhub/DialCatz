@@ -153,6 +153,7 @@ export const MCATZP_COVERAGE: Record<keyof DialCatzApi, string> = {
   grpcDescribe: 'tool: grpc_describe',
   grpcPickProto: 'not a tool: a picker for the user',
   grpcCall: 'tool: send_request (grpc:// requests go through it)',
+  wsPusherChannel: 'tool: websocket_channel',
   wsConnect: "tool: websocket_connect",
   wsSend: "tool: websocket_send",
   wsClose: "tool: websocket_close",

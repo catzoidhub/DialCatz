@@ -72,7 +72,7 @@ function specDoc(spec: RequestSpec): Record<string, unknown> {
   const s = stripLocalFiles(spec);
   const body = compact({ mode: s.body.mode, raw: s.body.raw, variables: s.body.variables, rpcMethod: s.body.rpcMethod, rpcBatch: s.body.rpcBatch || undefined, rpcNotify: s.body.rpcNotify || undefined, fields: s.body.fields.map((f) => compact({ key: f.key, value: f.value, enabled: f.enabled, type: f.type, description: f.description })) });
   const kv = (list: RequestSpec['params']) => list.map((r) => compact({ key: r.key, value: r.value, enabled: r.enabled, description: r.description }));
-  return compact({ method: s.method, url: s.url, params: kv(s.params), headers: kv(s.headers), body: s.body.mode === 'none' ? undefined : body, auth: s.auth, autoOff: s.autoOff, preRequest: s.preRequest, tests: s.tests, socketIo: s.socketIo || undefined, grpc: s.grpc && (s.grpc.service || s.grpc.method || s.grpc.protoFiles?.length) ? s.grpc : undefined });
+  return compact({ method: s.method, url: s.url, params: kv(s.params), headers: kv(s.headers), body: s.body.mode === 'none' ? undefined : body, auth: s.auth, autoOff: s.autoOff, preRequest: s.preRequest, tests: s.tests, socketIo: s.socketIo || undefined, pusher: s.pusher, grpc: s.grpc && (s.grpc.service || s.grpc.method || s.grpc.protoFiles?.length) ? s.grpc : undefined });
 }
 
 function itemDoc(i: TreeItem): Record<string, unknown> {
@@ -199,6 +199,10 @@ function specFrom(d: unknown): RequestSpec {
   if (r.preRequest) spec.preRequest = str(r.preRequest, 200_000);
   if (r.tests) spec.tests = str(r.tests, 200_000);
   if (r.socketIo === true) spec.socketIo = true;
+  if (r.pusher && typeof r.pusher === 'object') {
+    const p = r.pusher as Record<string, unknown>;
+    spec.pusher = { ...(Array.isArray(p.channels) ? { channels: p.channels.map((c) => str(c, 164)).slice(0, 50) } : {}), ...(p.secret ? { secret: str(p.secret, 200) } : {}), ...(p.userId ? { userId: str(p.userId, 200) } : {}) };
+  }
   if (r.grpc && typeof r.grpc === 'object') {
     const g = r.grpc as Record<string, unknown>;
     spec.grpc = { ...(g.service ? { service: str(g.service, 300) } : {}), ...(g.method ? { method: str(g.method, 200) } : {}), ...(Array.isArray(g.protoFiles) ? { protoFiles: g.protoFiles.map((x) => str(x, 2000)).slice(0, 50) } : {}) };

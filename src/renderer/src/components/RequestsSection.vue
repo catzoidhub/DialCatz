@@ -110,7 +110,7 @@ function run(fn: (t: Tab) => void) {
 
 const methodClass = (t: Tab) => `m-${t.spec.method.toLowerCase()}`;
 /** What the tab is: its HTTP method, or gRPC / WS / SIO (Socket.IO) for those addresses (#98). */
-const methodLabel = (t: { spec: { url: string; method: string; socketIo?: boolean } }) => (/^grpcs?:\/\//i.test(t.spec.url) ? 'gRPC' : /^wss?:\/\//i.test(t.spec.url) ? (t.spec.socketIo ? 'SIO' : 'WS') : t.spec.method);
+const methodLabel = (t: { spec: { url: string; method: string; socketIo?: boolean; pusher?: unknown } }) => (/^grpcs?:\/\//i.test(t.spec.url) ? 'gRPC' : /^wss?:\/\//i.test(t.spec.url) ? (t.spec.pusher ? 'PSH' : t.spec.socketIo ? 'SIO' : 'WS') : t.spec.method);
 
 defineExpose({
   newRequest: () => tree.value?.newRequestIn(),

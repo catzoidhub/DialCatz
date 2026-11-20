@@ -4,7 +4,7 @@ import { computed, ref, watch } from 'vue';
 import { HTTP_METHODS, type BodyMode, type KeyValue, type RequestAuth } from '@shared/types';
 import { AUTO_HEADERS, joinUrl, parseCurl, prettyJson, splitUrl, toCurl, toCurlCmd, toFetch, toPowerShell, effectiveAuth } from '@shared/request';
 import { currentOS } from '@shared/platform';
-import { activeTab, aiOn, appVersion, inheritedAuth, isGrpc, isWs, knownVar, notify, plain, readOnly, sendTab, sendWs, wireFor, workspace, type Tab } from '../state';
+import { activeTab, aiOn, appVersion, inheritedAuth, isGrpc, isWs, pusherChannel, knownVar, notify, plain, readOnly, sendTab, sendWs, wireFor, workspace, type Tab } from '../state';
 import { keyLabel } from '../platform';
 import KeyValueTable from './KeyValueTable.vue';
 import AuthEditor from './AuthEditor.vue';
@@ -219,8 +219,8 @@ const ws = computed(() => isWs(props.tab));
  * scheme (https://api.x → wss://api.x or grpc://api.x and back) and sets its mode, so a WebSocket, Socket.IO or gRPC
  * request starts from the same New request.
  */
-const kind = computed(() => (grpcOn.value ? '~grpc' : ws.value ? (spec.value.socketIo ? '~sio' : '~ws') : spec.value.method));
-const KIND_HINT: Record<string, string> = { '~ws': 'wss://echo.example.com/socket — then Connect', '~sio': 'ws://localhost:3000 (add /namespace for one) — then Connect', '~grpc': 'grpc://localhost:50051 (grpcs:// for TLS)' };
+const kind = computed(() => (grpcOn.value ? '~grpc' : ws.value ? (spec.value.pusher ? '~pusher' : spec.value.socketIo ? '~sio' : '~ws') : spec.value.method));
+const KIND_HINT: Record<string, string> = { '~pusher': 'ws://localhost:8080/app/{{REVERB_APP_KEY}} (Reverb, Sockudo, Soketi or Pusher) — then Connect', '~ws': 'wss://echo.example.com/socket — then Connect', '~sio': 'ws://localhost:3000 (add /namespace for one) — then Connect', '~grpc': 'grpc://localhost:50051 (grpcs:// for TLS)' };
 function setKind(k: string) {
   const url = spec.value.url.trim();
   // The address keeps its host and port; only the scheme changes ({{variables}} at the start stay as they are).
@@ -230,19 +230,23 @@ function setKind(k: string) {
     const secure = /^(https|wss|grpcs)$/i.test(m[1]);
     return `${scheme(secure)}://${m[2]}${keepPath ? m[3] : ''}`;
   };
-  if (k === '~ws' || k === '~sio') {
+  if (k === '~ws' || k === '~sio' || k === '~pusher') {
     spec.value.url = swap((s) => (s ? 'wss' : 'ws'), true);
+    if (k === '~pusher' && !/\/app\//.test(spec.value.url)) spec.value.url = spec.value.url.replace(/\/*$/, '') + (spec.value.url.endsWith('://') ? 'localhost:8080/app/{{REVERB_APP_KEY}}' : '/app/{{REVERB_APP_KEY}}');
     spec.value.socketIo = k === '~sio' || undefined;
+    spec.value.pusher = k === '~pusher' ? (spec.value.pusher ?? { channels: [], secret: '{{REVERB_APP_SECRET}}' }) : undefined;
     spec.value.method = 'GET';
   } else if (k === '~grpc') {
     spec.value.url = swap((s) => (s ? 'grpcs' : 'grpc'), false);
     spec.value.socketIo = undefined;
+    spec.value.pusher = undefined;
     spec.value.method = 'POST';
     if (spec.value.body.mode !== 'json') spec.value.body.mode = 'json';
     pane.value = 'body';
   } else {
     if (/^(wss?|grpcs?):\/\//i.test(url)) spec.value.url = swap((s) => (s ? 'https' : 'http'), !/^grpcs?:/i.test(url));
     spec.value.socketIo = undefined;
+    spec.value.pusher = undefined;
     spec.value.grpc = undefined;
     spec.value.method = k as typeof spec.value.method;
   }
@@ -296,6 +300,26 @@ watch(grpcOn, (on) => {
   }
 }, { immediate: true });
 const wsState = computed(() => props.tab.ws?.state ?? 'idle');
+// ---- Pusher (#99): channels joined on this connection, and the ones the request joins on Connect.
+const newChannel = ref('');
+const keepChannel = ref(true);
+const joined = computed(() => props.tab.ws?.channels ?? []);
+const saved = computed(() => spec.value.pusher?.channels ?? []);
+async function joinChannel() {
+  const c = newChannel.value.trim();
+  if (!c) return;
+  if (keepChannel.value && spec.value.pusher && !saved.value.includes(c)) {
+    spec.value.pusher.channels = [...saved.value, c];
+    touch();
+  }
+  await pusherChannel(props.tab, 'subscribe', c);
+  newChannel.value = '';
+}
+function dropSaved(c: string) {
+  if (!spec.value.pusher) return;
+  spec.value.pusher.channels = saved.value.filter((x) => x !== c);
+  touch();
+}
 function draft(v: string) {
   props.tab.ws ??= { state: 'idle', log: [], draft: '' };
   props.tab.ws.draft = v;
@@ -320,6 +344,7 @@ defineExpose({ focusUrl: () => urlInput.value?.select() });
           <optgroup label="Other protocols">
             <option value="~ws">{{ kind === '~ws' ? 'WS' : 'WebSocket' }}</option>
             <option value="~sio">{{ kind === '~sio' ? 'SIO' : 'Socket.IO' }}</option>
+            <option value="~pusher">{{ kind === '~pusher' ? 'PSH' : 'Pusher (Reverb)' }}</option>
             <option value="~grpc">gRPC</option>
           </optgroup>
         </select>
@@ -391,17 +416,48 @@ defineExpose({ focusUrl: () => urlInput.value?.select() });
       </div>
 
       <div v-else-if="pane === 'body' && ws" class="flex h-full min-h-40 flex-col gap-2">
+        <!-- Pusher (#99): channels to join (the request's own join on Connect), the secret for private / presence ones. -->
+        <div v-if="spec.pusher" class="space-y-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="label-caps shrink-0">Channel</span>
+            <input v-model="newChannel" class="input input-sm min-w-48 flex-1 font-mono" placeholder="orders · private-user.1 · presence-room" spellcheck="false" @keydown.enter="joinChannel" />
+            <button class="btn btn-sm" :disabled="wsState !== 'open' || !newChannel.trim()" @click="joinChannel">Subscribe</button>
+            <label class="flex cursor-pointer items-center gap-1.5 text-xs" title="Join this channel every time the request connects"><input v-model="keepChannel" type="checkbox" class="checkbox checkbox-xs checkbox-primary" />Save in the request</label>
+          </div>
+          <div v-if="joined.length || saved.length" class="flex flex-wrap gap-1.5">
+            <span v-for="c in [...new Set([...saved, ...joined])]" :key="c" class="pusher-chip" :class="{ 'is-on': joined.includes(c) }" :title="joined.includes(c) ? 'Subscribed' : 'Joins on Connect'">
+              <span class="font-mono">{{ c }}</span>
+              <button v-if="joined.includes(c)" title="Unsubscribe" @click="pusherChannel(tab, 'unsubscribe', c)"><Icon name="x" class="size-3" /></button>
+              <button v-else-if="saved.includes(c)" title="Stop joining it" @click="dropSaved(c)"><Icon name="x" class="size-3" /></button>
+            </span>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="label-caps shrink-0">App secret</span>
+            <input :value="spec.pusher.secret ?? ''" class="input input-sm min-w-48 flex-1 font-mono" placeholder="{{REVERB_APP_SECRET}}" spellcheck="false" :disabled="readOnly" @input="(e) => ((spec.pusher!.secret = (e.target as HTMLInputElement).value), touch())" />
+            <span class="label-caps shrink-0">Presence user</span>
+            <input :value="spec.pusher.userId ?? ''" class="input input-sm w-32 font-mono" placeholder="dialcatz" spellcheck="false" :disabled="readOnly" @input="(e) => ((spec.pusher!.userId = (e.target as HTMLInputElement).value || undefined), touch())" />
+          </div>
+          <p v-if="spec.pusher.secret && !/^\s*\{\{[^}]+\}\}\s*$/.test(spec.pusher.secret)" class="text-xs text-warning">Use a <code v-pre>{{variable}}</code> for the secret, so it stays in your environment and not in the request.</p>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="label-caps shrink-0">Client event</span>
+            <select class="select select-sm w-48 font-mono" :value="tab.ws?.channel ?? ''" @change="(e) => ((tab.ws ??= { state: 'idle', log: [], draft: '' }), (tab.ws.channel = (e.target as HTMLSelectElement).value))">
+              <option value="">Channel…</option>
+              <option v-for="c in joined.filter((x) => /^(private|presence)-/.test(x))" :key="c" :value="c">{{ c }}</option>
+            </select>
+            <input :value="tab.ws?.event ?? ''" class="input input-sm min-w-40 flex-1 font-mono" placeholder="client-typing" spellcheck="false" @input="(e) => ((tab.ws ??= { state: 'idle', log: [], draft: '' }), (tab.ws.event = (e.target as HTMLInputElement).value))" />
+          </div>
+        </div>
         <div v-if="spec.socketIo" class="flex flex-wrap items-center gap-3">
           <label class="flex min-w-60 flex-1 items-center gap-2">
             <span class="label-caps shrink-0">Event</span>
             <input :value="tab.ws?.event ?? ''" class="input input-sm flex-1 font-mono" placeholder="chat message" spellcheck="false" @input="(e) => ((tab.ws ??= { state: 'idle', log: [], draft: '' }), (tab.ws.event = (e.target as HTMLInputElement).value))" @keydown.enter="sendWs(tab)" />
           </label>
         </div>
-        <CodeEditor :model-value="tab.ws?.draft ?? ''" :language="/^\s*[[{]/.test(tab.ws?.draft ?? '') ? 'json' : 'text'" :known="knownVar" class="min-h-28 flex-1 rounded-xl border border-base-300/70" :placeholder="spec.socketIo ? 'The event’s args: a JSON list sends several, other JSON or text sends one (optional)' : 'A message to send ({{variables}} work here too)'" @update:model-value="draft" @run="sendWs(tab)" />
+        <CodeEditor :model-value="tab.ws?.draft ?? ''" :language="/^\s*[[{]/.test(tab.ws?.draft ?? '') ? 'json' : 'text'" :known="knownVar" class="min-h-28 flex-1 rounded-xl border border-base-300/70" :placeholder="spec.pusher ? 'The client event’s data (JSON)' : spec.socketIo ? 'The event’s args: a JSON list sends several, other JSON or text sends one (optional)' : 'A message to send ({{variables}} work here too)'" @update:model-value="draft" @run="sendWs(tab)" />
         <div class="flex items-center gap-2">
-          <span class="text-xs opacity-50">{{ wsState === 'open' ? `Connected. ${keyLabel('mod+enter')} sends.` : spec.socketIo ? 'Connect first. The address is the server and namespace (ws://host:3000/chat); DialCatz adds /socket.io/ and answers the pings.' : 'Connect first. The request’s headers and auth go with the handshake; set Sec-WebSocket-Protocol for subprotocols.' }}</span>
+          <span class="text-xs opacity-50">{{ wsState === 'open' ? `Connected. ${keyLabel('mod+enter')} sends.` : spec.pusher ? 'Connect first. The address ends in /app/<key>; private and presence channels are signed with the app secret.' : spec.socketIo ? 'Connect first. The address is the server and namespace (ws://host:3000/chat); DialCatz adds /socket.io/ and answers the pings.' : 'Connect first. The request’s headers and auth go with the handshake; set Sec-WebSocket-Protocol for subprotocols.' }}</span>
           <span class="flex-1" />
-          <button class="btn btn-primary btn-sm gap-1.5" :disabled="wsState !== 'open' || (spec.socketIo ? !tab.ws?.event?.trim() : !tab.ws?.draft)" @click="sendWs(tab)"><Icon name="send" class="size-4" />{{ spec.socketIo ? 'Emit event' : 'Send message' }}</button>
+          <button class="btn btn-primary btn-sm gap-1.5" :disabled="wsState !== 'open' || (spec.pusher ? !tab.ws?.event?.trim() || !tab.ws?.channel : spec.socketIo ? !tab.ws?.event?.trim() : !tab.ws?.draft)" @click="sendWs(tab)"><Icon name="send" class="size-4" />{{ spec.pusher ? 'Trigger client event' : spec.socketIo ? 'Emit event' : 'Send message' }}</button>
         </div>
       </div>
 
@@ -510,3 +566,19 @@ defineExpose({ focusUrl: () => urlInput.value?.select() });
     <p v-if="!workspace" class="p-4 text-sm opacity-60">No workspace.</p>
   </div>
 </template>
+
+<style scoped>
+.pusher-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  font-size: 12px;
+  background: oklch(from var(--color-base-content) l c h / 0.07);
+}
+.pusher-chip.is-on {
+  color: var(--primary-ink, var(--color-primary));
+  background: oklch(from var(--color-primary) l c h / 0.14);
+}
+</style>

@@ -27,7 +27,7 @@ export interface Tab {
   /** Results of the request's scripts for the last send. */
   scripts?: { pre?: ScriptResult; tests?: ScriptResult };
   /** WebSocket tabs (ws:// or wss:// URL): connection state, message log and the message being written. */
-  ws?: { state: 'idle' | 'connecting' | 'open' | 'closed'; log: WsEvent[]; draft: string; event?: string };
+  ws?: { state: 'idle' | 'connecting' | 'open' | 'closed'; log: WsEvent[]; draft: string; event?: string; channel?: string; channels?: string[] };
   /** A live SSE answer (text/event-stream): its events as they come, and whether it is still open. */
   sse?: { open: boolean; events: SseEvent[]; reason?: string };
 }
@@ -394,10 +394,23 @@ export async function toggleWs(tab: Tab): Promise<void> {
   const hop = /^(connection|upgrade|sec-websocket-(key|version|extensions)|accept-encoding|cache-control|content-type|content-length)$/i;
   const protocols = (wire.headers.find(([k]) => /^sec-websocket-protocol$/i.test(k))?.[1] ?? '').split(',').map((p) => p.trim()).filter(Boolean);
   tab.ws.state = 'connecting';
-  await attempt(() => api.wsConnect(tab.id, wire.url, plain(wire.headers.filter(([k]) => !hop.test(k) && !/^sec-websocket-protocol$/i.test(k))), protocols, { socketIo: tab.spec.socketIo === true }));
+  await attempt(() => api.wsConnect(tab.id, wire.url, plain(wire.headers.filter(([k]) => !hop.test(k) && !/^sec-websocket-protocol$/i.test(k))), protocols, { socketIo: tab.spec.socketIo === true, pusher: !!tab.spec.pusher }));
+}
+
+/** #99: joins (or leaves) a channel on a Pusher tab; the app secret comes from its {{variable}}. */
+export async function pusherChannel(tab: Tab, action: 'subscribe' | 'unsubscribe', channel: string): Promise<void> {
+  const name = interpolate(channel.trim(), vars.value);
+  if (!name) return notify('warning', 'Type a channel name');
+  const p = tab.spec.pusher ?? {};
+  await attempt(() => api.wsPusherChannel(tab.id, action, name, { secret: p.secret ? interpolate(p.secret, vars.value) : undefined, userId: p.userId ? interpolate(p.userId, vars.value) : undefined }));
 }
 
 export async function sendWs(tab: Tab): Promise<void> {
+  if (tab.spec.pusher) {
+    if (!tab.ws?.event?.trim()) return notify('warning', 'Type the client event name');
+    await attempt(() => api.wsSend(tab.id, interpolate(tab.ws!.draft ?? '', vars.value), interpolate(tab.ws!.event!, vars.value), tab.ws!.channel ?? ''));
+    return;
+  }
   if (tab.spec.socketIo) {
     // Socket.IO: an event by name; its args may be empty.
     if (!tab.ws?.event?.trim()) return notify('warning', 'Type the event name');
@@ -413,7 +426,11 @@ export function onWsEvent(e: WsEvent): void {
   const tab = tabs.value.find((t) => t.id === e.token);
   if (!tab) return;
   tab.ws ??= { state: 'idle', log: [], draft: '' };
-  if (e.type === 'open') tab.ws.state = 'open';
+  if (e.type === 'open') ((tab.ws.state = 'open'), (tab.ws.channels = []));
+  // Pusher (#99): the channels joined, and the request's own channels once the server gives a socket id.
+  if (e.event?.startsWith('subscribe ')) tab.ws.channels = [...new Set([...(tab.ws.channels ?? []), e.event.slice(10)])];
+  if (e.event?.startsWith('unsubscribe ')) tab.ws.channels = (tab.ws.channels ?? []).filter((c) => c !== e.event!.slice(12));
+  if (e.event === 'connected' && tab.spec.pusher?.channels?.length) for (const c of tab.spec.pusher.channels) void pusherChannel(tab, 'subscribe', c);
   else if (e.type === 'close') tab.ws.state = 'closed';
   else if (e.type === 'connecting') tab.ws.state = 'connecting';
   tab.ws.log.push(e);
@@ -755,11 +772,19 @@ export async function mcatzpCommand(what: string, a: Record<string, unknown>): P
     if (tab.ws?.state !== 'open') await toggleWs(tab);
     return { tab: tab.id, state: tab.ws?.state ?? 'connecting' };
   }
+  if (what === 'wsChannel') {
+    const tab = clientTab(a.tab);
+    if (!tab.spec.pusher) throw new Error(`${tab.name} is not a Pusher tab`);
+    if (tab.ws?.state !== 'open') throw new Error(`${tab.name} is not connected (websocket_connect)`);
+    await pusherChannel(tab, a.action === 'unsubscribe' ? 'unsubscribe' : 'subscribe', String(a.channel));
+    return { done: true };
+  }
   if (what === 'wsSend') {
     const tab = clientTab(a.tab);
     if (tab.ws?.state !== 'open') throw new Error(`${tab.name} is not connected (websocket_connect)`);
     tab.ws.draft = String(a.text);
     if (a.event !== undefined) tab.ws.event = String(a.event);
+    if (a.channel !== undefined) tab.ws.channel = String(a.channel);
     await sendWs(tab);
     return { sent: true };
   }
