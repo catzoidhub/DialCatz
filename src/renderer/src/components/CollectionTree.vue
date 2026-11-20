@@ -357,7 +357,7 @@ const menu = ref<{ item: TreeItem; x: number; y: number } | null>(null);
 const groupMenu = ref<{ group: { id: string; name: string }; x: number; y: number } | null>(null);
 function showMenu(item: TreeItem, e: MouseEvent) {
   groupMenu.value = null;
-  menu.value = { item, x: Math.min(e.clientX, window.innerWidth - 240), y: Math.min(e.clientY, window.innerHeight - 420) };
+  menu.value = { item, x: Math.min(e.clientX, window.innerWidth - 240), y: Math.max(8, Math.min(e.clientY, window.innerHeight - 420)) };
 }
 function showGroupMenu(group: { id: string; name: string }, e: MouseEvent) {
   menu.value = null;
@@ -604,7 +604,8 @@ const SORTS: { id: SidebarLayout['sortBy']; label: string }[] = [
     </div>
 
     <!-- Context menu -->
-    <ul v-if="menu" class="menu fixed z-50 w-52 rounded-box border border-base-300/60 bg-base-100 p-1 shadow-xl" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }" @click.stop>
+    <!-- Never past the window's bottom: opened sections (Spec, Move to group) scroll inside it instead. -->
+    <ul v-if="menu" class="menu fixed z-50 w-56 flex-nowrap overflow-x-hidden overflow-y-auto overscroll-contain rounded-box border border-base-300/60 bg-base-100 p-1 shadow-xl" :style="{ left: `${menu.x}px`, top: `${menu.y}px`, maxHeight: `calc(100vh - ${menu.y}px - 8px)` }" @click.stop>
       <template v-if="menu.item.kind !== 'request'">
         <li><button :disabled="readOnly" @click="run((i) => newRequestIn(i.id))">New request</button></li>
         <li><button :disabled="readOnly" @click="run(newFolder)">New folder</button></li>

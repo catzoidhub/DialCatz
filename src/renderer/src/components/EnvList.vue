@@ -79,7 +79,7 @@ function showMenu(env: Environment, e: MouseEvent) {
   const btn = (e.target as HTMLElement | null)?.closest?.('.tree-more')?.getBoundingClientRect();
   const x = btn ? btn.right - 224 : e.clientX;
   const y = btn ? btn.bottom + 4 : e.clientY;
-  menu.value = { env, x: Math.max(8, Math.min(x, window.innerWidth - 230)), y: Math.min(y, window.innerHeight - 300) };
+  menu.value = { env, x: Math.max(8, Math.min(x, window.innerWidth - 230)), y: Math.max(8, Math.min(y, window.innerHeight - 300)) };
 }
 function showGroupMenu(group: { id: string; name: string }, e: MouseEvent) {
   menu.value = null;
@@ -240,7 +240,7 @@ const active = (e: Environment) => e.id === workspace.value?.activeEnvironmentId
       <p v-if="nothing" class="px-3 py-4 text-sm opacity-60">Nothing matches “{{ filter.trim() }}”.</p>
     </div>
 
-    <ul v-if="menu" class="menu fixed z-50 w-56 rounded-box border border-base-300/60 bg-base-100 p-1 shadow-xl" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }" @click.stop>
+    <ul v-if="menu" class="menu fixed z-50 w-56 flex-nowrap overflow-x-hidden overflow-y-auto overscroll-contain rounded-box border border-base-300/60 bg-base-100 p-1 shadow-xl" :style="{ left: `${menu.x}px`, top: `${menu.y}px`, maxHeight: `calc(100vh - ${menu.y}px - 8px)` }" @click.stop>
       <li><button @click="run((e) => emit('pick', e.id))">Open</button></li>
       <li><button :disabled="active(menu.env)" @click="run(makeDefault)">Make default</button></li>
       <li><button @click="run(toggleFav)">{{ lay.favorites.includes(menu.env.id) ? 'Remove from favourites' : 'Add to favourites' }}</button></li>

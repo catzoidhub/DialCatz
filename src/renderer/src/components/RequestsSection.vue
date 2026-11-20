@@ -92,7 +92,7 @@ watch(activeTabId, async (id) => {
 // Right-click menu of a tab.
 const menu = ref<{ tab: Tab; x: number; y: number } | null>(null);
 function showMenu(tab: Tab, e: MouseEvent) {
-  menu.value = { tab, x: Math.min(e.clientX, window.innerWidth - 240), y: Math.min(e.clientY, window.innerHeight - 300) };
+  menu.value = { tab, x: Math.min(e.clientX, window.innerWidth - 240), y: Math.max(8, Math.min(e.clientY, window.innerHeight - 300)) };
 }
 const closeMenu = () => (menu.value = null);
 onMounted(() => window.addEventListener('click', closeMenu));
@@ -214,7 +214,7 @@ defineExpose({
     </dialog>
 
     <!-- Tab menu -->
-    <ul v-if="menu" class="menu fixed z-50 w-60 rounded-box border border-base-300/60 bg-base-100 p-1 shadow-xl" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }" @click.stop>
+    <ul v-if="menu" class="menu fixed z-50 w-60 flex-nowrap overflow-x-hidden overflow-y-auto overscroll-contain rounded-box border border-base-300/60 bg-base-100 p-1 shadow-xl" :style="{ left: `${menu.x}px`, top: `${menu.y}px`, maxHeight: `calc(100vh - ${menu.y}px - 8px)` }" @click.stop>
       <li><button @click="run(() => newTab())">New request tab</button></li>
       <li><button @click="run(duplicate)">Duplicate tab</button></li>
       <div class="my-1 border-t border-base-300/60" />

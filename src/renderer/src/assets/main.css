@@ -279,6 +279,8 @@ pre,
 .seg-item {
   display: inline-flex;
   align-items: center;
+  /* A tab stretched to share the bar (flex-1: export formats, choices) keeps its label in the middle. */
+  justify-content: center;
   gap: 6px;
   padding: 5px 12px;
   border-radius: 9px;
