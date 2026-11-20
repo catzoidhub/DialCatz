@@ -156,9 +156,9 @@ export function readActions(api: DialCatzApi, scopes: Scopes, win: WindowReads):
       const [i, u] = await Promise.all([api.appInfo(), api.updateState()]);
       return reply({ version: i.version, platform: i.platform, arch: i.arch, os: i.os, update: u.kind, ...('version' in u ? { updateVersion: u.version } : {}) });
     }),
-    read('get_settings', 'Settings', 'What Settings shows: theme, whether AI is on and its provider, and the request defaults. Never API keys.', OBJECT(), async () => {
+    read('get_settings', 'Settings', 'What Settings shows: theme, the browser links open in, whether AI is on and its provider, and the request defaults. Never API keys.', OBJECT(), async () => {
       const [s, u, r] = await Promise.all([api.settings(), api.updatePrefs(), api.reportPrefs()]);
-      return reply({ theme: s.theme, ai: { enabled: s.ai.enabled, provider: s.ai.provider, off: s.ai.off }, requests: { timeoutMs: s.requests.timeoutMs, followRedirects: s.requests.followRedirects, insecure: s.requests.insecure }, updates: { auto: u.auto, channel: u.channel }, crashReports: r.crashReports });
+      return reply({ theme: s.theme, browser: s.browser || 'system default', ai: { enabled: s.ai.enabled, provider: s.ai.provider, off: s.ai.off }, requests: { timeoutMs: s.requests.timeoutMs, followRedirects: s.requests.followRedirects, insecure: s.requests.insecure }, updates: { auto: u.auto, channel: u.channel }, crashReports: r.crashReports });
     }),
     read('list_workspaces', 'List workspaces', 'The workspaces shared with this client: personal, in a folder (Git) or from a team server (DialCatz Den). The other tools take one of these, by id or name.', OBJECT(), async () => {
       const list = await shared();
@@ -269,6 +269,10 @@ export function readActions(api: DialCatzApi, scopes: Scopes, win: WindowReads):
       const w = await workspaceOf(a.workspace);
       const c = collectionOf(w, a.collection);
       return reply(await api.specCheck(w.id, c.id));
+    }),
+    read('list_browsers', 'Browsers', 'The browsers installed here and the system default, for set_settings browser (shared with the Catzoid apps; get_settings shows the one chosen).', OBJECT(), async () => {
+      const b = await api.browsers();
+      return reply({ systemDefault: b.systemDefault?.name ?? null, browsers: b.list.map((x) => ({ name: x.name, path: x.path })) });
     }),
     read('list_mocks', 'Mock servers', 'The mock servers DialCatz runs now (start_mock): collection, address, how many requests they answer, and their latest calls.', OBJECT(), async () => reply({ mocks: (await api.mockList()).map((m) => ({ workspace: m.workspaceId, collection: m.collectionId, name: m.name, url: m.url, ...(m.devcatz ? { domain: m.devcatz.url } : {}), routes: m.routes, latest: m.hits.slice(0, 10) })) })),
     read('list_dbcatz_connections', 'DBCatz connections', 'The connections Check in DBCatz can use: names and engines from DBCatz, never a password.', OBJECT(), async () => {

@@ -345,6 +345,16 @@ export function changeActions(api: DialCatzApi, scopes: Scopes, command: WindowC
       if (a.use_in_dialcatz === true) await api.mockEnvironment(w.id, c.id);
       return done({ url: m.url, routes: m.routes });
     }),
+    asked('use_mock_environment', 'Send requests to the mock', "on: the collection's requests go to its running mock (its environment, or the workspace's active one, switches to Mock · <collection>). off: back to the environment it used before. stop_mock switches back too.", { workspace: WORKSPACE, collection: COLLECTION, on: { type: 'boolean' } }, ['workspace', 'collection', 'on'], async (a) => {
+      const w = await writeOf(a.workspace);
+      const c = collectionOf(w, a.collection);
+      return q(a.on ? `Send ${c.name}'s requests to its mock?` : `Switch ${c.name} back to its environment?`, [], { workspaceId: w.id, section: 'requests' });
+    }, async (a) => {
+      const w = await writeOf(a.workspace);
+      const c = collectionOf(w, a.collection);
+      await (a.on === true ? api.mockEnvironment(w.id, c.id) : api.mockEnvironmentRestore(w.id, c.id));
+      return done({});
+    }),
     stopper('stop_mock', 'Stop a mock server', "Stops the collection's mock server. Asks nothing: it only stops.", { workspace: WORKSPACE, collection: COLLECTION }, ['workspace', 'collection'], async (a) => {
       const w = await workspaceOf(a.workspace);
       await api.mockStop(w.id, collectionOf(w, a.collection).id);
@@ -561,8 +571,15 @@ export function changeActions(api: DialCatzApi, scopes: Scopes, command: WindowC
   ];
 
   const app: ChangeAction[] = [
-    asked('set_settings', 'Change settings', 'The theme and the request defaults. Never the AI connection, its keys, or MCatzP.', { theme: { type: 'string', enum: ['system', 'light', 'dark'] }, timeout_ms: { type: 'integer', minimum: 1000, maximum: 600_000 }, follow_redirects: { type: 'boolean' }, skip_tls_checks: { type: 'boolean', description: 'Certificate checks off for every request.' } }, [], async (a) => q('Change these settings?', [...fact('Theme', a.theme), ...fact('Timeout', a.timeout_ms ? `${String(a.timeout_ms)} ms` : null), ...fact('Redirects', a.follow_redirects === undefined ? null : a.follow_redirects ? 'Follow' : 'Do not follow'), ...fact('TLS', a.skip_tls_checks === undefined ? null : a.skip_tls_checks ? 'Certificate checks OFF for every request' : 'Certificate checks on')], { section: 'settings' }), async (a) => {
-      const patch: DialCatzSettingsPatch = { ...(a.theme ? { theme: a.theme as 'system' | 'light' | 'dark' } : {}), requests: { ...(a.timeout_ms ? { timeoutMs: Number(a.timeout_ms) } : {}), ...(a.follow_redirects === undefined ? {} : { followRedirects: a.follow_redirects === true }), ...(a.skip_tls_checks === undefined ? {} : { insecure: a.skip_tls_checks === true }) } };
+    asked('set_settings', 'Change settings', 'The theme and the request defaults. Never the AI connection, its keys, or MCatzP.', { theme: { type: 'string', enum: ['system', 'light', 'dark'] }, browser: S("The browser web links open in, shared with the Catzoid apps: a name or path from list_browsers, or '' for the system default.", 1000), timeout_ms: { type: 'integer', minimum: 1000, maximum: 600_000 }, follow_redirects: { type: 'boolean' }, skip_tls_checks: { type: 'boolean', description: 'Certificate checks off for every request.' } }, [], async (a) => q('Change these settings?', [...fact('Theme', a.theme), ...fact('Browser', a.browser === undefined ? null : a.browser === '' ? 'System default' : a.browser), ...fact('Timeout', a.timeout_ms ? `${String(a.timeout_ms)} ms` : null), ...fact('Redirects', a.follow_redirects === undefined ? null : a.follow_redirects ? 'Follow' : 'Do not follow'), ...fact('TLS', a.skip_tls_checks === undefined ? null : a.skip_tls_checks ? 'Certificate checks OFF for every request' : 'Certificate checks on')], { section: 'settings' }), async (a) => {
+      let browser: string | undefined;
+      if (typeof a.browser === 'string') {
+        const list = (await api.browsers()).list;
+        const want = a.browser.trim();
+        browser = want === '' ? '' : (list.find((b) => b.path === want || b.name.toLowerCase() === want.toLowerCase())?.path ?? undefined);
+        if (browser === undefined) throw new Error(`${want} is not an installed browser (list_browsers)`);
+      }
+      const patch: DialCatzSettingsPatch = { ...(a.theme ? { theme: a.theme as 'system' | 'light' | 'dark' } : {}), ...(browser !== undefined ? { browser } : {}), requests: { ...(a.timeout_ms ? { timeoutMs: Number(a.timeout_ms) } : {}), ...(a.follow_redirects === undefined ? {} : { followRedirects: a.follow_redirects === true }), ...(a.skip_tls_checks === undefined ? {} : { insecure: a.skip_tls_checks === true }) } };
       await api.setSettings(patch);
       settingsChanged();
       return done({ saved: true });

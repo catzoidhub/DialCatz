@@ -692,7 +692,11 @@ function api(): DialCatzApi {
       if (r.workspace.serverId) void srv.sync(id).then(() => send('app:workspaces', null));
       return { workspace: r.workspace, collectionId: r.collectionId };
     },
-    mockStop: async (id, collectionId) => mock.stop(id, String(collectionId)),
+    mockStop: async (id, collectionId) => {
+      await mock.stop(id, String(collectionId));
+      // Nothing answers there any more: the collection goes back to what it used before "Send requests here".
+      restoreMockEnv(id, String(collectionId));
+    },
     mockEnvironment: async (id, collectionId) => {
       const { w, col } = specCollection(id, String(collectionId));
       const m = mock.list().find((x) => x.workspaceId === id && x.collectionId === col.id);
@@ -704,8 +708,20 @@ function api(): DialCatzApi {
       const vars = [{ key: own, value: m.url, enabled: true, secret: false }, ...(env?.variables.filter((v) => v.key !== own) ?? [])];
       const saved = ws.saveEnvironment(id, { id: env?.id ?? uid('e_'), name, variables: vars, shared: env?.shared });
       const envId = saved.environments.find((e) => e.name === name)!.id;
-      return ws.setActiveEnvironment(id, envId);
+      // What it used before, to switch back (Switch back, or stopping the mock): the collection's own environment when it
+      // picks one (that one wins over the workspace's), else the workspace's active one.
+      const pinned = col.environmentId !== undefined;
+      const before = store.extra<Record<string, MockEnvBefore>>(MOCK_ENV_BEFORE) ?? {};
+      const key = `${id}:${col.id}`;
+      if ((pinned ? col.environmentId : saved.activeEnvironmentId) !== envId) {
+        before[key] = { pinned, envId: pinned ? (col.environmentId ?? null) : saved.activeEnvironmentId };
+        store.setExtra(MOCK_ENV_BEFORE, before);
+      }
+      const next = pinned ? ws.saveItems(id, [{ ...col, environmentId: envId }]) : ws.setActiveEnvironment(id, envId);
+      if (next.serverId && pinned) void srv.sync(id).then(() => send('app:workspaces', null));
+      return next;
     },
+    mockEnvironmentRestore: async (id, collectionId) => restoreMockEnv(id, String(collectionId)),
     devcatzSites: async () => ({ installed: devcatz.installed(), sites: devcatz.sites() }),
     dbcatzInfo: async () => ({ installed: dbcatz.installed(), ...dbcatz.connections() }),
     dbcatzOpen: (target) => dbcatz.open(target),
@@ -1196,6 +1212,34 @@ function ownVariable(w: Workspace, collection: TreeItem, items: TreeItem[]): Tre
   const own = w.items.find((i) => i.kind === 'request' && i.request && ids.has(i.id))?.request?.url.match(/^\{\{[^}]+\}\}/)?.[0];
   if (!own || own === '{{baseUrl}}') return items;
   return items.map((i) => (i.request ? { ...i, request: { ...i.request, url: i.request.url.replace(/^\{\{[^}]+\}\}/, own) }, ...(i.specBase ? { specBase: { ...i.specBase, url: i.specBase.url.replace(/^\{\{[^}]+\}\}/, own) } } : {}) } : i));
+}
+
+// ---------------------------------------------------------------- a mock's environment (#94)
+
+const MOCK_ENV_BEFORE = 'mockEnvBefore';
+interface MockEnvBefore {
+  /** The collection picked its own environment (else the workspace's active one was switched). */
+  pinned: boolean;
+  envId: string | null;
+}
+
+/** Puts back the environment "Send requests here" replaced; the workspace as it is when there is nothing to put back. */
+function restoreMockEnv(id: string, collectionId: string): Workspace {
+  const before = store.extra<Record<string, MockEnvBefore>>(MOCK_ENV_BEFORE) ?? {};
+  const key = `${id}:${collectionId}`;
+  const b = before[key];
+  const w = ws.load(id);
+  if (!b) return w;
+  delete before[key];
+  store.setExtra(MOCK_ENV_BEFORE, before);
+  const col = w.items.find((i) => i.id === collectionId && i.kind === 'collection');
+  if (b.pinned) {
+    if (!col) return w;
+    const next = ws.saveItems(id, [{ ...col, environmentId: b.envId }]);
+    if (next.serverId) void srv.sync(id).then(() => send('app:workspaces', null));
+    return next;
+  }
+  return ws.setActiveEnvironment(id, b.envId);
 }
 
 // ---------------------------------------------------------------- mocks of a DevCatz site's spec (#94)

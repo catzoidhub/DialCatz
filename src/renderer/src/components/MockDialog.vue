@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { TreeItem } from '@shared/types';
-import { attempt, mocks, notify, refreshMocks, setWorkspace, workspace } from '../state';
+import { attempt, goSection, mocks, notify, openItem, refreshMocks, setWorkspace, workspace } from '../state';
 import CatMood from './CatMood.vue';
 import Icon from './Icon.vue';
 import devcatzLogo from '../assets/logos/devcatz.svg';
@@ -46,16 +46,53 @@ async function start() {
 }
 async function stop() {
   busy.value = true;
+  const usedMock = usingMock.value;
   await attempt(() => api.mockStop(ws.value, props.collection.id));
   busy.value = false;
   await refreshMocks();
+  // Stopping also puts back the environment "Send requests here" replaced.
+  const w = await attempt(() => api.workspace(ws.value));
+  if (w) setWorkspace(w);
+  if (usedMock) notify('info', `“${props.collection.name}” is back on ${envName(w ?? null)}`);
 }
+/** The collection's requests in the tree's order (folders depth first); the first GET the mock answers comes first. */
+function firstRequest(): TreeItem | null {
+  const items = workspace.value?.items ?? [];
+  const out: TreeItem[] = [];
+  const walk = (parentId: string) => {
+    for (const i of items.filter((x) => x.parentId === parentId).sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name))) {
+      if (i.kind === 'request') out.push(i);
+      else walk(i.id);
+    }
+  };
+  walk(props.collection.id);
+  return out.find((i) => i.request?.method === 'GET' && i.specResponses?.length) ?? out.find((i) => i.specResponses?.length) ?? out[0] ?? null;
+}
+/** The collection as it is now (its environment changes while the dialog is open). */
+const current = computed(() => workspace.value?.items.find((i) => i.id === props.collection.id) ?? props.collection);
+const envName = (w: import('@shared/types').Workspace | null) => {
+  const c = w?.items.find((i) => i.id === props.collection.id) ?? current.value;
+  const envId = c.environmentId === undefined ? w?.activeEnvironmentId : c.environmentId;
+  return envId ? `“${w?.environments.find((e) => e.id === envId)?.name ?? 'its environment'}”` : 'no environment';
+};
 async function useIt() {
   const w = await attempt(() => api.mockEnvironment(ws.value, props.collection.id));
   if (!w) return;
   setWorkspace(w);
-  const pinned = props.collection.environmentId ? w.environments.find((e) => e.id === props.collection.environmentId)?.name : null;
-  notify('success', pinned ? `“Mock · ${props.collection.name}” is ready. This collection uses “${pinned}”: pick the mock in its Settings to send there.` : `Requests now go to the mock (environment “Mock · ${props.collection.name}”)`);
+  notify('success', `Requests from “${props.collection.name}” now go to the mock. Stop or Switch back puts back what it used.`);
+  emit('close');
+  // Ready to try: one of its requests in a tab (the first GET the mock answers, in the tree's order).
+  const first = firstRequest();
+  if (first) {
+    goSection('requests');
+    openItem(first);
+  }
+}
+async function switchBack() {
+  const w = await attempt(() => api.mockEnvironmentRestore(ws.value, props.collection.id));
+  if (!w) return;
+  setWorkspace(w);
+  notify('success', `“${props.collection.name}” is back on ${envName(w)}`);
 }
 async function copy(text = m.value!.url) {
   await navigator.clipboard.writeText(text);
@@ -67,7 +104,7 @@ const openWeb = (url: string) => void attempt(() => api.openUrl(url));
 const mockEnvName = computed(() => `Mock · ${props.collection.name}`);
 const usingMock = computed(() => {
   const w = workspace.value;
-  const envId = props.collection.environmentId ?? w?.activeEnvironmentId;
+  const envId = current.value.environmentId === undefined ? w?.activeEnvironmentId : current.value.environmentId;
   return !!w?.environments.find((e) => e.id === envId && e.name === mockEnvName.value);
 });
 
@@ -149,7 +186,10 @@ onBeforeUnmount(() => clearInterval(timer));
             <span class="block text-sm font-medium">Try it in DialCatz</span>
             <span class="block text-xs opacity-60">{{ usingMock ? `This collection's requests go to the mock now (environment “${mockEnvName}”).` : `Switches to the environment “${mockEnvName}”, so this collection's requests go to the mock.` }}</span>
           </span>
-          <span v-if="usingMock" class="badge badge-soft badge-success shrink-0">In use</span>
+          <template v-if="usingMock">
+            <span class="badge badge-soft badge-success shrink-0">In use</span>
+            <button class="btn btn-ghost btn-sm shrink-0" @click="switchBack">Switch back</button>
+          </template>
           <button v-else class="btn btn-primary btn-sm shrink-0" @click="useIt">Send requests here</button>
         </div>
 

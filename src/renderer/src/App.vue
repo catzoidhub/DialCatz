@@ -357,7 +357,8 @@ onBeforeUnmount(() => offs.forEach((f) => f()));
     <button v-if="ready && aiOn('ask') && !askOpen && workspace" class="ask-fab no-drag" :title="`Ask DialCatz (${keyLabel('mod+K')}): say what you need in plain words`" aria-label="Ask DialCatz" @click="askOpen = true"><span><img :src="askMark" alt="" /></span></button>
     <AskDialCatz v-if="askOpen" @close="askOpen = false" />
 
-    <div v-if="toast.text" class="toast toast-end toast-bottom z-50" :class="{ 'is-beside-fab': aiOn('ask') }">
+    <!-- Above every dialog (daisyUI modals sit at 999): a notice from inside a dialog must be seen. -->
+    <div v-if="toast.text" class="toast toast-end toast-bottom z-[1100]" :class="{ 'is-beside-fab': aiOn('ask') }">
       <div class="alert" :class="`alert-${toast.kind}`">
         <CatMood :mood="toast.kind" class="size-8 shrink-0 -my-1" />
         <span class="max-w-md text-sm">{{ toast.text }}</span>
