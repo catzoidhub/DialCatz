@@ -36,6 +36,7 @@ import * as reports from './reports';
 import { mergeRoutes } from './routemerge';
 import { specApply, specDiff, withBase, type Fresh, type SpecPick } from './specsync';
 import { fetchSpecText, freshFor, hashText, readSpecFile } from './specsource';
+import * as mock from './mock';
 import { Mcatzp } from './mcatzp';
 import * as mcatzpSetup from './mcatzp/install';
 import { MCATZP_TARGETS } from '@catzoid/mcatzp-host';
@@ -219,6 +220,7 @@ app.on('open-url', (e, url) => {
 });
 app.on('activate', () => createWindow());
 app.on('before-quit', () => {
+  mock.stopAll();
   quitting = true;
   if (win && !win.isDestroyed()) saveBounds(win);
   mcatzp?.quit();
@@ -595,6 +597,31 @@ function api(): DialCatzApi {
       return w;
     },
     specStale: async (id) => specStale(id),
+    mockList: async () => mock.list(),
+    mockStart: async (id, collectionId, port) => {
+      const { col } = specCollection(id, String(collectionId));
+      const p = Number(port) || undefined;
+      if (p !== undefined && (!Number.isInteger(p) || p < 1024 || p > 65535)) throw new Error('Pick a port from 1024 to 65535');
+      return mock.start(id, col.id, col.name, () => {
+        const w = ws.load(id);
+        const c = w.items.find((i) => i.id === col.id);
+        return c ? { items: w.items, name: c.name } : null;
+      }, p);
+    },
+    mockStop: async (id, collectionId) => mock.stop(id, String(collectionId)),
+    mockEnvironment: async (id, collectionId) => {
+      const { w, col } = specCollection(id, String(collectionId));
+      const m = mock.list().find((x) => x.workspaceId === id && x.collectionId === col.id);
+      if (!m) throw new Error('Start the mock first');
+      // The variable the collection's requests start with ({{baseUrl}}, or {{<service>Url}} from DoCatz's "All").
+      const own = w.items.find((i) => i.kind === 'request' && i.request && under(w.items, col.id).has(i.id))?.request?.url.match(/^\{\{([^}]+)\}\}/)?.[1] ?? 'baseUrl';
+      const name = `Mock · ${col.name}`;
+      const env = w.environments.find((e) => e.name === name);
+      const vars = [{ key: own, value: m.url, enabled: true, secret: false }, ...(env?.variables.filter((v) => v.key !== own) ?? [])];
+      const saved = ws.saveEnvironment(id, { id: env?.id ?? uid('e_'), name, variables: vars, shared: env?.shared });
+      const envId = saved.environments.find((e) => e.name === name)!.id;
+      return ws.setActiveEnvironment(id, envId);
+    },
     devcatzSites: async () => ({ installed: devcatz.installed(), sites: devcatz.sites() }),
     dbcatzInfo: async () => ({ installed: dbcatz.installed(), ...dbcatz.connections() }),
     dbcatzOpen: (target) => dbcatz.open(target),

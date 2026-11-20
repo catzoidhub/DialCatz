@@ -149,6 +149,21 @@ export interface SpecResponse {
   status: string;
   types: string[];
   schema?: Record<string, unknown>;
+  /** The spec's own example body for it (#94: what the mock answers), when it gives one. */
+  example?: unknown;
+}
+
+/** A mock server made from a collection's spec (#94), running on this computer. */
+export interface MockState {
+  workspaceId: string;
+  collectionId: string;
+  name: string;
+  url: string;
+  port: number;
+  /** Requests of the collection the mock can answer (they carry the spec's responses). */
+  routes: number;
+  /** The latest calls, newest first. */
+  hits: { at: number; method: string; path: string; status: number; route: string | null }[];
 }
 
 /** One difference between a collection and its spec (#92). `key` is the route ("GET /users/:"). */
@@ -1212,6 +1227,13 @@ export interface DialCatzApi {
   specUnfollow(workspaceId: string, collectionId: string): Promise<Workspace>;
   /** #92: collections whose spec file or URL changed since they last took it in. */
   specStale(workspaceId: string): Promise<string[]>;
+  /** #94: mock servers running now. */
+  mockList(): Promise<MockState[]>;
+  /** #94: starts (or returns) the collection's mock server on 127.0.0.1; `port` 0 or left out: the one used last, else a free one. */
+  mockStart(workspaceId: string, collectionId: string, port?: number): Promise<MockState>;
+  mockStop(workspaceId: string, collectionId: string): Promise<void>;
+  /** #94: an environment "Mock · <collection>" whose baseUrl is the mock, made active. */
+  mockEnvironment(workspaceId: string, collectionId: string): Promise<Workspace>;
   /** Picks a file and imports it like importText (null: cancelled). */
   /**
    * Picks files: one collection file goes straight in (`collection`); an export zip, several files or an environment
@@ -1379,7 +1401,7 @@ export const API_METHODS = [
   'workspaces', 'workspace', 'createWorkspace', 'renameWorkspace', 'deleteWorkspace', 'openFolderWorkspace', 'useFolder', 'stopUsingFolder', 'revealFolder', 'folderGitStatus', 'folderGitDiff', 'folderGitCommit', 'folderGitPull', 'folderGitPush', 'folderGitInit', 'folderGitAbortMerge',
   'gitState', 'gitInstall', 'gitUpdateCheck', 'gitUpdate', 'gitWatch', 'gitRepoAdd', 'gitRepoRemove', 'gitRepoLog', 'gitRevealRepo', 'gitOpenWorkspace', 'gitPickFolder', 'gitStatus', 'gitInit', 'gitDiff', 'gitStage', 'gitUnstage', 'gitDiscard', 'gitCommit', 'gitSync', 'gitCancel', 'gitLog', 'gitShow', 'gitBranches', 'gitBranch', 'gitStashes', 'gitStash', 'gitTags', 'gitTag', 'gitOperation', 'gitSquash', 'gitCherryPick', 'gitRevert', 'gitReset', 'gitRestoreFile', 'gitOpenFile', 'gitIgnoreSuggestions', 'gitIgnoreAdd', 'gitignoreRead', 'gitignoreSave', 'gitSetIdentity', 'gitAddRemote', 'gitWorktrees', 'gitWorktreeAdd', 'gitWorktreeRemove', 'gitWorktreePrune', 'gitPulls', 'gitCreatePull', 'gitCheckoutPull', 'gitAddAccount', 'gitRemoveAccount', 'gitRepos', 'gitSshKeys', 'gitSshGenerate', 'gitSshAddToAccount', 'gitClone', 'gitCancelClone', 'gitDismissClone', 'gitAccounts', 'gitCreateRemoteRepo', 'gitDevCatzAccounts', 'gitImportDevCatz', 'folderGitConnect', 'createFolderWorkspace', 'pickFolder', 'teamAdminUrl', 'appMenu', 'menuShortcuts', 'menuKey',
   'saveItems', 'deleteItems',
-  'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'specCheck', 'specApply', 'specFollow', 'specUnfollow', 'specStale', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'importedBefore', 'docatzProjects', 'docatzImport', 'docatzOpen', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection',
+  'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'specCheck', 'specApply', 'specFollow', 'specUnfollow', 'specStale', 'mockList', 'mockStart', 'mockStop', 'mockEnvironment', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'importedBefore', 'docatzProjects', 'docatzImport', 'docatzOpen', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection',
   'aiModels', 'aiTest', 'aiAsk', 'aiExplain', 'aiTests', 'aiBody', 'aiCancel',
   'send', 'pickFile', 'pickDataFile', 'saveText', 'cancel', 'wsConnect', 'wsSend', 'wsClose', 'saveResponse', 'history', 'addHistory', 'clearHistory',
   'servers', 'probeServer', 'connectWithToken', 'connectWithCode', 'refreshServer', 'disconnectServer', 'subscribeWorkspace', 'setPresence', 'presence', 'syncWorkspace', 'resolveConflict',

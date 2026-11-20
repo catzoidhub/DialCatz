@@ -334,6 +334,22 @@ export function changeActions(api: DialCatzApi, scopes: Scopes, command: WindowC
       await api.specUnfollow(w.id, collectionOf(w, a.collection).id);
       return done({});
     }),
+    asked('start_mock', 'Start a mock server', "A mock server on this computer (127.0.0.1) made from the collection's spec: each request that came from an OpenAPI document answers with the spec's example or a body made from its schema; the header Prefer: code=404 picks another response. CORS is open for a frontend. use_in_dialcatz also makes an environment Mock · <collection> pointing at it and selects it.", { workspace: WORKSPACE, collection: COLLECTION, port: { type: 'integer', minimum: 1024, maximum: 65535, description: 'Left out: 4010 or the next free one.' }, use_in_dialcatz: { type: 'boolean' } }, ['workspace', 'collection'], async (a) => {
+      const w = await workspaceOf(a.workspace);
+      const c = collectionOf(w, a.collection);
+      return q(`Start a mock of ${c.name}?`, [{ label: 'Listens on', value: `127.0.0.1:${a.port ?? '4010 or the next free port'}` }, ...fact('Then', a.use_in_dialcatz ? `Selects the environment Mock · ${c.name}` : null)], { workspaceId: w.id, section: 'requests' });
+    }, async (a) => {
+      const w = await workspaceOf(a.workspace);
+      const c = collectionOf(w, a.collection);
+      const m = await api.mockStart(w.id, c.id, typeof a.port === 'number' ? a.port : undefined);
+      if (a.use_in_dialcatz === true) await api.mockEnvironment(w.id, c.id);
+      return done({ url: m.url, routes: m.routes });
+    }),
+    stopper('stop_mock', 'Stop a mock server', "Stops the collection's mock server. Asks nothing: it only stops.", { workspace: WORKSPACE, collection: COLLECTION }, ['workspace', 'collection'], async (a) => {
+      const w = await workspaceOf(a.workspace);
+      await api.mockStop(w.id, collectionOf(w, a.collection).id);
+      return done({ stopped: true });
+    }),
     asked('import_text', 'Import text', 'Text as a new collection: a Postman collection, an OpenAPI / Swagger document (JSON or YAML), a DialCatz export or a cURL command.', { workspace: WORKSPACE, text: S('The text.', 5_000_000) }, ['workspace', 'text'], async (a) => {
       const w = await writeOf(a.workspace);
       return q(`Import this into ${w.name}?`, [{ label: 'Text', value: short(maskText(String(a.text), await secrets()), 300) }], { workspaceId: w.id, section: 'requests' });

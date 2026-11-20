@@ -269,6 +269,7 @@ export function readActions(api: DialCatzApi, scopes: Scopes, win: WindowReads):
       const c = collectionOf(w, a.collection);
       return reply(await api.specCheck(w.id, c.id));
     }),
+    read('list_mocks', 'Mock servers', 'The mock servers DialCatz runs now (start_mock): collection, address, how many requests they answer, and their latest calls.', OBJECT(), async () => reply({ mocks: (await api.mockList()).map((m) => ({ workspace: m.workspaceId, collection: m.collectionId, name: m.name, url: m.url, routes: m.routes, latest: m.hits.slice(0, 10) })) })),
     read('list_dbcatz_connections', 'DBCatz connections', 'The connections Check in DBCatz can use: names and engines from DBCatz, never a password.', OBJECT(), async () => {
       const r = await api.dbcatzInfo();
       return reply({ installed: r.installed, connections: r.connections.map((c) => ({ id: c.id, name: c.name, engine: c.engine, database: c.database, source: c.source })) });

@@ -1,5 +1,5 @@
 import { computed, reactive, ref, toRaw, watch } from 'vue';
-import { newRequest, uid, type ConnectRequest, type McatzpAsk, type McatzpInstallProgress, type McatzpRun, type McatzpTab, type McatzpTabResponse, type DialCatzSettings, type Environment, type EnvVariable, type PresenceEntry, type WsEvent, type HistoryEntry, type RequestAuth, type RequestSpec, type SendResult, type ServerConnection, type TreeItem, type Workspace, type WorkspaceSummary } from '@shared/types';
+import { newRequest, uid, type ConnectRequest, type McatzpAsk, type McatzpInstallProgress, type McatzpRun, type McatzpTab, type McatzpTabResponse, type DialCatzSettings, type Environment, type EnvVariable, type PresenceEntry, type WsEvent, type HistoryEntry, type RequestAuth, type RequestSpec, type SendResult, type ServerConnection, type TreeItem, type Workspace, type WorkspaceSummary, type MockState } from '@shared/types';
 import { AUTO_HEADERS, buildVars, effectiveAuth, interpolate, nameFromUrl, toWire, type Vars } from '@shared/request';
 import { store } from './store';
 import { requestContext, responseContext, runScript, type ScriptResult } from './scripts';
@@ -53,6 +53,12 @@ export const workspace = ref<Workspace | null>(null);
 export const specStale = ref<Set<string>>(new Set());
 /** #92: the collection whose spec review is asked for (the tree opens the dialog). */
 export const specAsk = ref<string | null>(null);
+/** #94: mock servers running now (the tree marks their collections). */
+export const mocks = ref<MockState[]>([]);
+export async function refreshMocks(): Promise<void> {
+  const list = await api.mockList().catch(() => null);
+  if (list) mocks.value = list;
+}
 /** #92: asks main which followed specs changed (on focus and when the workspace changes; URLs at most once a minute). */
 export async function refreshSpecStale(): Promise<void> {
   const w = workspace.value;

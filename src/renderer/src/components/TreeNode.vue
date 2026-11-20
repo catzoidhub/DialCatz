@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { TreeItem } from '@shared/types';
-import { activeTab, readOnly, specAsk, specStale } from '../state';
+import { activeTab, mocks, readOnly, specAsk, specStale } from '../state';
 import Icon from './Icon.vue';
 
 /** Where a dragged row would land relative to this one. */
@@ -77,6 +77,7 @@ const dropClass = computed(() => (props.drop?.id === props.item.id ? `is-drop-${
       </template>
       <span class="truncate">{{ item.name }}</span>
       <button class="tree-star-btn" :class="{ 'is-on': starred }" :title="starred ? 'Remove from favourites' : 'Add to favourites'" @click.stop="emit('star', item)"><Icon name="star" class="size-3.5" /></button>
+      <span v-if="item.kind === 'collection' && mocks.some((m) => m.collectionId === item.id)" class="tree-mock" :title="`Mock server running at ${mocks.find((m) => m.collectionId === item.id)?.url}`">mock</span>
       <button v-if="item.kind === 'collection' && specStale.has(item.id)" class="tree-spec" title="Its spec changed: review what is new" @click.stop="specAsk = item.id">spec</button>
       <span v-if="item.dirty" class="tree-dirty" title="Changed here, not synced yet" />
       <span v-if="presence?.[item.id]?.length" class="tree-presence" :title="`${presence[item.id].join(', ')} ${presence[item.id].length === 1 ? 'has' : 'have'} this open`">{{ presence[item.id].map((n) => n[0]).join('') }}</span>
