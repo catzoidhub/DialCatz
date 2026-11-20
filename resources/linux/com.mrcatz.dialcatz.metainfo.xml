@@ -17,7 +17,8 @@
       themselves.
     </p>
     <ul>
-      <li>HTTP, GraphQL and WebSocket requests, with params, headers, bodies, auth and scripts</li>
+      <li>HTTP, GraphQL, WebSocket, Socket.IO, Pusher, Server-Sent Events, JSON-RPC and gRPC requests, with params, headers, bodies, auth and scripts</li>
+      <li>Collections that follow their OpenAPI spec: responses checked against it, and a local mock server from it</li>
       <li>Collections and environments, with a runner for whole folders</li>
       <li>Imports from Postman, OpenAPI files and the routes of DevCatz sites and DoCatz projects</li>
       <li>Team sync through a self-hosted DialCatz Den, with no account anywhere else</li>

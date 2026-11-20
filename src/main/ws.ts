@@ -2,6 +2,25 @@ import type { WsEvent } from '@shared/types';
 import { sioConnect, sioDecode, sioEvent, sioUrl } from '@shared/socketio';
 import { authText, clientEventFrame, isPresence, needsAuth, pongFrame, pusherDecode, pusherUrl, subscribeFrame, unsubscribeFrame } from '@shared/pusher';
 import { createHmac } from 'node:crypto';
+import { Agent, WebSocket as TlsWebSocket } from 'undici';
+import { localCa } from './http';
+
+/**
+ * wss:// to a DevCatz host (*.localhost, a site's own domain) needs DevCatz's local CA, like HTTP requests get it
+ * (http.ts localCa); "Skip certificate checks" applies too. Node's own WebSocket has neither, so those go through
+ * undici's with a dispatcher that carries them (one per CA set / insecure).
+ */
+const agents = new Map<string, Agent>();
+function tlsAgent(url: string, insecure: boolean): Agent | null {
+  const u = new URL(url);
+  if (u.protocol !== 'wss:') return null;
+  const ca = insecure ? undefined : localCa(u.hostname);
+  if (!insecure && !ca) return null;
+  const key = insecure ? 'insecure' : `ca:${ca!.length}:${ca![ca!.length - 1].length}`;
+  let a = agents.get(key);
+  if (!a) agents.set(key, (a = new Agent({ connect: insecure ? { rejectUnauthorized: false } : { ca } })));
+  return a;
+}
 
 /**
  * WebSocket connections for ws:// and wss:// request tabs, from the main process (Node's built-in WebSocket
@@ -21,7 +40,7 @@ export const onEvent = (fn: (e: WsEvent) => void) => (emit = fn);
 
 const MAX_FRAME_SHOWN = 1024 * 1024;
 
-export function connect(token: string, url: string, headers: [string, string][], protocols: string[], options: { socketIo?: boolean; pusher?: boolean } = {}): void {
+export function connect(token: string, url: string, headers: [string, string][], protocols: string[], options: { socketIo?: boolean; pusher?: boolean; insecure?: boolean } = {}): void {
   close(token);
   if (!/^wss?:\/\//i.test(url)) throw new Error('A WebSocket address starts with ws:// or wss://');
   let namespace: string | null = null;
@@ -33,7 +52,10 @@ export function connect(token: string, url: string, headers: [string, string][],
   let ws: WebSocket;
   try {
     // undici's WebSocket takes headers next to the subprotocols (not in the browser API).
-    ws = new WebSocket(url, { protocols, headers: Object.fromEntries(headers) } as unknown as string[]);
+    const dispatcher = tlsAgent(url, options.insecure === true);
+    ws = dispatcher
+      ? (new TlsWebSocket(url, { protocols, headers: Object.fromEntries(headers), dispatcher }) as unknown as WebSocket)
+      : new WebSocket(url, { protocols, headers: Object.fromEntries(headers) } as unknown as string[]);
   } catch (e) {
     emit({ token, type: 'error', at: at(), data: (e as Error).message });
     return;

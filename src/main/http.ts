@@ -20,6 +20,7 @@ import { parseSse } from '@shared/sse';
  */
 setDefaultAutoSelectFamilyAttemptTimeout(2500);
 import { store } from './store';
+import { appDataDir } from './platform';
 
 /**
  * Sends requests from the main process with node:http(s): no browser CORS rules, a real Host / Cookie header,
@@ -36,7 +37,8 @@ const MAX_REDIRECTS = 10;
 // DevCatz signs its sites' certificates with its own CA. Trust that CA (its public certificate only) for the hosts
 // DevCatz serves — the site and app domains in its bridge.json, whatever their ending — and .localhost, so DevCatz
 // sites work without turning certificate checks off. The CA can sign any name, so it is never trusted elsewhere.
-const DEVCATZ = join(process.platform === 'darwin' ? join(homedir(), 'Library', 'Application Support') : (process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming')), 'DevCatz');
+// DevCatz's data folder on every platform (on Linux it is ~/.config/DevCatz, not an AppData folder).
+const DEVCATZ = process.env.DIALCATZ_DEVCATZ_DIR || appDataDir('DevCatz');
 let caCache: { mtime: number; ca: string[] } | null = null;
 let hostCache: { mtime: number; hosts: Set<string> } | null = null;
 
@@ -69,7 +71,8 @@ function devcatzHosts(): Set<string> {
   }
 }
 
-function localCa(host: string): string[] | undefined {
+/** The CA list for a DevCatz host (*.localhost, its sites' own hosts): the system's roots plus DevCatz's local CA. */
+export function localCa(host: string): string[] | undefined {
   const h = host.toLowerCase();
   if (h !== 'localhost' && !h.endsWith('.localhost') && !devcatzHosts().has(h)) return undefined;
   const file = join(DEVCATZ, 'certs', 'ca.crt');

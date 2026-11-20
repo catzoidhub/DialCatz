@@ -354,6 +354,37 @@ export function ensureDefault(): void {
 
 const SAMPLES_KEY = 'protocolSamples';
 const GRPC_SAMPLES_KEY = 'protocolSamplesGrpc2';
+const PUSHER_SAMPLES_KEY = 'protocolSamplesPusher';
+
+/** A Pusher sample joins an older "More protocols" folder once (one made before it existed). */
+function addPusherSample(): void {
+  if (store.extra<boolean>(PUSHER_SAMPLES_KEY)) return;
+  store.setExtra(PUSHER_SAMPLES_KEY, true);
+  for (const s of list().filter((x) => !x.serverId && !x.folder)) {
+    const w = load(s.id);
+    const folder = w.items.find((i) => i.kind === 'folder' && i.name === 'More protocols');
+    if (!folder || w.items.some((i) => i.parentId === folder.id && i.request?.pusher)) continue;
+    w.items.push(pusherSample(folder.id, w.items.filter((i) => i.parentId === folder.id).length));
+    save(w);
+  }
+}
+
+/**
+ * Pusher has no public server to try (an app key belongs to someone's account), so the sample talks to a Laravel
+ * Reverb on this computer: its key and secret come from {{variables}} the user adds from the app's .env.
+ */
+function pusherSample(folder: string, sort: number): TreeItem {
+  return {
+    id: uid('r_'),
+    kind: 'request',
+    parentId: folder,
+    name: 'Pusher: a local Reverb',
+    sort,
+    description:
+      'The Pusher protocol (Laravel Reverb, Soketi, Sockudo, Pusher Channels). Start Reverb (php artisan reverb:start, or from DevCatz\'s WebSocket page), add REVERB_APP_KEY and REVERB_APP_SECRET from its .env to your environment, then Connect: the channels below join, private- and presence- ones signed with the secret. DevCatz and DoCatz open their socket servers here with Open in DialCatz.',
+    request: { ...newRequest(), method: 'GET', url: 'ws://localhost:8080/app/{{REVERB_APP_KEY}}', pusher: { channels: ['orders', 'private-orders'], secret: '{{REVERB_APP_SECRET}}' } },
+  };
+}
 
 /** The first build's "gRPC echo" (Postman's server, unusable) becomes the Eliza samples, once; an edited one stays. */
 function replacePostmanGrpcSample(): void {
@@ -384,7 +415,7 @@ function protocolSamples(collectionId: string, sort: number): TreeItem[] {
     request: { ...newRequest(), url, ...patch },
   });
   return [
-    { id: folder, kind: 'folder', parentId: collectionId, name: 'More protocols', sort, auth: { mode: 'inherit' }, description: 'Server-Sent Events, GraphQL, JSON-RPC, WebSocket, Socket.IO and gRPC, against public servers.' },
+    { id: folder, kind: 'folder', parentId: collectionId, name: 'More protocols', sort, auth: { mode: 'inherit' }, description: 'Server-Sent Events, GraphQL, JSON-RPC, WebSocket, Socket.IO and gRPC against public servers, and Pusher against a local Laravel Reverb.' },
     req(0, 'Live events (SSE)', 'https://stream.wikimedia.org/v2/stream/recentchange', { method: 'GET' }, "Wikipedia's live edits as Server-Sent Events: Send, watch them arrive in Events, Stop when you have seen enough."),
     req(1, 'GraphQL: a country', 'https://countries.trevorblades.com/graphql', { method: 'POST', body: { mode: 'graphql', raw: 'query Country($code: ID!) {\n  country(code: $code) {\n    name\n    capital\n    emoji\n  }\n}', variables: '{ "code": "ID" }', fields: [] } }, 'A GraphQL query with variables.'),
     req(2, 'JSON-RPC: latest block', 'https://ethereum-rpc.publicnode.com', { method: 'POST', body: { mode: 'jsonrpc', raw: '[]', fields: [], rpcMethod: 'eth_blockNumber' } }, 'A JSON-RPC 2.0 call to a public Ethereum node; the RPC tab shows the reply by id.'),
@@ -392,6 +423,7 @@ function protocolSamples(collectionId: string, sort: number): TreeItem[] {
     req(4, 'WebSocket echo', 'wss://ws.postman-echo.com/raw', { method: 'GET' }, "Connect, type a message, send it: Postman's echo server sends it back."),
     req(5, 'Socket.IO echo', 'wss://ws.postman-echo.com/socket.io/', { method: 'GET', socketIo: true }, 'Socket.IO over the WebSocket: Connect, then emit an event by name with JSON args.'),
     ...grpcSamples(folder, 6),
+    pusherSample(folder, 8),
   ];
 }
 
@@ -418,6 +450,7 @@ function grpcSamples(folder: string, sort: number): TreeItem[] {
 /** Older installs: the protocol samples join their Getting started once (nothing else in it changes). */
 export function addProtocolSamples(): void {
   replacePostmanGrpcSample();
+  addPusherSample();
   if (store.extra<boolean>(SAMPLES_KEY)) return;
   store.setExtra(SAMPLES_KEY, true);
   for (const s of list().filter((x) => !x.serverId && !x.folder)) {

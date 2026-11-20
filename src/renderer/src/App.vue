@@ -357,7 +357,7 @@ onBeforeUnmount(() => offs.forEach((f) => f()));
 <template>
   <div class="flex h-full" :class="{ 'is-mac': isMac }">
     <!-- Section rail -->
-    <nav class="rail drag flex w-24 shrink-0 flex-col items-center pt-12 pb-3">
+    <nav class="rail drag flex w-24 shrink-0 flex-col items-center pb-3" :class="isWin ? 'pt-[3.75rem]' : 'pt-12'">
       <div class="rail-scroll flex flex-1 flex-col items-center gap-1 overflow-y-auto">
         <button v-for="r in RAIL" :key="r.id" class="rail-item no-drag" :class="{ 'is-active': section === r.id }" :style="{ '--rail-c': `var(--c-${r.id})` }" @click="goSection(r.id)">
           <span class="rail-icon"><Icon :name="r.icon" class="size-[18px]" /></span>{{ r.label }}
@@ -436,7 +436,8 @@ onBeforeUnmount(() => offs.forEach((f) => f()));
        screens. Every sidebar / page header leaves this strip free. Last in the document on purpose: Electron builds
        the drag area in document order, so a no-drag hole made before the drag strips would be filled again. -->
     <!-- Windows: no menu bar — the app menu (every command and its shortcut) behind ☰, where the traffic lights sit on a Mac. -->
-    <button v-if="isWin" class="no-drag btn btn-ghost btn-sm btn-square fixed top-1.5 left-3 z-30" title="Menu: every DialCatz command and its shortcut" aria-label="Menu" @click="openAppMenu">
+    <!-- Where DoCatz has it: a 1.5rem button centred on the 6rem rail, just above its first icon (the rail starts lower off macOS). -->
+    <button v-if="isWin" class="no-drag btn btn-ghost btn-xs btn-square fixed top-7 left-9 z-30" title="Menu: every DialCatz command and its shortcut" aria-label="Menu" @click="openAppMenu">
       <svg viewBox="0 0 20 20" class="size-4" fill="currentColor"><path d="M3 5a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H4a1 1 0 0 1-1-1Zm0 5a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H4a1 1 0 0 1-1-1Zm1 4a1 1 0 1 0 0 2h12a1 1 0 1 0 0-2H4Z" /></svg>
     </button>
     <div class="no-drag fixed top-2.5 left-[6.75rem] z-30 flex items-center gap-0.5">

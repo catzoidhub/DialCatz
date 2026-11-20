@@ -83,12 +83,12 @@ linux:
       arch: [x64]
   artifactName: ${productName}-${version}-${arch}.${ext}
   synopsis: Dial an endpoint. Hear it purr.
-  description: An open-source API client — collections, environments, history and tests for HTTP, GraphQL and WebSocket, with a self-hosted DialCatz Den for teams.
+  description: An open-source API client — collections, environments, history and tests for HTTP, GraphQL, WebSocket, Socket.IO, Pusher, SSE, JSON-RPC and gRPC, with OpenAPI checks, mock servers and a self-hosted DialCatz Den for teams.
   desktop:
     entry:
       Name: DialCatz
       GenericName: API client
-      Comment: Collections, environments, history and tests for HTTP, GraphQL and WebSocket APIs
+      Comment: Collections, environments, history and tests for HTTP, GraphQL, WebSocket, gRPC and more
       Keywords: api;http;rest;graphql;websocket;postman;dev;
   # The window belongs to this menu entry (app_id / WM_CLASS = dialcatz.desktop's name).
   syncDesktopName: true

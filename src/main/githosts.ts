@@ -7,7 +7,7 @@ import type { GitAccount, GitHostKind, GitPull, GitRepo, GitSshKey } from '@shar
 import type { GitCreds } from './gitcore';
 import { setSharedGitAccounts, setSharedGitToken, sharedGitAccounts, sharedGitToken } from './shared';
 import { store } from './store';
-import { exePath, isWin } from './platform';
+import { appDataDir, exePath, isWin } from './platform';
 
 /**
  * Hosting accounts (GitHub, GitLab, Gitea / Forgejo, Bitbucket) through their REST APIs with a personal access
@@ -310,7 +310,7 @@ export async function createRepo(accountId: string, nameIn: string, priv: boolea
  * later finds it already there.
  */
 const devcatzConfig = () =>
-  join(process.env.DIALCATZ_DEVCATZ_DIR || (process.platform === 'darwin' ? join(homedir(), 'Library', 'Application Support', 'DevCatz') : join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'DevCatz')), 'config.json');
+  join(process.env.DIALCATZ_DEVCATZ_DIR || appDataDir('DevCatz'), 'config.json');
 
 type DevCatzAccount = GitAccount & { token: string };
 function devcatzStored(): DevCatzAccount[] {

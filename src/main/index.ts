@@ -158,9 +158,10 @@ function createWindow(): void {
   w.webContents.on('did-start-navigation', (_e, _url, isInPlace, isMainFrame) => {
     if (isMainFrame && !isInPlace) windowListens = false;
   });
-  // Links in responses / docs open in the browser, never inside the app window.
+  // Links in responses / docs open in the browser chosen in Settings (shared with the Catzoid apps), never inside the
+  // app window.
   w.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+    if (/^https?:\/\//i.test(url)) void openWeb(url, settings().browser).catch(() => shell.openExternal(url));
     return { action: 'deny' };
   });
   w.webContents.on('will-navigate', (e, url) => {
@@ -1137,7 +1138,7 @@ function api(): DialCatzApi {
         return { error: (e as Error).message, sent };
       }
     },
-    wsConnect: async (token, url, headers, protocols, options) => sockets.connect(String(token), String(url), (Array.isArray(headers) ? headers : []).map(([k, v]) => [String(k), String(v)] as [string, string]), (Array.isArray(protocols) ? protocols : []).map(String), { socketIo: options?.socketIo === true, pusher: options?.pusher === true }),
+    wsConnect: async (token, url, headers, protocols, options) => sockets.connect(String(token), String(url), (Array.isArray(headers) ? headers : []).map(([k, v]) => [String(k), String(v)] as [string, string]), (Array.isArray(protocols) ? protocols : []).map(String), { socketIo: options?.socketIo === true, pusher: options?.pusher === true, insecure: settings().requests.insecure === true }),
     wsSend: async (token, data, event, channel) => sockets.send(String(token), String(data), event === undefined ? undefined : String(event), channel === undefined ? undefined : String(channel)),
     wsPusherChannel: async (token, action, channel, o) => sockets.pusherChannel(String(token), action === 'unsubscribe' ? 'unsubscribe' : 'subscribe', String(channel), { secret: o?.secret ? String(o.secret) : undefined, userId: o?.userId ? String(o.userId) : undefined }),
     wsClose: async (token) => sockets.close(String(token)),
