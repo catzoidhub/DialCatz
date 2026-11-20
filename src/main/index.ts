@@ -6,7 +6,7 @@ import { messageBox, openDialog, saveDialog } from './dialogs';
 import { execFile } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative as relativePath, resolve as resolvePath, sep as pathSep } from 'node:path';
 import { API_METHODS, uid, type ConnectRequest, type DevCatzSite, type DoCatzProject, type McatzpRun, type McatzpTab, type McatzpTabResponse, type Workspace, type EnvVariable, type PostmanChoice, type DialCatzApi, type HistoryEntry, type SpecLink, type SpecReview, type TreeItem, type WireRequest } from '@shared/types';
 import { dataDir, store } from './store';
 import { applySettings, setAiKey, setSettings, settings, startSupportClock } from './settings';
@@ -37,6 +37,8 @@ import { mergeRoutes } from './routemerge';
 import { specApply, specDiff, withBase, type Fresh, type SpecPick } from './specsync';
 import { fetchSpecText, freshFor, hashText, readSpecFile } from './specsource';
 import * as mock from './mock';
+import * as dclink from './devcatzlink';
+import { browsersState, openWeb, refreshBrowsers } from './browsers';
 import { Mcatzp } from './mcatzp';
 import * as mcatzpSetup from './mcatzp/install';
 import { MCATZP_TARGETS } from '@catzoid/mcatzp-host';
@@ -50,6 +52,8 @@ import { systemVersion } from './system';
  *   dialcatz://open?site=<DevCatz site id>           the DevCatz import for that site (asks before importing)
  *   dialcatz://open?docatz=<compose project>[&service=<service>]  the DoCatz import for that project, that service
  *                                                    as baseUrl (asks before importing)
+ *   dialcatz://open?workspace=<id>&collection=<id>[&mock=1]  that collection (and its Mock server panel), from DevCatz
+ *   dialcatz://mock?site=<DevCatz site id>&spec=<path in the site>  its mock server (asks before importing the spec)
  *   dialcatz://connect?server=<url>&code=<code>       join a team server with a one-time invite code; the window
  *                                                    shows the server address and asks before anything is sent
  */
@@ -182,11 +186,27 @@ function handleLink(raw: string): void {
       if (/^[\w-]{1,64}$/.test(site)) sendLink('app:devcatz', site);
       return;
     }
+    if (u.hostname === 'open' && u.searchParams.get('collection')) {
+      // From DevCatz's mock page (#94): that collection, and with mock=1 its Mock server panel (nothing starts or stops).
+      const workspaceId = u.searchParams.get('workspace') ?? '';
+      const collectionId = u.searchParams.get('collection')!;
+      if (/^[\w-]{1,64}$/.test(workspaceId) && /^[\w-]{1,64}$/.test(collectionId)) sendLink('app:openCollection', { workspaceId, collectionId, mock: u.searchParams.get('mock') === '1' });
+      return;
+    }
     if (u.hostname === 'open' && u.searchParams.get('docatz')) {
       // From DoCatz: show the import for that compose project (nothing happens without the user's click).
       const project = u.searchParams.get('docatz')!;
       const service = u.searchParams.get('service') ?? '';
       if (docatz.PROJECT_NAME.test(project)) sendLink('app:docatz', { project, service: /^[a-z0-9][a-z0-9_.-]{0,62}$/.test(service) ? service : '' });
+      return;
+    }
+    if (u.hostname === 'mock') {
+      // From DevCatz's "Create mock server" (#94): a site's spec file. The window reuses the collection that follows it,
+      // or asks before importing it, then starts its mock.
+      const site = u.searchParams.get('site') ?? '';
+      const spec = u.searchParams.get('spec') ?? '';
+      const app = u.searchParams.get('app') ?? '';
+      if (/^[\w-]{1,64}$/.test(site) && SPEC_PATH.test(spec) && !spec.split('/').includes('..') && /^[\w@.\- /]{0,200}$/.test(app) && !app.split('/').includes('..')) sendLink('app:mockSpec', { siteId: site, spec, app });
       return;
     }
     if (u.hostname === 'connect') {
@@ -597,7 +617,19 @@ function api(): DialCatzApi {
       return w;
     },
     specStale: async (id) => specStale(id),
-    mockList: async () => mock.list(),
+    browsers: async () => {
+      await refreshBrowsers().catch(() => false);
+      return browsersState();
+    },
+    mockList: async () => mock.list().map((m) => {
+      const d = devcatz.mockDomain(m.workspaceId, m.collectionId);
+      return d ? { ...m, devcatz: d } : m;
+    }),
+    mockOpenInDevCatz: async (id, collectionId) => {
+      const d = devcatz.mockDomain(String(id), String(collectionId));
+      if (!d) throw new Error('DevCatz has not picked this mock up yet');
+      await shell.openExternal(d.link);
+    },
     mockStart: async (id, collectionId, port) => {
       const { col } = specCollection(id, String(collectionId));
       const p = Number(port) || undefined;
@@ -606,7 +638,59 @@ function api(): DialCatzApi {
         const w = ws.load(id);
         const c = w.items.find((i) => i.id === col.id);
         return c ? { items: w.items, name: c.name } : null;
-      }, p);
+      }, p, await siteSpecOf(col), devcatz.usedPorts());
+    },
+    mockSiteSpec: async (siteId, spec, appArg) => {
+      const { site, file } = siteSpecFile(String(siteId), String(spec));
+      const app = String(appArg ?? '') || dclink.appOfSpec(site, String(spec));
+      // A collection that follows the file, else one paired with the site's app (its link, devcatzlink.ts).
+      let fallback: { workspaceId: string; collectionId: string; name: string } | null = null;
+      for (const s of ws.list()) {
+        let items: TreeItem[];
+        try {
+          items = ws.load(s.id).items;
+        } catch {
+          continue; // a workspace that cannot be read now (its folder gone) is skipped, not the whole lookup
+        }
+        for (const col of items.filter((i) => i.kind === 'collection')) {
+          if (col.spec?.kind === 'file' && resolvePath(col.spec.path) === file) return { site: site.name, file, found: { workspaceId: s.id, collectionId: col.id, name: col.name } };
+          if (!fallback && (await dclink.linkedTo(col, site, app))) fallback = { workspaceId: s.id, collectionId: col.id, name: col.name };
+        }
+      }
+      return { site: site.name, file, found: fallback };
+    },
+    devcatzLinks: async (id) => {
+      const out: Record<string, { site: string | null; app: string; here: boolean }> = {};
+      for (const c of ws.load(id).items.filter((i) => i.kind === 'collection')) {
+        const l = dclink.linkOf(c);
+        if (!l) continue;
+        const site = await dclink.siteOf(l);
+        out[c.id] = { site: site?.name ?? null, app: site ? dclink.appDir(site, l.app) : l.app, here: !!site };
+      }
+      return out;
+    },
+    devcatzLinkSet: async (id, collectionId, siteId, app) => {
+      const { col } = specCollection(id, String(collectionId));
+      const next: TreeItem = { ...col };
+      if (siteId === null) {
+        delete next.devcatz;
+        // An older import's origin would pair it again: it goes too (merging DevCatz routes then makes a new collection).
+        if (next.origin?.startsWith('devcatz:')) delete next.origin;
+      } else next.devcatz = await dclink.makeLink(devcatz.site(String(siteId)), String(app ?? ''));
+      const w = ws.saveItems(id, [next]);
+      if (w.serverId) void srv.sync(id).then(() => send('app:workspaces', null));
+      return w;
+    },
+    mockSiteImport: async (id, siteId, spec) => {
+      const { site, file } = siteSpecFile(String(siteId), String(spec));
+      const text = readSpecFile(file);
+      importSpec(text);
+      const r0 = doImport(id, text, { kind: 'file', path: file });
+      // Paired with the site's app from the start, like a site import.
+      const col = r0.workspace.items.find((i) => i.id === r0.collectionId)!;
+      const r = { ...r0, workspace: ws.saveItems(id, [{ ...col, devcatz: await dclink.makeLink(site, dclink.appOfSpec(site, String(spec))) }]) };
+      if (r.workspace.serverId) void srv.sync(id).then(() => send('app:workspaces', null));
+      return { workspace: r.workspace, collectionId: r.collectionId };
     },
     mockStop: async (id, collectionId) => mock.stop(id, String(collectionId)),
     mockEnvironment: async (id, collectionId) => {
@@ -644,10 +728,20 @@ function api(): DialCatzApi {
       let merged = false;
       if (what.routes) {
         const r = await devcatz.routes(site, what.app);
+        const dir = devcatz.pickApp(site, what.app)?.dir ?? '';
+        const origin = `devcatz:${site.id}:${dir}`;
+        // Paired already (a teammate's copy: the same Git remote, another site id here): the routes go there.
+        let into = what.into?.[dir] ?? undefined;
+        if (!into && !w.items.some((i) => i.kind === 'collection' && i.origin === origin)) {
+          for (const c of w.items.filter((i) => i.kind === 'collection')) if (await dclink.linkedTo(c, site, dir)) (into = c.id);
+        }
         // Imported before: the new routes join that collection, the user's requests stay as they are.
-        const placed = placeRoutes(id, w, r, `devcatz:${site.id}:${devcatz.pickApp(site, what.app)?.dir ?? ''}`, envName, what.into?.[devcatz.pickApp(site, what.app)?.dir ?? ''] ?? undefined);
+        const placed = placeRoutes(id, w, r, origin, envName, into);
         ({ w, collectionId, requests, merged } = placed);
         source = r.source;
+        // The pairing every DevCatz feature matches on (devcatzlink.ts).
+        const col = w.items.find((i) => i.id === collectionId);
+        if (col) w = ws.saveItems(id, [{ ...col, devcatz: await dclink.makeLink(site, dir) }]);
       }
       if (what.environment) w = linkEnvironment(id, devcatzEnvironment(id, w, site, what.app, what.envVars), envName, collectionId ? [collectionId] : []);
       if (w.serverId) void srv.sync(id).then(() => send('app:workspaces', null));
@@ -663,11 +757,17 @@ function api(): DialCatzApi {
       }
       const site = devcatz.sites().find((x) => x.id === key);
       if (!site) return [];
-      return importedFrom(w, `devcatz:${site.id}:`, `DevCatz · ${site.name}`, (n) => {
+      // Paired through the Git remote (imported on another computer, synced here): they count too.
+      const paired: { collectionId: string; name: string; key: string; requests: number }[] = [];
+      for (const c of w.items.filter((i) => i.kind === 'collection' && !i.origin?.startsWith(`devcatz:${site.id}:`))) {
+        const l = dclink.linkOf(c);
+        if (l && (await dclink.linkedTo(c, site, l.app))) paired.push({ collectionId: c.id, name: c.name, key: dclink.appDir(site, l.app), requests: countRequests(w, c.id) });
+      }
+      return [...paired, ...importedFrom(w, `devcatz:${site.id}:`, `DevCatz · ${site.name}`, (n) => {
         if (n === site.name) return devcatz.pickApp(site)?.dir ?? '';
         const label = n.startsWith(`${site.name} · `) ? n.slice(site.name.length + 3) : null;
         return label === null ? null : (site.apps.find((a) => devcatz.appLabel(a) === label)?.dir ?? null);
-      }).map((x) => ({ collectionId: x.col.id, name: x.col.name, key: x.key, requests: countRequests(w, x.col.id) }));
+      }).map((x) => ({ collectionId: x.col.id, name: x.col.name, key: x.key, requests: countRequests(w, x.col.id) }))];
     },
     docatzProjects: async () => ({ installed: docatz.installed(), engine: docatz.engineRunning(), projects: docatz.projects() }),
     docatzOpen: async (name) => void (await shell.openExternal(docatz.link(docatz.project(String(name))))),
@@ -923,7 +1023,8 @@ function api(): DialCatzApi {
     openUrl: async (url) => {
       // app:licenses — the third-party licences shipped inside the app (Catzoid #66), readable offline
       if (url === 'app:licenses') await shell.openPath(app.isPackaged ? join(process.resourcesPath, 'third-party-licenses.txt') : join(app.getAppPath(), 'resources', 'third-party-licenses.txt'));
-      else if (/^https?:\/\//i.test(url)) await shell.openExternal(url);
+      // Web links open in the browser chosen in Settings (shared with the Catzoid apps), else the system default.
+      else if (/^https?:\/\//i.test(url)) await openWeb(url, settings().browser);
     },
     copyText: async (text) => clipboard.writeText(text),
     hostName: () => deviceName(),
@@ -1095,6 +1196,41 @@ function ownVariable(w: Workspace, collection: TreeItem, items: TreeItem[]): Tre
   const own = w.items.find((i) => i.kind === 'request' && i.request && ids.has(i.id))?.request?.url.match(/^\{\{[^}]+\}\}/)?.[0];
   if (!own || own === '{{baseUrl}}') return items;
   return items.map((i) => (i.request ? { ...i, request: { ...i.request, url: i.request.url.replace(/^\{\{[^}]+\}\}/, own) }, ...(i.specBase ? { specBase: { ...i.specBase, url: i.specBase.url.replace(/^\{\{[^}]+\}\}/, own) } } : {}) } : i));
+}
+
+// ---------------------------------------------------------------- mocks of a DevCatz site's spec (#94)
+
+/** A spec path inside a site, as DevCatz sends it: relative, forward slashes, a JSON or YAML file. */
+const SPEC_PATH = /^(?!\/)[\w@.\- /]{1,400}\.(json|ya?ml)$/i;
+
+/** The site and the absolute spec file for a DevCatz link; refuses anything outside the site's folder. */
+function siteSpecFile(siteId: string, spec: string): { site: DevCatzSite; file: string } {
+  if (!SPEC_PATH.test(spec) || spec.split('/').includes('..')) throw new Error('That is not a spec file of the site');
+  const site = devcatz.site(siteId);
+  const root = resolvePath(site.path);
+  const file = resolvePath(root, ...spec.split('/'));
+  const rel = relativePath(root, file);
+  if (!rel || rel.startsWith('..') || isAbsolute(rel)) throw new Error('That is not a spec file of the site');
+  if (!existsSync(file)) throw new Error(`${spec} is not in ${site.name} any more`);
+  return { site, file };
+}
+
+/** The DevCatz site and spec file a collection is paired with, for bridge.json (DevCatz matches mocks on them). */
+async function siteSpecOf(col: TreeItem): Promise<{ siteId: string; specFile: string } | null> {
+  const l = dclink.linkOf(col);
+  if (l) {
+    const site = await dclink.siteOf(l);
+    const specFile = site ? (dclink.specFileOf(site, l.app) ?? l.specFile) : undefined;
+    if (site && specFile) return { siteId: site.id, specFile };
+  }
+  // Following a spec file that sits inside a site, without a link.
+  if (col.spec?.kind !== 'file') return null;
+  const file = resolvePath(col.spec.path);
+  for (const s of devcatz.sites()) {
+    const rel = relativePath(resolvePath(s.path), file);
+    if (rel && !rel.startsWith('..') && !isAbsolute(rel)) return { siteId: s.id, specFile: rel.split(pathSep).join('/') };
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------- a collection follows its spec (#92)

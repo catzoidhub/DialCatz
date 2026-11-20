@@ -21,6 +21,8 @@ interface Running {
 const running = new Map<string, Running>();
 const key = (workspaceId: string, collectionId: string) => `${workspaceId}:${collectionId}`;
 const FIRST_PORT = 4010; // Prism's, so a frontend set up for a mock already points here
+/** Mocks stay below 4100, where DevCatz starts handing its sites ports. */
+const LAST_PORT = 4099;
 const HITS = 50;
 
 /** The ids of a collection and everything in it. */
@@ -42,7 +44,7 @@ export function routesOf(items: TreeItem[], collectionId: string): MockRoute[] {
 const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'mock';
 
 function publish(): void {
-  setBridgeMocks([...running.values()].map((r) => ({ name: r.state.name, slug: slug(r.state.name), workspaceId: r.state.workspaceId, collectionId: r.state.collectionId, url: r.state.url, port: r.state.port, startedAt: r.startedAt })));
+  setBridgeMocks([...running.values()].map((r) => ({ name: r.state.name, slug: slug(r.state.name), workspaceId: r.state.workspaceId, collectionId: r.state.collectionId, url: r.state.url, port: r.state.port, startedAt: r.startedAt, ...(r.state.siteId ? { siteId: r.state.siteId, specFile: r.state.specFile } : {}) })));
 }
 
 function cors(req: IncomingMessage, res: ServerResponse): void {
@@ -114,7 +116,7 @@ function listen(server: Server, port: number): Promise<number> {
 }
 
 /** Starts the collection's mock (or gives the running one). `port`: that port only; none: 4010 and up. */
-export async function start(workspaceId: string, collectionId: string, name: string, load: Load, port?: number): Promise<MockState> {
+export async function start(workspaceId: string, collectionId: string, name: string, load: Load, port?: number, site?: { siteId: string; specFile: string } | null, reserved: Set<number> = new Set()): Promise<MockState> {
   const k = key(workspaceId, collectionId);
   const have = running.get(k);
   if (have) return have.state;
@@ -122,18 +124,21 @@ export async function start(workspaceId: string, collectionId: string, name: str
   if (!w) throw new Error('That collection is gone');
   const routes = routesOf(w.items, collectionId).length;
   if (!routes) throw new Error(`No request in “${name}” has responses from a spec yet. Import it from an OpenAPI document, or use Spec → Check for changes once to bring them in.`);
-  const r: Running = { server: createServer(), state: { workspaceId, collectionId, name, url: '', port: 0, routes, hits: [] }, startedAt: Date.now() };
+  const r: Running = { server: createServer(), state: { workspaceId, collectionId, name, url: '', port: 0, routes, hits: [], ...(site ? site : {}) }, startedAt: Date.now() };
   r.server.on('request', handler(r, load));
   let got = 0;
   if (port) {
+    if (reserved.has(port)) throw new Error(`DevCatz uses port ${port}. Pick another, or leave it empty for a free one.`);
     try {
       got = await listen(r.server, port);
     } catch (e) {
       throw new Error((e as NodeJS.ErrnoException).code === 'EADDRINUSE' ? `Port ${port} is in use. Pick another, or leave it empty for a free one.` : (e as Error).message);
     }
   } else {
+    // Free now is not enough: a port DevCatz gave a stopped site would clash the moment that site starts.
     const taken = new Set([...running.values()].map((x) => x.state.port));
-    for (let p = FIRST_PORT; p < FIRST_PORT + 200 && !got; p++) {
+    for (const p of reserved) taken.add(p);
+    for (let p = FIRST_PORT; p <= LAST_PORT && !got; p++) {
       if (taken.has(p)) continue;
       got = await listen(r.server, p).catch(() => 0);
     }

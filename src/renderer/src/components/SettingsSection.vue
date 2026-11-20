@@ -2,11 +2,11 @@
 import AboutCard from './AboutCard.vue';
 import AiModelPicker from './AiModelPicker.vue';
 import McatzpSettings from './McatzpSettings.vue';
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { AI_FEATURES, AI_PROVIDERS, aiProvider, type AiFeature, type AiProvider, type DialCatzSettingsPatch, type Theme } from '@shared/types';
 import { AUTO_HEADERS } from '@shared/request';
 import { attempt, mcatzpUpdate, notify, settings, settingsTab, updateOpen, updateState } from '../state';
-import type { ReportPrefs, UpdatePrefs } from '@shared/types';
+import type { BrowsersState, ReportPrefs, UpdatePrefs } from '@shared/types';
 import { words } from '../platform';
 import PageHeader from './PageHeader.vue';
 
@@ -67,6 +67,17 @@ const updatePrefs = ref<UpdatePrefs | null>(null);
 const reportPrefs = ref<ReportPrefs | null>(null);
 const version = ref('');
 const site = ref('https://catzoid.com');
+// General → Open with → Browser (as DevCatz's and DoCatz's, shared with the Catzoid apps): the installed browsers,
+// looked at again when the window comes to the front (one installed meanwhile shows up).
+const browsers = ref<BrowsersState>({ list: [], systemDefault: null });
+const loadBrowsers = async () => (browsers.value = (await window.dialcatz.browsers().catch(() => null)) ?? browsers.value);
+onMounted(() => {
+  void loadBrowsers();
+  window.addEventListener('focus', loadBrowsers);
+});
+onBeforeUnmount(() => window.removeEventListener('focus', loadBrowsers));
+const chosenBrowser = computed(() => (settings.value?.browser ? (browsers.value.list.find((b) => b.path === settings.value!.browser) ?? null) : browsers.value.systemDefault));
+
 onMounted(async () => {
   updatePrefs.value = await api.updatePrefs();
   reportPrefs.value = await api.reportPrefs();
@@ -127,6 +138,38 @@ const THEMES: { id: Theme; label: string }[] = [
               <button v-for="t in THEMES" :key="t.id" role="tab" class="seg-item" :class="{ 'is-active': settings.theme === t.id }" @click="patch({ theme: t.id })">{{ t.label }}</button>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <div class="flex items-center gap-2"><h2 class="flex-1">Open with</h2><span class="badge badge-soft badge-primary badge-sm" title="Change it here and every Catzoid app follows">Shared with Catzoid apps</span></div>
+          <p class="text-sm opacity-60">Web links open here, such as a mock server's address. All Catzoid apps use the same browser.</p>
+          <div class="opt-row">
+            <span class="label-caps">Browser</span>
+            <div class="dropdown dropdown-end">
+              <button type="button" tabindex="0" class="select select-sm flex w-64 items-center gap-2 text-left">
+                <img v-if="chosenBrowser?.icon" :src="chosenBrowser.icon" alt="" class="size-4 shrink-0" draggable="false" />
+                <span class="min-w-0 flex-1 truncate">{{ settings.browser ? (chosenBrowser?.name ?? 'Not installed') : `System default (${browsers.systemDefault?.name ?? words.os})` }}</span>
+              </button>
+              <ul tabindex="0" class="dropdown-content menu z-30 mt-1 max-h-80 w-64 flex-nowrap overflow-y-auto rounded-box border border-base-300/70 bg-base-100 p-1.5 shadow-xl">
+                <li>
+                  <button type="button" class="flex items-center gap-2" :class="{ 'menu-active': !settings.browser }" @click="patch({ browser: '' })">
+                    <img v-if="browsers.systemDefault?.icon" :src="browsers.systemDefault.icon" alt="" class="size-4 shrink-0" draggable="false" />
+                    <span class="flex-1 truncate">System default</span>
+                    <span class="text-xs opacity-50">{{ browsers.systemDefault?.name ?? '' }}</span>
+                  </button>
+                </li>
+                <li v-for="b in browsers.list" :key="b.path">
+                  <button type="button" class="flex items-center gap-2" :class="{ 'menu-active': settings.browser === b.path }" :title="b.path" @click="patch({ browser: b.path })">
+                    <img v-if="b.icon" :src="b.icon" alt="" class="size-4 shrink-0" draggable="false" />
+                    <span class="flex-1 truncate">{{ b.name }}</span>
+                  </button>
+                </li>
+              </ul>
+            </div>
+          </div>
+          <p v-if="settings.browser && !chosenBrowser && browsers.list.length" class="text-xs text-warning">The chosen browser is no longer installed; links open in the system default.</p>
         </div>
       </div>
 

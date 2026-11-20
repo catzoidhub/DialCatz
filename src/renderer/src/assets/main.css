@@ -93,6 +93,8 @@
   --c-history: oklch(68% 0.13 250);
   --c-git: oklch(66% 0.16 40);
   --c-team: oklch(66% 0.15 300);
+  /* DevCatz's own primary (its main.css), for collections paired with a DevCatz site. */
+  --devcatz: oklch(57% 0.2 283);
   --c-settings: oklch(from var(--color-base-content) l c h / 0.9);
 }
 /* Dark surfaces: the system's dark mode (unless Light is picked), or Dark picked by hand. */
@@ -102,6 +104,7 @@
     --surface-raised: oklch(from var(--color-base-100) calc(l + 0.05) c h);
     --shadow-card: 0 1px 2px oklch(0 0 0 / 0.3), 0 10px 30px -18px oklch(0 0 0 / 0.6);
     --primary-ink: var(--color-primary);
+    --devcatz: oklch(72% 0.15 283);
   }
 }
 :root[data-theme='dark'] {
@@ -109,6 +112,7 @@
   --surface-raised: oklch(from var(--color-base-100) calc(l + 0.05) c h);
   --shadow-card: 0 1px 2px oklch(0 0 0 / 0.3), 0 10px 30px -18px oklch(0 0 0 / 0.6);
   --primary-ink: var(--color-primary);
+  --devcatz: oklch(72% 0.15 283);
 }
 /* Primary-coloured text: the soft teal is for fills; text takes the deeper ink. */
 .text-primary,
@@ -840,6 +844,16 @@ body.is-resizing * {
   line-height: 16px;
   color: var(--primary-ink, var(--color-primary));
   background: oklch(from var(--color-primary) l c h / 0.14);
+}
+/* A collection paired with a DevCatz site: its own icon in DevCatz's colour (dashed when the site is not here). */
+.tree-icon.is-devcatz {
+  color: var(--devcatz);
+  opacity: 1 !important;
+}
+.tree-icon-wrap.is-away {
+  border-radius: 5px;
+  outline: 1px dashed oklch(from var(--devcatz) l c h / 0.6);
+  outline-offset: 1px;
 }
 .tree-mock {
   flex-shrink: 0;

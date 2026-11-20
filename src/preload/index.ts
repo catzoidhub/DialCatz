@@ -37,6 +37,10 @@ const bridge = {
   onDevCatz: (cb: (siteId: string) => void) => on('app:devcatz', cb),
   /** dialcatz://open?docatz=<compose project>[&service=<service>] from DoCatz ('' when no service is named). */
   onDoCatz: (cb: (link: { project: string; service: string }) => void) => on('app:docatz', cb),
+  /** dialcatz://mock?site=<id>&spec=<path> from DevCatz's "Create mock server" (#94). */
+  onMockSpec: (cb: (link: { siteId: string; spec: string; app: string }) => void) => on('app:mockSpec', cb),
+  /** dialcatz://open?workspace=<id>&collection=<id>[&mock=1] from DevCatz's mock page (#94). */
+  onOpenCollection: (cb: (link: { workspaceId: string; collectionId: string; mock: boolean }) => void) => on('app:openCollection', cb),
   /** A question from an MCP client waiting for the user (null: none left). */
   onMcatzpAsk: (cb: (ask: McatzpAsk | null) => void) => on('app:mcatzpAsk', cb),
   /** The main process asks for what only the window holds; answered with mcatzpWindowReply. */

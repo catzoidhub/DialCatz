@@ -2,7 +2,7 @@
 import CodeEditor from './CodeEditor.vue';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { emptyLayout, uid, type ExportFormat, type RequestAuth, type SidebarLayout, type SpecReview, type TreeItem, type Workspace } from '@shared/types';
-import { attempt, closeTab, defaultEnvironment, freshRequest, importRequest, newTab, notify, openItem, plain, presenceByItem, readOnly, refreshMocks, refreshSpecStale, section, specAsk, specStale, syncTabsWithWorkspace, tabs, workspace } from '../state';
+import { attempt, closeTab, collectionAsk, defaultEnvironment, freshRequest, importRequest, newTab, notify, openItem, plain, presenceByItem, readOnly, refreshMocks, refreshSpecStale, devcatzInstalled, devcatzLinks, refreshDevcatzLinks, section, specAsk, specStale, syncTabsWithWorkspace, tabs, workspace } from '../state';
 import TreeNode, { type DropTarget } from './TreeNode.vue';
 import PromptDialog from './PromptDialog.vue';
 import ConfirmDialog from './ConfirmDialog.vue';
@@ -12,6 +12,7 @@ import RunnerDialog from './RunnerDialog.vue';
 import CopyCollectionDialog from './CopyCollectionDialog.vue';
 import SpecReviewDialog from './SpecReviewDialog.vue';
 import MockDialog from './MockDialog.vue';
+import DevcatzLinkDialog from './DevcatzLinkDialog.vue';
 import Icon from './Icon.vue';
 import CopyName from './CopyName.vue';
 import { store } from '../store';
@@ -283,6 +284,12 @@ const specLabel = (i: TreeItem) => (i.spec ? (i.spec.kind === 'url' ? i.spec.pat
 const reviewing = ref<{ review: SpecReview; name: string } | null>(null);
 /** #94: the collection whose Mock server dialog is open. */
 const mocking = ref<TreeItem | null>(null);
+/** The collection whose "Link to DevCatz" dialog is open. */
+const linking = ref<TreeItem | null>(null);
+async function unlinkDevcatz(item: TreeItem) {
+  await apply(() => api.devcatzLinkSet(workspace.value!.id, item.id, null, ''), `“${item.name}” is no longer linked to DevCatz`);
+  void refreshDevcatzLinks();
+}
 const checking = ref<string | null>(null);
 async function checkSpec(item: TreeItem) {
   checking.value = item.id;
@@ -313,6 +320,15 @@ function specDone(w: Workspace, summary: string) {
   notify('success', summary);
   void refreshSpecStale();
 }
+// A link asked for this collection (DevCatz's mock page): open it in the tree, and its Mock server panel.
+watch(collectionAsk, (ask) => {
+  if (!ask) return;
+  collectionAsk.value = null;
+  const item = workspace.value?.items.find((i) => i.id === ask.id);
+  if (!item) return;
+  open.add(item.id);
+  if (ask.mock) mocking.value = item;
+});
 // The tree's "spec" mark asks for a review.
 watch(specAsk, (id) => {
   if (!id) return;
@@ -324,7 +340,9 @@ watch(specAsk, (id) => {
 const onFocus = () => void refreshSpecStale();
 onMounted(() => (window.addEventListener('focus', onFocus), void refreshSpecStale()));
 onBeforeUnmount(() => window.removeEventListener('focus', onFocus));
-watch(() => workspace.value?.id, () => (void refreshSpecStale(), void refreshMocks()));
+watch(() => workspace.value?.id, () => (void refreshSpecStale(), void refreshMocks(), void refreshDevcatzLinks()));
+watch(() => workspace.value?.items.filter((i) => i.kind === 'collection').length, () => void refreshDevcatzLinks());
+onMounted(() => void refreshDevcatzLinks());
 onMounted(() => void refreshMocks());
 
 // ---------------------------------------------------------------- context menu
@@ -615,6 +633,16 @@ const SORTS: { id: SidebarLayout['sortBy']; label: string }[] = [
             </ul>
           </details>
         </li>
+        <li v-if="devcatzInstalled">
+          <details>
+            <summary>DevCatz</summary>
+            <ul>
+              <li v-if="devcatzLinks[menu.item.id]" class="menu-title max-w-48 truncate normal-case" :title="devcatzLinks[menu.item.id].site ?? ''">{{ devcatzLinks[menu.item.id].here ? `${devcatzLinks[menu.item.id].site}${devcatzLinks[menu.item.id].app ? ` · ${devcatzLinks[menu.item.id].app}` : ''}` : 'Site not on this computer' }}</li>
+              <li><button :disabled="readOnly" @click="run((i) => (linking = i))">{{ devcatzLinks[menu.item.id] ? 'Link to another site…' : 'Link to a DevCatz site…' }}</button></li>
+              <li v-if="devcatzLinks[menu.item.id]"><button :disabled="readOnly" @click="run(unlinkDevcatz)">Unlink</button></li>
+            </ul>
+          </details>
+        </li>
         <li><button @click="run((i) => (copying = i))">Copy to workspace…</button></li>
         <li><button @click="run(exportIt)">Export…</button></li>
       </template>
@@ -693,6 +721,7 @@ const SORTS: { id: SidebarLayout['sortBy']; label: string }[] = [
       <div class="modal-backdrop" @click="exporting = null" />
     </dialog>
     <CopyCollectionDialog v-if="copying" :collection="copying" @close="copying = null" />
+    <DevcatzLinkDialog v-if="linking" :collection="linking" @close="linking = null" />
     <MockDialog v-if="mocking" :collection="mocking" @close="mocking = null" />
     <SpecReviewDialog v-if="reviewing" :review="reviewing.review" :name="reviewing.name" :workspace-id="workspace!.id" @close="reviewing = null" @done="specDone" />
     <RunnerDialog v-if="running" :root="running" @close="running = null" />

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { activeTab, activeTabId, mcatzpAsk, mcatzpUpdate, mcatzpCommand, mcatzpInstalling, mcatzpOpen, mcatzpRefresh, mcatzpRun, runnerRunning, mcatzpTabResponse, mcatzpTabs, plain, notify, selectWorkspace, aiOn, askOpen, connectRequest as connect, goSection, importRequest, loadHistory, onWsEvent, presence, loadSettings, loadWorkspaces, reloadWorkspace, restoreTabs, section, sendTab, settings, settingsTab, syncTabsWithWorkspace, updateState, updateOpen, updateOpenAuto, reportOpen, uninstallOpen, tabs, toast, workspace, type Section } from './state';
+import { activeTab, activeTabId, mcatzpAsk, mcatzpUpdate, mcatzpCommand, mcatzpInstalling, mcatzpOpen, mcatzpRefresh, mcatzpRun, runnerRunning, mcatzpTabResponse, mcatzpTabs, plain, notify, selectWorkspace, aiOn, askOpen, connectRequest as connect, goSection, importRequest, loadHistory, onWsEvent, presence, loadSettings, loadWorkspaces, reloadWorkspace, restoreTabs, section, sendTab, settings, settingsTab, syncTabsWithWorkspace, updateState, updateOpen, collectionAsk, workspaces, attempt, refreshMocks, setWorkspace, updateOpenAuto, reportOpen, uninstallOpen, tabs, toast, workspace, type Section } from './state';
 import { backIndex, backList, canBack, canForward, forwardList, goBack, goForward, goTo, navApply, navPrune, navVisit, type NavEntry } from './nav';
 import PopMenu from './components/PopMenu.vue';
 import UpdateDialog from './components/UpdateDialog.vue';
@@ -19,6 +19,7 @@ import TeamSection from './components/TeamSection.vue';
 import SettingsSection from './components/SettingsSection.vue';
 import ConnectDialog from './components/ConnectDialog.vue';
 import AskDialCatz from './components/AskDialCatz.vue';
+import ConfirmDialog from './components/ConfirmDialog.vue';
 import askMark from './assets/logos/ask-catzoid.svg';
 import { isMac, keyLabel, modKey } from './platform';
 import { currentOS } from '@shared/platform';
@@ -68,6 +69,31 @@ function openSupport() {
 }
 
 const offs: (() => void)[] = [];
+
+// ---- DevCatz's "Create mock server" (#94): the collection that follows the site's spec, or an import asked first.
+const mockImportAsk = ref<{ siteId: string; spec: string; site: string } | null>(null);
+const mockImporting = ref(false);
+async function startSiteMock(workspaceId: string, collectionId: string) {
+  if (workspace.value?.id !== workspaceId) await selectWorkspace(workspaceId);
+  goSection('requests');
+  // Imported a moment ago (or by a client): what is on screen may be older than the workspace.
+  if (!workspace.value?.items.some((i) => i.id === collectionId)) await reloadWorkspace();
+  await attempt(() => api.mockStart(workspaceId, collectionId));
+  await refreshMocks();
+  // Started or not, the panel says where it stands (a collection with no responses from its spec explains how to get them).
+  collectionAsk.value = { id: collectionId, mock: true };
+}
+async function importSiteMock() {
+  const a = mockImportAsk.value!;
+  if (!workspace.value) return;
+  mockImporting.value = true;
+  const r = await attempt(() => api.mockSiteImport(workspace.value!.id, a.siteId, a.spec));
+  mockImporting.value = false;
+  mockImportAsk.value = null;
+  if (!r) return;
+  setWorkspace(r.workspace);
+  await startSiteMock(r.workspace.id, r.collectionId);
+}
 function onCommand(cmd: string) {
   const goReq = () => goSection('requests');
   switch (cmd) {
@@ -259,6 +285,27 @@ onMounted(async () => {
   mcatzpAsk.value = await api.mcatzpPending();
   // "Open in DialCatz" from DoCatz (an API container's page): the import on that project, that service as baseUrl.
   offs.push(api.onDoCatz(({ project, service }) => (importRequest.value = { tab: 'docatz', project, service })));
+  offs.push(
+    api.onMockSpec(async ({ siteId, spec, app }) => {
+      const r = await attempt(() => api.mockSiteSpec(siteId, spec, app));
+      if (!r) return;
+      if (r.found) return void startSiteMock(r.found.workspaceId, r.found.collectionId);
+      mockImportAsk.value = { siteId, spec, site: r.site };
+    }),
+  );
+  offs.push(
+    api.onOpenCollection(async ({ workspaceId, collectionId, mock }) => {
+      if (!workspaces.value.some((w) => w.id === workspaceId)) await loadWorkspaces();
+      if (!workspaces.value.some((w) => w.id === workspaceId)) return notify('warning', 'That workspace is not on this computer');
+      if (workspace.value?.id !== workspaceId) await selectWorkspace(workspaceId);
+      const has = () => workspace.value?.items.some((i) => i.id === collectionId && i.kind === 'collection');
+      // Made a moment ago (an import, a client): what is on screen may be older than the workspace.
+      if (!has()) await reloadWorkspace();
+      if (!has()) return notify('warning', 'That collection is gone');
+      goSection('requests');
+      collectionAsk.value = { id: collectionId, mock };
+    }),
+  );
   offs.push(api.onPresence((p) => (presence.value = { ...presence.value, [p.workspaceId]: p.presence })));
   offs.push(api.onUpdate((st) => (updateState.value = st)));
   updateState.value = await api.updateState();
@@ -321,6 +368,15 @@ onBeforeUnmount(() => offs.forEach((f) => f()));
     <UpdateDialog v-if="updateOpen" @close="updateOpen = false" />
     <ReportDialog v-if="reportOpen" :kind="reportOpen" @close="reportOpen = null" />
     <WelcomeDialog v-if="ready" />
+    <ConfirmDialog
+      v-if="mockImportAsk"
+      title="Make a mock server?"
+      :text="`DevCatz asks for a mock of ${mockImportAsk.spec} in ${mockImportAsk.site}. No collection follows that file yet: DialCatz imports it into “${workspace?.name ?? 'this workspace'}” as a collection that keeps following it, then starts its mock.`"
+      confirm="Import and start"
+      :busy="mockImporting"
+      @ok="importSiteMock"
+      @cancel="mockImportAsk = null"
+    />
     <SupportNudge v-if="ready" />
     <UpdatePrompt v-if="ready" />
     <McatzpPairDialog />

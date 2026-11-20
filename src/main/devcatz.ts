@@ -36,6 +36,8 @@ interface Bridge {
     apps?: { dir: string; name: string; framework: string; kind: string; url: string | null }[];
     openapi?: DevCatzOpenApi[];
   }[];
+  /** DialCatz's mock servers DevCatz serves under a domain of their own (#94). */
+  dialcatzMocks?: { workspaceId: string; collectionId: string; domain: string; url: string }[];
 }
 
 function readJson<T>(file: string): T | null {
@@ -79,6 +81,42 @@ function siteFramework(path: string, apps: DevCatzApp[]): DevCatzSite['framework
 /** Where a site keeps its DialCatz workspace in its own repository (a folder workspace, for Git). */
 export const workspaceFolder = (sitePath: string) => join(sitePath, 'dialcatz');
 const hasWorkspace = (sitePath: string) => existsSync(join(workspaceFolder(sitePath), 'dialcatz.yml'));
+
+/**
+ * The domain DevCatz gives a DialCatz mock (#94: `<slug>.dialcatz.<tld>`), and the devcatz:// link to its page there;
+ * null without DevCatz, or before it has picked the mock up.
+ */
+export function mockDomain(workspaceId: string, collectionId: string): { domain: string; url: string; link: string } | null {
+  const m = readJson<Bridge>('bridge.json')?.dialcatzMocks?.find((x) => x.workspaceId === workspaceId && x.collectionId === collectionId);
+  if (!m || !/^[a-z0-9.-]{1,253}$/i.test(m.domain) || !/^https?:\/\//.test(m.url)) return null;
+  return { domain: m.domain, url: m.url, link: `devcatz://mocks?${new URLSearchParams({ workspace: workspaceId, collection: collectionId })}` };
+}
+
+/**
+ * Every port DevCatz has handed out or uses (#94: a mock never takes one): its sites' ports (`ports`, 4100 and up),
+ * databases, connections, its HTTP / HTTPS / mail ports, storage … — any number under a key with "port" in its name
+ * in its config.json. Empty without DevCatz.
+ */
+export function usedPorts(): Set<number> {
+  const out = new Set<number>();
+  const add = (v: unknown) => {
+    const n = typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : v;
+    if (typeof n === 'number' && Number.isInteger(n) && n > 0 && n < 65536) out.add(n);
+  };
+  const walk = (o: unknown, depth: number) => {
+    if (!o || typeof o !== 'object' || depth > 8) return;
+    if (Array.isArray(o)) return o.forEach((x) => walk(x, depth + 1));
+    for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
+      if (/port/i.test(k) && !/support/i.test(k)) {
+        if (v && typeof v === 'object' && !Array.isArray(v)) Object.values(v).forEach(add);
+        else add(v);
+      }
+      walk(v, depth + 1);
+    }
+  };
+  walk(readJson<unknown>('config.json'), 0);
+  return out;
+}
 
 export function installed(): boolean {
   return existsSync(join(DATA, 'bridge.json')) || existsSync(join(DATA, 'config.json'));

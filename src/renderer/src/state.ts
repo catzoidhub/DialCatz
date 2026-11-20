@@ -53,6 +53,20 @@ export const workspace = ref<Workspace | null>(null);
 export const specStale = ref<Set<string>>(new Set());
 /** #92: the collection whose spec review is asked for (the tree opens the dialog). */
 export const specAsk = ref<string | null>(null);
+/** A collection a link asked to show (#94: DevCatz's "Open in DialCatz"); `mock` opens its Mock server panel. */
+export const collectionAsk = ref<{ id: string; mock: boolean } | null>(null);
+/** Collections paired with a DevCatz site (devcatzlink.ts): the site's name and app, and whether it is on this computer. */
+export const devcatzLinks = ref<Record<string, { site: string | null; app: string; here: boolean }>>({});
+/** Link / Unlink and the tree's DevCatz mark show only when DevCatz is installed here. */
+export const devcatzInstalled = ref(false);
+export async function refreshDevcatzLinks(): Promise<void> {
+  const w = workspace.value;
+  if (!w) return;
+  devcatzInstalled.value = (await api.devcatzSites().catch(() => null))?.installed === true;
+  if (!devcatzInstalled.value) return void (devcatzLinks.value = {});
+  const links = await api.devcatzLinks(w.id).catch(() => null);
+  if (links && workspace.value?.id === w.id) devcatzLinks.value = links;
+}
 /** #94: mock servers running now (the tree marks their collections). */
 export const mocks = ref<MockState[]>([]);
 export async function refreshMocks(): Promise<void> {

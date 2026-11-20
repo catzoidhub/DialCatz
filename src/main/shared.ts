@@ -55,6 +55,8 @@ export interface Shared {
   ai?: SharedAi;
   /** Git hosting accounts, shared by the Catzoid apps (tokens in the Keychain item "Catzoid Git"). */
   git?: { accounts?: GitAccount[] };
+  /** The browser web links open in (Settings → General → Open with): its .app / .exe / .desktop file; '' = system default. */
+  browser?: string;
   /** The Catzoid site address the apps build their links from and update from (Catzoid TODO #50); catzoid.com when unset. */
   site?: string;
   updatedBy?: string;

@@ -20,6 +20,9 @@ export interface BridgeMock {
   url: string;
   port: number;
   startedAt: number;
+  /** From a DevCatz site's spec file: the site's id and the file's path in it, as DevCatz sent it (forward slashes). */
+  siteId?: string;
+  specFile?: string;
 }
 
 let mcatzpEntry: BridgeEntry | undefined;

@@ -4,6 +4,7 @@ import { AUTO_HEADERS } from '@shared/request';
 import { cleanClients } from './mcatzp/clients';
 import { store } from './store';
 import { readShared, setSharedKey, sharedKey, watchShared, writeShared } from './shared';
+import { validBrowser } from './browsers';
 
 /**
  * The Settings page's values. The theme and the AI connection (provider, models, addresses, API keys) are shared
@@ -49,6 +50,7 @@ function local(): Stored {
   const r = { ...REQUEST_DEFAULTS, ...(s.requests ?? {}) };
   return {
     theme: THEMES.includes(s.theme as Theme) ? (s.theme as Theme) : 'system',
+    browser: typeof s.browser === 'string' ? s.browser : '',
     ai: { enabled: ai.enabled === true, off: Array.isArray(ai.off) ? ai.off.filter((f): f is AiFeature => FEATURES.includes(f)) : [], provider: PROVIDERS.includes(ai.provider as AiProvider) ? (ai.provider as AiProvider) : 'anthropic', models: ai.models ?? {}, baseUrls: ai.baseUrls ?? {} },
     requests: { timeoutMs: Number(r.timeoutMs) || REQUEST_DEFAULTS.timeoutMs, followRedirects: r.followRedirects !== false, insecure: r.insecure === true, autoHeaders: r.autoHeaders && typeof r.autoHeaders === 'object' ? r.autoHeaders : {} },
     mcatzp: mcatzpOf(s.mcatzp),
@@ -64,6 +66,7 @@ function stored(): Stored {
   return {
     ...s,
     theme: sh.theme && THEMES.includes(sh.theme) ? sh.theme : s.theme,
+    browser: typeof sh.browser === 'string' ? sh.browser : s.browser,
     ai: { enabled: s.ai.enabled, off: s.ai.off, provider: PROVIDERS.includes(provider) ? provider : 'anthropic', models: sh.ai?.models ?? s.ai.models, baseUrls: sh.ai?.baseUrls ?? s.ai.baseUrls },
   };
 }
@@ -79,6 +82,11 @@ export function setSettings(patch: DialCatzSettingsPatch): DialCatzSettings {
   if (patch.theme !== undefined) {
     if (!THEMES.includes(patch.theme)) throw new Error(`Unknown theme ${patch.theme}`);
     s.theme = patch.theme;
+  }
+  if (patch.browser !== undefined) {
+    const b = String(patch.browser);
+    if (!validBrowser(b)) throw new Error('That browser is not installed here');
+    s.browser = b;
   }
   const ai = patch.ai;
   if (ai) {
@@ -123,7 +131,7 @@ export function setSettings(patch: DialCatzSettingsPatch): DialCatzSettings {
   if (sp) s.support = supportOf({ ...s.support, ...(sp.later !== undefined ? { later: sp.later } : {}), ...(sp.laterAt !== undefined ? { laterAt: sp.laterAt } : {}), ...(sp.off !== undefined ? { off: sp.off } : {}), ...(sp.replySeen !== undefined ? { replySeen: sp.replySeen } : {}) });
   store.setExtra(KEY, s);
   const conn = ai && (ai.provider !== undefined || ai.models !== undefined || ai.baseUrls !== undefined);
-  if (patch.theme !== undefined || conn) writeShared({ ...(patch.theme !== undefined ? { theme: s.theme } : {}), ...(conn ? { ai: { provider: s.ai.provider, models: s.ai.models, baseUrls: s.ai.baseUrls } } : {}) });
+  if (patch.theme !== undefined || patch.browser !== undefined || conn) writeShared({ ...(patch.theme !== undefined ? { theme: s.theme } : {}), ...(patch.browser !== undefined ? { browser: s.browser } : {}), ...(conn ? { ai: { provider: s.ai.provider, models: s.ai.models, baseUrls: s.ai.baseUrls } } : {}) });
   nativeTheme.themeSource = s.theme;
   return settings();
 }

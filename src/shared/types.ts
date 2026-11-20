@@ -106,6 +106,8 @@ export interface TreeItem {
    * taken in, so a changed file or URL is noticed and its changes are offered for review.
    */
   spec?: SpecLink;
+  /** Collections: the DevCatz site (and app) it is paired with; see main/devcatzlink.ts. */
+  devcatz?: DevcatzLink;
   /** Requests made from a spec (#92): the request as the spec made it, so an update can tell the user's edits apart. */
   specBase?: SpecBase;
   /** Requests made from a spec (#93): the responses the spec describes, to check a response against. */
@@ -119,6 +121,17 @@ export interface TreeItem {
   dirty?: boolean;
   updatedBy?: string;
   updatedAt?: string;
+}
+
+/** A collection paired with a DevCatz site's app (main/devcatzlink.ts). */
+export interface DevcatzLink {
+  siteId: string;
+  /** The app's folder in the site ('' = the site itself). */
+  app: string;
+  /** The OpenAPI file DevCatz lists for that app, relative to the site (forward slashes). */
+  specFile?: string;
+  /** The site's Git remote ("github.com/owner/repo"), to find the site on a teammate's computer. */
+  repo?: string;
 }
 
 /** Where a collection's spec is read from (#92). */
@@ -164,6 +177,11 @@ export interface MockState {
   routes: number;
   /** The latest calls, newest first. */
   hits: { at: number; method: string; path: string; status: number; route: string | null }[];
+  /** The collection follows a spec file inside a DevCatz site: that site, and the file's path in it (forward slashes). */
+  siteId?: string;
+  specFile?: string;
+  /** DevCatz serves it under a domain of its own (DevCatz installed and has picked it up): that domain and its page. */
+  devcatz?: { domain: string; url: string; link: string };
 }
 
 /** One difference between a collection and its spec (#92). `key` is the route ("GET /users/:"). */
@@ -505,14 +523,30 @@ export interface RequestDefaults {
   autoHeaders: Record<string, boolean>;
 }
 
+/** An installed web browser (Settings → General → Open with; shared with the Catzoid apps). */
+export interface BrowserInfo {
+  name: string;
+  /** The app bundle (/Applications/Google Chrome.app), the program (.exe) or the .desktop file. */
+  path: string;
+  /** Its app icon as a data URL ('' when the OS gave none). */
+  icon: string;
+}
+export interface BrowsersState {
+  list: BrowserInfo[];
+  /** What the OS opens https links with (null when it could not be read). */
+  systemDefault: BrowserInfo | null;
+}
+
 export interface DialCatzSettings {
   theme: Theme;
+  /** The browser web links open in ('' = the system default); shared with the Catzoid apps. */
+  browser: string;
   ai: AiSettings;
   requests: RequestDefaults;
   mcatzp: McatzpSettings;
   support: SupportState;
 }
-export type DialCatzSettingsPatch = { theme?: Theme; ai?: Partial<Omit<AiSettings, 'keys'>>; requests?: Partial<RequestDefaults>; mcatzp?: Partial<Omit<McatzpSettings, 'clients'>>; support?: Partial<Pick<SupportState, 'later' | 'laterAt' | 'off' | 'replySeen'>> };
+export type DialCatzSettingsPatch = { theme?: Theme; browser?: string; ai?: Partial<Omit<AiSettings, 'keys'>>; requests?: Partial<RequestDefaults>; mcatzp?: Partial<Omit<McatzpSettings, 'clients'>>; support?: Partial<Pick<SupportState, 'later' | 'laterAt' | 'off' | 'replySeen'>> };
 
 /**
  * Support Catzoid (Catzoid #94): when this DialCatz first ran with the feature (the corner card waits 7 days after
@@ -1227,11 +1261,29 @@ export interface DialCatzApi {
   specUnfollow(workspaceId: string, collectionId: string): Promise<Workspace>;
   /** #92: collections whose spec file or URL changed since they last took it in. */
   specStale(workspaceId: string): Promise<string[]>;
+  /** The browsers installed here and the system default (looked at again each call). */
+  browsers(): Promise<BrowsersState>;
   /** #94: mock servers running now. */
   mockList(): Promise<MockState[]>;
   /** #94: starts (or returns) the collection's mock server on 127.0.0.1; `port` 0 or left out: the one used last, else a free one. */
   mockStart(workspaceId: string, collectionId: string, port?: number): Promise<MockState>;
   mockStop(workspaceId: string, collectionId: string): Promise<void>;
+  /**
+   * #94, DevCatz's "Create mock server" (dialcatz://mock?site=&spec=): the site's spec file, and the collection that
+   * already follows it in any workspace on this computer (null: none yet, the window asks before importing).
+   */
+  mockSiteSpec(siteId: string, spec: string, app?: string): Promise<{ site: string; file: string; found: { workspaceId: string; collectionId: string; name: string } | null }>;
+  /**
+   * The DevCatz pairing of each collection in a workspace (main/devcatzlink.ts): the site's name and app, and whether
+   * that site is on this computer (null: not paired).
+   */
+  devcatzLinks(workspaceId: string): Promise<Record<string, { site: string | null; app: string; here: boolean }>>;
+  /** Pairs a collection with a DevCatz site's app (siteId null: unpairs it). */
+  devcatzLinkSet(workspaceId: string, collectionId: string, siteId: string | null, app: string): Promise<Workspace>;
+  /** #94: imports the site's spec file as a collection that follows it. */
+  mockSiteImport(workspaceId: string, siteId: string, spec: string): Promise<{ workspace: Workspace; collectionId: string }>;
+  /** #94: the mock's page in DevCatz (devcatz://mocks?workspace=&collection=). */
+  mockOpenInDevCatz(workspaceId: string, collectionId: string): Promise<void>;
   /** #94: an environment "Mock · <collection>" whose baseUrl is the mock, made active. */
   mockEnvironment(workspaceId: string, collectionId: string): Promise<Workspace>;
   /** Picks a file and imports it like importText (null: cancelled). */
@@ -1401,7 +1453,7 @@ export const API_METHODS = [
   'workspaces', 'workspace', 'createWorkspace', 'renameWorkspace', 'deleteWorkspace', 'openFolderWorkspace', 'useFolder', 'stopUsingFolder', 'revealFolder', 'folderGitStatus', 'folderGitDiff', 'folderGitCommit', 'folderGitPull', 'folderGitPush', 'folderGitInit', 'folderGitAbortMerge',
   'gitState', 'gitInstall', 'gitUpdateCheck', 'gitUpdate', 'gitWatch', 'gitRepoAdd', 'gitRepoRemove', 'gitRepoLog', 'gitRevealRepo', 'gitOpenWorkspace', 'gitPickFolder', 'gitStatus', 'gitInit', 'gitDiff', 'gitStage', 'gitUnstage', 'gitDiscard', 'gitCommit', 'gitSync', 'gitCancel', 'gitLog', 'gitShow', 'gitBranches', 'gitBranch', 'gitStashes', 'gitStash', 'gitTags', 'gitTag', 'gitOperation', 'gitSquash', 'gitCherryPick', 'gitRevert', 'gitReset', 'gitRestoreFile', 'gitOpenFile', 'gitIgnoreSuggestions', 'gitIgnoreAdd', 'gitignoreRead', 'gitignoreSave', 'gitSetIdentity', 'gitAddRemote', 'gitWorktrees', 'gitWorktreeAdd', 'gitWorktreeRemove', 'gitWorktreePrune', 'gitPulls', 'gitCreatePull', 'gitCheckoutPull', 'gitAddAccount', 'gitRemoveAccount', 'gitRepos', 'gitSshKeys', 'gitSshGenerate', 'gitSshAddToAccount', 'gitClone', 'gitCancelClone', 'gitDismissClone', 'gitAccounts', 'gitCreateRemoteRepo', 'gitDevCatzAccounts', 'gitImportDevCatz', 'folderGitConnect', 'createFolderWorkspace', 'pickFolder', 'teamAdminUrl', 'appMenu', 'menuShortcuts', 'menuKey',
   'saveItems', 'deleteItems',
-  'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'specCheck', 'specApply', 'specFollow', 'specUnfollow', 'specStale', 'mockList', 'mockStart', 'mockStop', 'mockEnvironment', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'importedBefore', 'docatzProjects', 'docatzImport', 'docatzOpen', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection',
+  'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'specCheck', 'specApply', 'specFollow', 'specUnfollow', 'specStale', 'browsers', 'mockList', 'mockStart', 'mockStop', 'mockEnvironment', 'mockSiteSpec', 'mockSiteImport', 'devcatzLinks', 'devcatzLinkSet', 'mockOpenInDevCatz', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'importedBefore', 'docatzProjects', 'docatzImport', 'docatzOpen', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection',
   'aiModels', 'aiTest', 'aiAsk', 'aiExplain', 'aiTests', 'aiBody', 'aiCancel',
   'send', 'pickFile', 'pickDataFile', 'saveText', 'cancel', 'wsConnect', 'wsSend', 'wsClose', 'saveResponse', 'history', 'addHistory', 'clearHistory',
   'servers', 'probeServer', 'connectWithToken', 'connectWithCode', 'refreshServer', 'disconnectServer', 'subscribeWorkspace', 'setPresence', 'presence', 'syncWorkspace', 'resolveConflict',

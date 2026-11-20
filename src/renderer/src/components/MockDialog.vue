@@ -4,6 +4,7 @@ import type { TreeItem } from '@shared/types';
 import { attempt, mocks, notify, refreshMocks, setWorkspace, workspace } from '../state';
 import CatMood from './CatMood.vue';
 import Icon from './Icon.vue';
+import devcatzLogo from '../assets/logos/devcatz.svg';
 
 /**
  * A mock server made from a collection's spec (#94): a stand-in for the API on this computer, so a frontend can work
@@ -56,10 +57,19 @@ async function useIt() {
   const pinned = props.collection.environmentId ? w.environments.find((e) => e.id === props.collection.environmentId)?.name : null;
   notify('success', pinned ? `“Mock · ${props.collection.name}” is ready. This collection uses “${pinned}”: pick the mock in its Settings to send there.` : `Requests now go to the mock (environment “Mock · ${props.collection.name}”)`);
 }
-async function copy() {
-  await navigator.clipboard.writeText(m.value!.url);
+async function copy(text = m.value!.url) {
+  await navigator.clipboard.writeText(text);
   notify('success', 'Address copied');
 }
+const openDevCatz = () => attempt(() => api.mockOpenInDevCatz(ws.value, props.collection.id));
+/** Addresses open in the browser chosen in Settings → Open with (shared with the Catzoid apps). */
+const openWeb = (url: string) => void attempt(() => api.openUrl(url));
+const mockEnvName = computed(() => `Mock · ${props.collection.name}`);
+const usingMock = computed(() => {
+  const w = workspace.value;
+  const envId = props.collection.environmentId ?? w?.activeEnvironmentId;
+  return !!w?.environments.find((e) => e.id === envId && e.name === mockEnvName.value);
+});
 
 const ago = (t: number) => {
   const s = Math.round((Date.now() - t) / 1000);
@@ -111,17 +121,36 @@ onBeforeUnmount(() => clearInterval(timer));
           <div class="flex items-center gap-2">
             <span class="mock-live" />
             <span class="text-sm font-medium">Running</span>
-            <span class="text-xs opacity-60">· answers {{ m.routes }} {{ m.routes === 1 ? 'request' : 'requests' }}</span>
+            <span class="min-w-0 flex-1 truncate text-xs opacity-60">· answers {{ m.routes }} {{ m.routes === 1 ? 'request' : 'requests' }}</span>
+            <button class="btn btn-ghost btn-xs gap-1 text-error" :disabled="busy" title="Stop the mock server" @click="stop"><Icon name="stop" class="size-3.5" />Stop server</button>
           </div>
           <div class="flex items-center gap-2">
-            <code class="selectable min-w-0 flex-1 truncate rounded-lg bg-base-200 px-3 py-2 font-mono text-sm">{{ m.url }}</code>
-            <button class="btn btn-ghost btn-sm" title="Copy the address" @click="copy"><Icon name="copy" class="size-4" /></button>
+            <button class="mock-url" :title="`Open ${m.url} in your browser`" @click="openWeb(m.url)"><span class="truncate">{{ m.url }}</span><Icon name="link" class="size-3.5 shrink-0 opacity-50" /></button>
+            <button class="btn btn-ghost btn-sm" title="Copy the address" @click="copy()"><Icon name="copy" class="size-4" /></button>
           </div>
-          <div class="flex flex-wrap gap-2">
-            <button class="btn btn-primary btn-sm" @click="useIt">Use in DialCatz</button>
-            <button class="btn btn-ghost btn-sm" :disabled="busy" @click="stop">Stop</button>
+          <!-- DevCatz installed and serving it: its own domain (HTTP and HTTPS), and its page there. -->
+          <div v-if="m.devcatz" class="mock-domain space-y-2">
+            <div class="flex items-center gap-2">
+              <img :src="devcatzLogo" alt="" class="size-5 shrink-0 rounded" />
+              <span class="min-w-0 flex-1 text-xs opacity-70">Its own domain, from DevCatz</span>
+              <button class="btn btn-sm gap-1.5" @click="openDevCatz"><img :src="devcatzLogo" alt="" class="size-4" />Open in DevCatz</button>
+            </div>
+            <div class="flex items-center gap-2">
+              <button class="mock-url" :title="`Open ${m.devcatz.url} in your browser`" @click="openWeb(m.devcatz.url)"><span class="truncate">{{ m.devcatz.url }}</span><Icon name="link" class="size-3.5 shrink-0 opacity-50" /></button>
+              <button class="btn btn-ghost btn-sm" title="Copy the domain" @click="copy(m.devcatz.url)"><Icon name="copy" class="size-4" /></button>
+            </div>
           </div>
-          <p class="text-xs opacity-60">Point your frontend at this address, or choose <b>Use in DialCatz</b> to send this collection's requests here. Add the header <code>Prefer: code=404</code> to get another response the spec describes.</p>
+          <p class="text-xs opacity-60">Point your frontend at this address. Add the header <code>Prefer: code=404</code> to get another response the spec describes.</p>
+        </div>
+
+        <!-- Try it from DialCatz itself: the collection's requests go to the mock through an environment. -->
+        <div class="mock-card flex items-center gap-3">
+          <span class="min-w-0 flex-1">
+            <span class="block text-sm font-medium">Try it in DialCatz</span>
+            <span class="block text-xs opacity-60">{{ usingMock ? `This collection's requests go to the mock now (environment “${mockEnvName}”).` : `Switches to the environment “${mockEnvName}”, so this collection's requests go to the mock.` }}</span>
+          </span>
+          <span v-if="usingMock" class="badge badge-soft badge-success shrink-0">In use</span>
+          <button v-else class="btn btn-primary btn-sm shrink-0" @click="useIt">Send requests here</button>
         </div>
 
         <section class="min-h-0 space-y-1.5 overflow-y-auto">
@@ -151,6 +180,29 @@ onBeforeUnmount(() => clearInterval(timer));
   border-radius: 0.875rem;
   border: 1px solid oklch(from var(--color-base-content) l c h / 0.08);
   background: oklch(from var(--color-base-content) l c h / 0.025);
+}
+.mock-domain {
+  padding: 0.625rem 0.75rem;
+  border-radius: 0.625rem;
+  background: oklch(from var(--color-primary) l c h / 0.07);
+}
+.mock-url {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.875rem;
+  text-align: left;
+  background: var(--color-base-200);
+  transition: background 0.12s;
+}
+.mock-url:hover {
+  background: oklch(from var(--color-primary) l c h / 0.12);
+  color: var(--primary-ink, var(--color-primary));
 }
 .mock-live {
   width: 8px;

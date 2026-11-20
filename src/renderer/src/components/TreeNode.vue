@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { TreeItem } from '@shared/types';
-import { activeTab, mocks, readOnly, specAsk, specStale } from '../state';
+import { activeTab, devcatzLinks, mocks, readOnly, specAsk, specStale } from '../state';
 import Icon from './Icon.vue';
 
 /** Where a dragged row would land relative to this one. */
@@ -34,6 +34,8 @@ function matches(i: TreeItem): boolean {
   return props.items.some((c) => c.parentId === i.id && matches(c));
 }
 const visible = computed(() => matches(props.item));
+/** Paired with a DevCatz site (only listed while DevCatz is installed). */
+const link = computed(() => (props.item.kind === 'collection' ? devcatzLinks.value[props.item.id] : undefined));
 const method = computed(() => props.item.request?.method ?? 'GET');
 const short: Record<string, string> = { DELETE: 'DEL', OPTIONS: 'OPT', PATCH: 'PATCH' };
 
@@ -73,7 +75,8 @@ const dropClass = computed(() => (props.drop?.id === props.item.id ? `is-drop-${
       <template v-else>
         <input v-if="ticks" type="checkbox" class="checkbox checkbox-xs checkbox-primary" :checked="ticked" :aria-label="`Select ${item.name}`" @click.stop="emit('select', item)" />
         <Icon v-else name="chevron" class="tree-chev size-3.5" :class="{ 'is-open': isOpen }" />
-        <Icon :name="item.kind === 'collection' ? 'collection' : 'folder'" class="size-4 shrink-0 opacity-70" />
+        <span v-if="link" class="tree-icon-wrap grid shrink-0 place-items-center" :class="{ 'is-away': !link.here }" :title="link.here ? `Linked to DevCatz · ${link.site}${link.app ? ` (${link.app})` : ''}` : 'Linked to a DevCatz site that is not on this computer'"><Icon name="collection" class="tree-icon size-4" :class="{ 'is-devcatz': link.here }" /></span>
+        <Icon v-else :name="item.kind === 'collection' ? 'collection' : 'folder'" class="size-4 shrink-0 opacity-70" />
       </template>
       <span class="truncate">{{ item.name }}</span>
       <button class="tree-star-btn" :class="{ 'is-on': starred }" :title="starred ? 'Remove from favourites' : 'Add to favourites'" @click.stop="emit('star', item)"><Icon name="star" class="size-3.5" /></button>

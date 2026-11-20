@@ -350,6 +350,15 @@ export function changeActions(api: DialCatzApi, scopes: Scopes, command: WindowC
       await api.mockStop(w.id, collectionOf(w, a.collection).id);
       return done({ stopped: true });
     }),
+    asked('link_devcatz_site', 'Pair with a DevCatz site', "Pairs a collection with a DevCatz site's app, so importing the site's routes, DevCatz's Open in DialCatz and Create mock server all find it (site: its id from list_devcatz_sites; leave site out to unpair).", { workspace: WORKSPACE, collection: COLLECTION, site: S("The site's id (list_devcatz_sites); left out: unpair."), app: S("The app's folder in the site ('' or left out: the site's API app).", 200) }, ['workspace', 'collection'], async (a) => {
+      const w = await writeOf(a.workspace);
+      const c = collectionOf(w, a.collection);
+      return q(a.site ? `Pair ${c.name} with a DevCatz site?` : `Unpair ${c.name} from DevCatz?`, [...fact('Site', a.site ?? null), ...fact('App', a.app ?? null)], { workspaceId: w.id, section: 'requests' });
+    }, async (a) => {
+      const w = await writeOf(a.workspace);
+      await api.devcatzLinkSet(w.id, collectionOf(w, a.collection).id, a.site ? String(a.site) : null, String(a.app ?? ''));
+      return done({});
+    }),
     asked('import_text', 'Import text', 'Text as a new collection: a Postman collection, an OpenAPI / Swagger document (JSON or YAML), a DialCatz export or a cURL command.', { workspace: WORKSPACE, text: S('The text.', 5_000_000) }, ['workspace', 'text'], async (a) => {
       const w = await writeOf(a.workspace);
       return q(`Import this into ${w.name}?`, [{ label: 'Text', value: short(maskText(String(a.text), await secrets()), 300) }], { workspaceId: w.id, section: 'requests' });
