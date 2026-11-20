@@ -27,8 +27,10 @@
     "@anthropic-ai/sdk": "^1.1.0",
     "@catzoid/mcatzp-host": "^1.0.5",
     "@catzoid/mcatzp-protocol": "^1.0.5",
+    "@grpc/grpc-js": "1.14.7",
     "ajv": "^8.17.1",
     "electron-updater": "6.8.10",
+    "protobufjs": "8.8.1",
     "yaml": "2"
   },
   "devDependencies": {

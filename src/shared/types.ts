@@ -24,7 +24,7 @@ export interface KeyValue {
   src?: string;
 }
 
-export type BodyMode = 'none' | 'json' | 'text' | 'xml' | 'form' | 'multipart' | 'graphql' | 'binary';
+export type BodyMode = 'none' | 'json' | 'text' | 'xml' | 'form' | 'multipart' | 'graphql' | 'jsonrpc' | 'binary';
 export interface RequestBody {
   mode: BodyMode;
   /** json / text / xml, and the GraphQL query. */
@@ -33,6 +33,10 @@ export interface RequestBody {
   fields: KeyValue[];
   /** GraphQL variables (JSON text). */
   variables?: string;
+  /** JSON-RPC (#97): the method (raw holds the params, or the list of calls for a batch), a batch, a notification. */
+  rpcMethod?: string;
+  rpcBatch?: boolean;
+  rpcNotify?: boolean;
   /** binary: the picked file's path (this computer only). */
   file?: string;
 }
@@ -61,6 +65,27 @@ export interface RequestSpec {
   /** Scripts (JavaScript, run in a sandbox): before the request is built, and after the response (tests). */
   preRequest?: string;
   tests?: string;
+  /** ws:// / wss:// requests (#98): speak Socket.IO over the connection (handshake, ping, events by name). */
+  socketIo?: boolean;
+  /**
+   * grpc:// / grpcs:// requests (#98): the service and method, and the .proto files (paths on this computer) when the
+   * server offers no reflection. The message is body.raw (JSON); headers are the call's metadata.
+   */
+  grpc?: { service?: string; method?: string; protoFiles?: string[] };
+}
+
+export interface GrpcMethodInfo {
+  name: string;
+  requestType: string;
+  responseType: string;
+  clientStreaming: boolean;
+  serverStreaming: boolean;
+  /** A request message with every field, to start from (JSON text). */
+  example: string;
+}
+export interface GrpcServiceInfo {
+  name: string;
+  methods: GrpcMethodInfo[];
 }
 
 /** A request as it goes on the wire: variables filled, auth applied, body encoded (shared/request.ts toWire). */
@@ -354,6 +379,12 @@ export interface HttpResponse {
   redirected: boolean;
   /** Was the body cut at the size limit. */
   truncated: boolean;
+  /** An SSE answer that goes on: its events follow live (SendOptions.stream). */
+  streaming?: boolean;
+  /** An SSE answer collected for a few seconds and then closed (runner, clients). */
+  streamCut?: boolean;
+  /** A gRPC answer (#98): its status code and name; status above is the closest HTTP status. */
+  grpc?: { code: number; name: string; details: string; messages: number };
 }
 
 export interface SendResult {
@@ -369,6 +400,25 @@ export interface SendOptions {
   followRedirects?: boolean;
   /** Skip TLS certificate checks (self-signed dev servers). */
   insecure?: boolean;
+  /**
+   * A text/event-stream (SSE) answer: true (request tabs) hands it back at once and its events follow live (onSse);
+   * otherwise (runner, clients) the first SSE_COLLECT_MS of it is collected and returned like any body.
+   */
+  stream?: boolean;
+}
+
+/** One Server-Sent Event, or the end of the stream (a request tab's live SSE answer). */
+export interface SseEvent {
+  token: string;
+  type: 'event' | 'end' | 'error';
+  at: number;
+  /** event: the event's name ('message' when it gives none), data (lines joined), id, retry. */
+  event?: string;
+  data?: string;
+  id?: string;
+  retry?: number;
+  /** end / error: why it stopped. */
+  reason?: string;
 }
 
 /** Something that happened on a WebSocket tab. `in` / `out` are messages; binary ones as base64 (first 4 KB). */
@@ -379,6 +429,8 @@ export interface WsEvent {
   data: string;
   binary?: boolean;
   size?: number;
+  /** Socket.IO (#98): the event's name (in / out), or what the packet was (connect, disconnect, connect error). */
+  event?: string;
 }
 
 export interface HistoryEntry {
@@ -723,6 +775,8 @@ export interface McatzpTabResponse extends McatzpTab {
   scriptLogs: string[];
   scriptError: string | null;
   log: { dir: string; text: string; at: number }[];
+  /** A live SSE answer: whether it is still open and its latest events. */
+  events?: { open: boolean; list: { event: string; data: string; id?: string; at: number }[] };
 }
 
 /** A local site DevCatz runs (read from DevCatz). */
@@ -1380,8 +1434,15 @@ export interface DialCatzApi {
   saveText(suggestedName: string, text: string): Promise<boolean>;
   cancel(token: string): Promise<void>;
   /** WebSocket tabs: connect (handshake headers + subprotocols), send a text message, close. Events: onWs. */
-  wsConnect(token: string, url: string, headers: [string, string][], protocols: string[]): Promise<void>;
-  wsSend(token: string, data: string): Promise<void>;
+  /** #98: what a gRPC server offers (reflection, or the .proto files given). */
+  grpcDescribe(url: string, options: { protoFiles?: string[]; insecure?: boolean; metadata?: [string, string][] }): Promise<{ services: GrpcServiceInfo[]; source: 'reflection' | 'files' }>;
+  /** #98: the user picks .proto files (null: cancelled). */
+  grpcPickProto(): Promise<string[] | null>;
+  /** #98: one gRPC call; the answer comes back as a response (JSON body, metadata and trailers as headers). */
+  grpcCall(request: { url: string; service: string; method: string; message: string; metadata: [string, string][]; protoFiles?: string[]; insecure?: boolean }, token: string): Promise<SendResult>;
+  wsConnect(token: string, url: string, headers: [string, string][], protocols: string[], options?: { socketIo?: boolean }): Promise<void>;
+  /** `event` (Socket.IO): the event name; data is then its args (a JSON list, other JSON, or text). */
+  wsSend(token: string, data: string, event?: string): Promise<void>;
   wsClose(token: string): Promise<void>;
   /** Saves the last response body to a file. */
   saveResponse(token: string, suggestedName: string): Promise<boolean>;
@@ -1487,7 +1548,7 @@ export const API_METHODS = [
   'saveItems', 'deleteItems',
   'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'specCheck', 'specApply', 'specFollow', 'specUnfollow', 'specStale', 'browsers', 'specScanFolder', 'specImportFile', 'mockList', 'mockEnvironmentRestore', 'mockStart', 'mockStop', 'mockEnvironment', 'mockSiteSpec', 'mockSiteImport', 'devcatzLinks', 'devcatzLinkSet', 'mockOpenIn', 'mockServiceSpec', 'docatzLinks', 'docatzLinkSet', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'importedBefore', 'docatzProjects', 'docatzImport', 'docatzOpen', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection',
   'aiModels', 'aiTest', 'aiAsk', 'aiExplain', 'aiTests', 'aiBody', 'aiCancel',
-  'send', 'pickFile', 'pickDataFile', 'saveText', 'cancel', 'wsConnect', 'wsSend', 'wsClose', 'saveResponse', 'history', 'addHistory', 'clearHistory',
+  'send', 'grpcDescribe', 'grpcPickProto', 'grpcCall', 'pickFile', 'pickDataFile', 'saveText', 'cancel', 'wsConnect', 'wsSend', 'wsClose', 'saveResponse', 'history', 'addHistory', 'clearHistory',
   'servers', 'probeServer', 'connectWithToken', 'connectWithCode', 'refreshServer', 'disconnectServer', 'subscribeWorkspace', 'setPresence', 'presence', 'syncWorkspace', 'resolveConflict',
   'openUrl', 'exportWorkspace', 'exportEnvironment', 'importEnvironments', 'dbcatzInfo', 'dbcatzOpen', 'saveDbTarget', 'copyText', 'hostName',
   'updateState', 'updateCheck', 'updateNotes', 'updateDownload', 'updateCancel', 'updateInstall', 'updateSkip', 'updatePrefs', 'setUpdatePrefs', 'ratingSend', 'ratingRefresh', 'setCloseGuard',

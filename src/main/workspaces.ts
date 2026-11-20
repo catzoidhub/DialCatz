@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { emptyEnvLayout, emptyLayout, newRequest, uid, type Environment, type HttpMethod, type SidebarLayout, type EnvLayout, type EnvVariable, type TreeItem, type Workspace, type WorkspaceSummary } from '@shared/types';
-import { dataDir } from './store';
+import { emptyEnvLayout, emptyLayout, newRequest, uid, type Environment, type HttpMethod, type RequestSpec, type SidebarLayout, type EnvLayout, type EnvVariable, type TreeItem, type Workspace, type WorkspaceSummary } from '@shared/types';
+import { dataDir, store } from './store';
 import * as folders from './folders';
 
 /**
@@ -347,5 +347,86 @@ export function ensureDefault(): void {
     },
   ];
   w.activeEnvironmentId = env;
+  w.items.push(...protocolSamples(col, w.items.length));
   save(w);
+  store.setExtra(SAMPLES_KEY, true);
+}
+
+const SAMPLES_KEY = 'protocolSamples';
+const GRPC_SAMPLES_KEY = 'protocolSamplesGrpc2';
+
+/** The first build's "gRPC echo" (Postman's server, unusable) becomes the Eliza samples, once; an edited one stays. */
+function replacePostmanGrpcSample(): void {
+  if (store.extra<boolean>(GRPC_SAMPLES_KEY)) return;
+  store.setExtra(GRPC_SAMPLES_KEY, true);
+  for (const s of list().filter((x) => !x.serverId && !x.folder)) {
+    const w = load(s.id);
+    const old = w.items.find((i) => i.kind === 'request' && i.name === 'gRPC echo' && /^grpcs?:\/\/grpc\.postman-echo\.com/.test(i.request?.url ?? '') && !i.request?.grpc?.service);
+    if (!old?.parentId) continue;
+    w.items = [...w.items.filter((i) => i.id !== old.id), ...grpcSamples(old.parentId, old.sort)];
+    save(w);
+  }
+}
+
+/**
+ * "More protocols" in Getting started (#96 – #98): one request per kind DialCatz speaks besides plain HTTP, each against
+ * a public server (Wikimedia's live stream, a public Ethereum node, Postman's echo servers, a GraphQL countries API).
+ */
+function protocolSamples(collectionId: string, sort: number): TreeItem[] {
+  const folder = uid('f_');
+  const req = (n: number, name: string, url: string, patch: Partial<RequestSpec>, description: string): TreeItem => ({
+    id: uid('r_'),
+    kind: 'request',
+    parentId: folder,
+    name,
+    sort: n,
+    description,
+    request: { ...newRequest(), url, ...patch },
+  });
+  return [
+    { id: folder, kind: 'folder', parentId: collectionId, name: 'More protocols', sort, auth: { mode: 'inherit' }, description: 'Server-Sent Events, GraphQL, JSON-RPC, WebSocket, Socket.IO and gRPC, against public servers.' },
+    req(0, 'Live events (SSE)', 'https://stream.wikimedia.org/v2/stream/recentchange', { method: 'GET' }, "Wikipedia's live edits as Server-Sent Events: Send, watch them arrive in Events, Stop when you have seen enough."),
+    req(1, 'GraphQL: a country', 'https://countries.trevorblades.com/graphql', { method: 'POST', body: { mode: 'graphql', raw: 'query Country($code: ID!) {\n  country(code: $code) {\n    name\n    capital\n    emoji\n  }\n}', variables: '{ "code": "ID" }', fields: [] } }, 'A GraphQL query with variables.'),
+    req(2, 'JSON-RPC: latest block', 'https://ethereum-rpc.publicnode.com', { method: 'POST', body: { mode: 'jsonrpc', raw: '[]', fields: [], rpcMethod: 'eth_blockNumber' } }, 'A JSON-RPC 2.0 call to a public Ethereum node; the RPC tab shows the reply by id.'),
+    req(3, 'JSON-RPC: a batch', 'https://ethereum-rpc.publicnode.com', { method: 'POST', body: { mode: 'jsonrpc', raw: '[\n  { "method": "eth_blockNumber" },\n  { "method": "eth_chainId" }\n]', fields: [], rpcBatch: true } }, 'Two calls in one request; each reply is matched to its call.'),
+    req(4, 'WebSocket echo', 'wss://ws.postman-echo.com/raw', { method: 'GET' }, "Connect, type a message, send it: Postman's echo server sends it back."),
+    req(5, 'Socket.IO echo', 'wss://ws.postman-echo.com/socket.io/', { method: 'GET', socketIo: true }, 'Socket.IO over the WebSocket: Connect, then emit an event by name with JSON args.'),
+    ...grpcSamples(folder, 6),
+  ];
+}
+
+/**
+ * The gRPC samples: Buf's public Eliza demo (TLS, server reflection), one plain call and one server stream. (Postman's
+ * echo server answered reflection with nothing, so it could not be used without its .proto files.)
+ */
+function grpcSamples(folder: string, sort: number): TreeItem[] {
+  const one = (n: number, name: string, method: string, message: string, description: string): TreeItem => ({
+    id: uid('r_'),
+    kind: 'request',
+    parentId: folder,
+    name,
+    sort: sort + n,
+    description,
+    request: { ...newRequest(), method: 'POST', url: 'grpcs://demo.connectrpc.com', body: { mode: 'json', raw: message, fields: [] }, grpc: { service: 'connectrpc.eliza.v1.ElizaService', method } },
+  });
+  return [
+    one(0, 'gRPC: talk to Eliza', 'Say', '{\n  "sentence": "Hello from DialCatz"\n}', "A unary gRPC call to Buf's public Eliza demo. Message → Load from server lists its methods through server reflection."),
+    one(1, 'gRPC: a server stream', 'Introduce', '{\n  "name": "MrCatz"\n}', 'A server-streaming method: every message it sends is collected into the response.'),
+  ];
+}
+
+/** Older installs: the protocol samples join their Getting started once (nothing else in it changes). */
+export function addProtocolSamples(): void {
+  replacePostmanGrpcSample();
+  if (store.extra<boolean>(SAMPLES_KEY)) return;
+  store.setExtra(SAMPLES_KEY, true);
+  for (const s of list().filter((x) => !x.serverId && !x.folder)) {
+    const w = load(s.id);
+    const col = w.items.find((i) => i.kind === 'collection' && i.name === 'Getting started');
+    if (!col || w.items.some((i) => i.parentId === col.id && i.name === 'More protocols')) continue;
+    const sort = w.items.filter((i) => i.parentId === col.id).length;
+    w.items.push(...protocolSamples(col.id, sort));
+    save(w);
+    return;
+  }
 }

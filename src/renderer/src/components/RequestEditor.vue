@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { rpcEnvelope } from '@shared/jsonrpc';
 import { computed, ref, watch } from 'vue';
 import { HTTP_METHODS, type BodyMode, type KeyValue, type RequestAuth } from '@shared/types';
 import { AUTO_HEADERS, joinUrl, parseCurl, prettyJson, splitUrl, toCurl, toCurlCmd, toFetch, toPowerShell, effectiveAuth } from '@shared/request';
 import { currentOS } from '@shared/platform';
-import { activeTab, aiOn, appVersion, inheritedAuth, isWs, knownVar, notify, plain, readOnly, sendTab, sendWs, wireFor, workspace, type Tab } from '../state';
+import { activeTab, aiOn, appVersion, inheritedAuth, isGrpc, isWs, knownVar, notify, plain, readOnly, sendTab, sendWs, wireFor, workspace, type Tab } from '../state';
 import { keyLabel } from '../platform';
 import KeyValueTable from './KeyValueTable.vue';
 import AuthEditor from './AuthEditor.vue';
@@ -65,6 +66,17 @@ function setBodyMode(mode: BodyMode) {
 }
 
 const count = (rows: KeyValue[]) => rows.filter((r) => r.enabled && r.key).length;
+/** JSON-RPC params (or a batch's calls) that would not build an envelope. */
+const rpcBad = computed(() => {
+  const b = spec.value.body;
+  if (b.mode !== 'jsonrpc') return null;
+  try {
+    rpcEnvelope({ method: b.rpcMethod || 'x', params: b.raw.replace(/\{\{[^}]+\}\}/g, '0'), batch: b.rpcBatch, notify: b.rpcNotify });
+    return null;
+  } catch (e) {
+    return (e as Error).message;
+  }
+});
 const bodyIsJsonBad = computed(() => {
   if (spec.value.body.mode !== 'json' || !spec.value.body.raw.trim()) return null;
   // {{vars}} inside JSON are fine once filled; test with placeholders.
@@ -202,6 +214,87 @@ async function copyCode() {
 
 const methodClass = computed(() => `m-${spec.value.method.toLowerCase()}`);
 const ws = computed(() => isWs(props.tab));
+/**
+ * The kind of request (#98): an HTTP method, or ~ws / ~sio / ~grpc. Picking another kind turns the address into that
+ * scheme (https://api.x → wss://api.x or grpc://api.x and back) and sets its mode, so a WebSocket, Socket.IO or gRPC
+ * request starts from the same New request.
+ */
+const kind = computed(() => (grpcOn.value ? '~grpc' : ws.value ? (spec.value.socketIo ? '~sio' : '~ws') : spec.value.method));
+const KIND_HINT: Record<string, string> = { '~ws': 'wss://echo.example.com/socket — then Connect', '~sio': 'ws://localhost:3000 (add /namespace for one) — then Connect', '~grpc': 'grpc://localhost:50051 (grpcs:// for TLS)' };
+function setKind(k: string) {
+  const url = spec.value.url.trim();
+  // The address keeps its host and port; only the scheme changes ({{variables}} at the start stay as they are).
+  const swap = (scheme: (secure: boolean) => string, keepPath: boolean) => {
+    const m = url.match(/^([a-z][\w+.-]*):\/\/([^/?#]*)(.*)$/i);
+    if (!m) return url ? url : `${scheme(false)}://`;
+    const secure = /^(https|wss|grpcs)$/i.test(m[1]);
+    return `${scheme(secure)}://${m[2]}${keepPath ? m[3] : ''}`;
+  };
+  if (k === '~ws' || k === '~sio') {
+    spec.value.url = swap((s) => (s ? 'wss' : 'ws'), true);
+    spec.value.socketIo = k === '~sio' || undefined;
+    spec.value.method = 'GET';
+  } else if (k === '~grpc') {
+    spec.value.url = swap((s) => (s ? 'grpcs' : 'grpc'), false);
+    spec.value.socketIo = undefined;
+    spec.value.method = 'POST';
+    if (spec.value.body.mode !== 'json') spec.value.body.mode = 'json';
+    pane.value = 'body';
+  } else {
+    if (/^(wss?|grpcs?):\/\//i.test(url)) spec.value.url = swap((s) => (s ? 'https' : 'http'), !/^grpcs?:/i.test(url));
+    spec.value.socketIo = undefined;
+    spec.value.grpc = undefined;
+    spec.value.method = k as typeof spec.value.method;
+  }
+  touch();
+}
+// ---- gRPC (#98): the server's services (reflection, or the .proto files picked), and the method this request calls.
+const grpcOn = computed(() => isGrpc(props.tab));
+const grpcServices = ref<import('@shared/types').GrpcServiceInfo[]>([]);
+const grpcSource = ref<'reflection' | 'files' | null>(null);
+const grpcBusy = ref(false);
+const grpcError = ref('');
+const grpcService = computed(() => grpcServices.value.find((s) => s.name === spec.value.grpc?.service) ?? null);
+const grpcMethod = computed(() => grpcService.value?.methods.find((m) => m.name === spec.value.grpc?.method) ?? null);
+function setGrpc(patch: { service?: string; method?: string; protoFiles?: string[] }) {
+  spec.value.grpc = { ...(spec.value.grpc ?? {}), ...patch };
+  touch();
+}
+async function loadGrpc(files?: string[]) {
+  grpcBusy.value = true;
+  grpcError.value = '';
+  try {
+    const url = wireFor(props.tab).url.split('?')[0];
+    const protoFiles = files ?? spec.value.grpc?.protoFiles;
+    const r = await window.dialcatz.grpcDescribe(url, plain({ protoFiles, metadata: wireFor(props.tab).headers }));
+    grpcServices.value = r.services;
+    grpcSource.value = r.source;
+    // Nothing picked yet (or gone): the first service and method.
+    if (!r.services.some((s) => s.name === spec.value.grpc?.service)) setGrpc({ service: r.services[0]?.name, method: r.services[0]?.methods[0]?.name });
+  } catch (e) {
+    grpcError.value = String((e as Error).message).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+  } finally {
+    grpcBusy.value = false;
+  }
+}
+async function pickProto() {
+  const files = await window.dialcatz.grpcPickProto();
+  if (!files) return;
+  setGrpc({ protoFiles: files });
+  await loadGrpc(files);
+}
+function grpcExample() {
+  if (!grpcMethod.value) return;
+  spec.value.body.raw = grpcMethod.value.example;
+  spec.value.body.mode = 'json';
+  touch();
+}
+watch(grpcOn, (on) => {
+  if (on) {
+    if (spec.value.body.mode !== 'json') spec.value.body.mode = 'json';
+    if (pane.value === 'params' || pane.value === 'scripts') pane.value = 'body';
+  }
+}, { immediate: true });
 const wsState = computed(() => props.tab.ws?.state ?? 'idle');
 function draft(v: string) {
   props.tab.ws ??= { state: 'idle', log: [], draft: '' };
@@ -220,10 +313,17 @@ defineExpose({ focusUrl: () => urlInput.value?.select() });
     <!-- Address bar -->
     <div class="flex items-center gap-2 px-4 pt-3 pb-2">
       <div class="url-bar flex-1">
-        <select class="method-select font-mono" :class="methodClass" :value="spec.method" :disabled="readOnly" @change="((spec.method = ($event.target as HTMLSelectElement).value as typeof spec.method), touch())">
-          <option v-for="m in HTTP_METHODS" :key="m" :value="m">{{ m }}</option>
+        <select class="method-select font-mono" :class="kind.startsWith('~') ? '' : methodClass" :style="`field-sizing: content;${kind.startsWith('~') ? ' color: var(--color-primary)' : ''}`" :value="kind" :disabled="readOnly" title="An HTTP method, or another kind of request" @change="setKind(($event.target as HTMLSelectElement).value)">
+          <optgroup label="HTTP">
+            <option v-for="m in HTTP_METHODS" :key="m" :value="m">{{ m }}</option>
+          </optgroup>
+          <optgroup label="Other protocols">
+            <option value="~ws">{{ kind === '~ws' ? 'WS' : 'WebSocket' }}</option>
+            <option value="~sio">{{ kind === '~sio' ? 'SIO' : 'Socket.IO' }}</option>
+            <option value="~grpc">gRPC</option>
+          </optgroup>
         </select>
-        <VarInput ref="urlInput" class="url-input" :model-value="spec.url" placeholder="https://api.example.com/users or {{baseUrl}}/users — or paste a cURL command" @update:model-value="setUrl" @enter="sendTab(tab)" />
+        <VarInput ref="urlInput" class="url-input" :model-value="spec.url" :placeholder="KIND_HINT[kind] ?? 'https://api.example.com/users or {{baseUrl}}/users — or paste a cURL command'" @update:model-value="setUrl" @enter="sendTab(tab)" />
       </div>
       <button v-if="ws" class="btn btn-sm h-9 min-w-28 gap-1.5" :class="wsState === 'open' || wsState === 'connecting' ? 'btn-error btn-soft' : 'btn-primary'" @click="sendTab(tab)">
         <template v-if="wsState === 'connecting'"><span class="loading loading-spinner loading-xs" />Cancel</template>
@@ -240,9 +340,9 @@ defineExpose({ focusUrl: () => urlInput.value?.select() });
     <!-- Request parts -->
     <div class="flex items-center gap-3 px-4 pb-2">
       <div class="seg seg-xs" role="tablist">
-        <button role="tab" class="seg-item" :class="{ 'is-active': pane === 'params' }" @click="pane = 'params'">Params<span v-if="count(spec.params)" class="pane-count">{{ count(spec.params) }}</span></button>
-        <button role="tab" class="seg-item" :class="{ 'is-active': pane === 'headers' }" @click="pane = 'headers'">Headers<span v-if="count(spec.headers)" class="pane-count">{{ count(spec.headers) }}</span></button>
-        <button v-if="ws" role="tab" class="seg-item" :class="{ 'is-active': pane === 'body' }" @click="pane = 'body'">Message</button>
+        <button v-if="!grpcOn" role="tab" class="seg-item" :class="{ 'is-active': pane === 'params' }" @click="pane = 'params'">Params<span v-if="count(spec.params)" class="pane-count">{{ count(spec.params) }}</span></button>
+        <button role="tab" class="seg-item" :class="{ 'is-active': pane === 'headers' }" @click="pane = 'headers'">{{ grpcOn ? 'Metadata' : 'Headers' }}<span v-if="count(spec.headers)" class="pane-count">{{ count(spec.headers) }}</span></button>
+        <button v-if="ws || grpcOn" role="tab" class="seg-item" :class="{ 'is-active': pane === 'body' }" @click="pane = 'body'">Message</button>
         <button v-else role="tab" class="seg-item" :class="{ 'is-active': pane === 'body' }" @click="pane = 'body'">Body<span v-if="spec.body.mode !== 'none'" class="pane-dot" /></button>
         <button role="tab" class="seg-item" :class="{ 'is-active': pane === 'auth' }" @click="pane = 'auth'">Auth<span v-if="!['none', 'inherit'].includes(spec.auth.mode)" class="pane-dot" /></button>
         <button v-if="!ws" role="tab" class="seg-item" :class="{ 'is-active': pane === 'scripts' }" @click="pane = 'scripts'">Scripts<span v-if="spec.preRequest?.trim() || spec.tests?.trim()" class="pane-dot" /></button>
@@ -270,20 +370,46 @@ defineExpose({ focusUrl: () => urlInput.value?.select() });
         </div>
       </template>
 
+      <div v-else-if="pane === 'body' && grpcOn" class="flex h-full min-h-48 flex-col gap-2">
+        <div class="flex flex-wrap items-center gap-2">
+          <select class="select select-sm min-w-48 flex-1 font-mono" :value="spec.grpc?.service ?? ''" :disabled="readOnly || !grpcServices.length" @change="(e) => { const s = grpcServices.find((x) => x.name === (e.target as HTMLSelectElement).value); setGrpc({ service: s?.name, method: s?.methods[0]?.name }); }">
+            <option v-if="!grpcServices.length" :value="spec.grpc?.service ?? ''">{{ spec.grpc?.service || 'Service' }}</option>
+            <option v-for="s in grpcServices" :key="s.name" :value="s.name">{{ s.name }}</option>
+          </select>
+          <select class="select select-sm min-w-40 flex-1 font-mono" :value="spec.grpc?.method ?? ''" :disabled="readOnly || !grpcService" @change="(e) => setGrpc({ method: (e.target as HTMLSelectElement).value })">
+            <option v-if="!grpcService" :value="spec.grpc?.method ?? ''">{{ spec.grpc?.method || 'Method' }}</option>
+            <option v-for="m in grpcService?.methods ?? []" :key="m.name" :value="m.name" :disabled="m.clientStreaming">{{ m.name }}{{ m.serverStreaming ? ' (server stream)' : m.clientStreaming ? ' (client stream: not supported)' : '' }}</option>
+          </select>
+          <button class="btn btn-ghost btn-sm gap-1.5" :disabled="grpcBusy" title="Ask the server for its services (server reflection)" @click="loadGrpc()"><span v-if="grpcBusy" class="loading loading-spinner loading-xs" /><Icon v-else name="refresh" class="size-4" />{{ grpcServices.length ? 'Reload' : 'Load from server' }}</button>
+          <button class="btn btn-ghost btn-sm gap-1.5" :disabled="readOnly" title="The server has no reflection: use its .proto files" @click="pickProto"><Icon name="file" class="size-4" />.proto files…</button>
+          <button v-if="grpcMethod" class="btn btn-ghost btn-xs" :disabled="readOnly" title="A message with every field of the request type" @click="grpcExample">Example</button>
+        </div>
+        <p v-if="grpcError" class="text-xs text-error">{{ grpcError }}</p>
+        <p v-else-if="grpcMethod" class="text-xs opacity-60"><span class="font-mono">{{ grpcMethod.requestType }}</span> → <span class="font-mono">{{ grpcMethod.responseType }}</span><template v-if="grpcSource === 'files'"> · from {{ spec.grpc?.protoFiles?.length }} .proto file{{ (spec.grpc?.protoFiles?.length ?? 0) > 1 ? 's' : '' }}</template><template v-else-if="grpcSource"> · from the server's reflection</template></p>
+        <p v-else-if="!grpcServices.length" class="text-xs opacity-60">Load the server's services (reflection), or choose its .proto files. Metadata goes in the Metadata tab; auth (bearer) is sent as authorization metadata.</p>
+        <CodeEditor v-model="spec.body.raw" language="json" class="min-h-40 flex-1 rounded-xl border border-base-300/70" :known="knownVar" placeholder="{ &quot;name&quot;: &quot;{{name}}&quot; }" @update:model-value="touch" @run="sendTab(tab)" />
+      </div>
+
       <div v-else-if="pane === 'body' && ws" class="flex h-full min-h-40 flex-col gap-2">
-        <CodeEditor :model-value="tab.ws?.draft ?? ''" :language="/^\s*[[{]/.test(tab.ws?.draft ?? '') ? 'json' : 'text'" :known="knownVar" class="min-h-28 flex-1 rounded-xl border border-base-300/70" placeholder="A message to send ({{variables}} work here too)" @update:model-value="draft" @run="sendWs(tab)" />
+        <div v-if="spec.socketIo" class="flex flex-wrap items-center gap-3">
+          <label class="flex min-w-60 flex-1 items-center gap-2">
+            <span class="label-caps shrink-0">Event</span>
+            <input :value="tab.ws?.event ?? ''" class="input input-sm flex-1 font-mono" placeholder="chat message" spellcheck="false" @input="(e) => ((tab.ws ??= { state: 'idle', log: [], draft: '' }), (tab.ws.event = (e.target as HTMLInputElement).value))" @keydown.enter="sendWs(tab)" />
+          </label>
+        </div>
+        <CodeEditor :model-value="tab.ws?.draft ?? ''" :language="/^\s*[[{]/.test(tab.ws?.draft ?? '') ? 'json' : 'text'" :known="knownVar" class="min-h-28 flex-1 rounded-xl border border-base-300/70" :placeholder="spec.socketIo ? 'The event’s args: a JSON list sends several, other JSON or text sends one (optional)' : 'A message to send ({{variables}} work here too)'" @update:model-value="draft" @run="sendWs(tab)" />
         <div class="flex items-center gap-2">
-          <span class="text-xs opacity-50">{{ wsState === 'open' ? `Connected. ${keyLabel('mod+enter')} sends.` : 'Connect first. The request’s headers and auth go with the handshake; set Sec-WebSocket-Protocol for subprotocols.' }}</span>
+          <span class="text-xs opacity-50">{{ wsState === 'open' ? `Connected. ${keyLabel('mod+enter')} sends.` : spec.socketIo ? 'Connect first. The address is the server and namespace (ws://host:3000/chat); DialCatz adds /socket.io/ and answers the pings.' : 'Connect first. The request’s headers and auth go with the handshake; set Sec-WebSocket-Protocol for subprotocols.' }}</span>
           <span class="flex-1" />
-          <button class="btn btn-primary btn-sm gap-1.5" :disabled="wsState !== 'open' || !tab.ws?.draft" @click="sendWs(tab)"><Icon name="send" class="size-4" />Send message</button>
+          <button class="btn btn-primary btn-sm gap-1.5" :disabled="wsState !== 'open' || (spec.socketIo ? !tab.ws?.event?.trim() : !tab.ws?.draft)" @click="sendWs(tab)"><Icon name="send" class="size-4" />{{ spec.socketIo ? 'Emit event' : 'Send message' }}</button>
         </div>
       </div>
 
       <div v-else-if="pane === 'body'" class="flex h-full min-h-48 flex-col gap-2">
         <div class="flex items-center gap-2">
           <div class="seg seg-xs seg-choice">
-            <button v-for="m in (['none', 'json', 'text', 'xml', 'form', 'multipart', 'graphql', 'binary'] as BodyMode[])" :key="m" role="tab" class="seg-item normal-case" :class="{ 'is-active': spec.body.mode === m }" @click="setBodyMode(m)">
-              {{ { none: 'None', json: 'JSON', text: 'Text', xml: 'XML', form: 'Form URL-encoded', multipart: 'Multipart', graphql: 'GraphQL', binary: 'Binary' }[m] }}
+            <button v-for="m in (['none', 'json', 'text', 'xml', 'form', 'multipart', 'graphql', 'jsonrpc', 'binary'] as BodyMode[])" :key="m" role="tab" class="seg-item normal-case" :class="{ 'is-active': spec.body.mode === m }" @click="setBodyMode(m)">
+              {{ { none: 'None', json: 'JSON', text: 'Text', xml: 'XML', form: 'Form URL-encoded', multipart: 'Multipart', graphql: 'GraphQL', jsonrpc: 'JSON-RPC', binary: 'Binary' }[m] }}
             </button>
           </div>
           <span class="flex-1" />
@@ -319,6 +445,23 @@ defineExpose({ focusUrl: () => urlInput.value?.select() });
             </div>
           </div>
           <p class="text-xs opacity-50">Sent as JSON: <code>{ "query": …, "variables": … }</code> (usually with POST).</p>
+        </template>
+        <template v-else-if="spec.body.mode === 'jsonrpc'">
+          <div class="flex flex-wrap items-center gap-3">
+            <label v-if="!spec.body.rpcBatch" class="flex min-w-60 flex-1 items-center gap-2">
+              <span class="label-caps shrink-0">Method</span>
+              <input :value="spec.body.rpcMethod ?? ''" class="input input-sm flex-1 font-mono" placeholder="user.get" spellcheck="false" :disabled="readOnly" @input="(e) => ((spec.body.rpcMethod = (e.target as HTMLInputElement).value), touch())" />
+            </label>
+            <label class="flex cursor-pointer items-center gap-1.5 text-xs" title="Send a list of calls in one request; each gets its own id">
+              <input type="checkbox" class="checkbox checkbox-xs checkbox-primary" :checked="spec.body.rpcBatch === true" :disabled="readOnly" @change="(e) => ((spec.body.rpcBatch = (e.target as HTMLInputElement).checked || undefined), touch())" />Batch
+            </label>
+            <label v-if="!spec.body.rpcBatch" class="flex cursor-pointer items-center gap-1.5 text-xs" title="No id: the server does not answer it">
+              <input type="checkbox" class="checkbox checkbox-xs checkbox-primary" :checked="spec.body.rpcNotify === true" :disabled="readOnly" @change="(e) => ((spec.body.rpcNotify = (e.target as HTMLInputElement).checked || undefined), touch())" />Notification
+            </label>
+          </div>
+          <span class="label-caps">{{ spec.body.rpcBatch ? 'Calls (JSON list)' : 'Params (JSON)' }}<span v-if="rpcBad" class="ml-2 normal-case text-error" :title="rpcBad">{{ rpcBad }}</span></span>
+          <CodeEditor v-model="spec.body.raw" language="json" class="min-h-40 flex-1 rounded-xl border border-base-300/70" :known="knownVar" :placeholder="spec.body.rpcBatch ? '[{ &quot;method&quot;: &quot;user.get&quot;, &quot;params&quot;: { &quot;id&quot;: 1 } }, { &quot;method&quot;: &quot;user.list&quot; }]' : '{ &quot;id&quot;: 1 }'" @update:model-value="touch" @run="sendTab(tab)" />
+          <p class="text-xs opacity-50">Sent as <code>{ "jsonrpc": "2.0", "method": …, "params": …, "id": … }</code><template v-if="spec.body.rpcBatch"> for each call, ids 1, 2, …</template> (usually with POST). Replies are matched to their call by id.</p>
         </template>
         <div v-else-if="spec.body.mode === 'binary'" class="flex flex-col items-start gap-2 py-4">
           <button class="btn btn-sm gap-2" :disabled="readOnly" @click="pickBinary"><Icon name="file" class="size-4" />{{ spec.body.file ? 'Change file…' : 'Choose a file…' }}</button>

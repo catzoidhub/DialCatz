@@ -8,7 +8,8 @@ import { readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { rootCertificates } from 'node:tls';
-import type { HttpResponse, SendOptions, SendResult, WireRequest } from '@shared/types';
+import type { HttpResponse, SendOptions, SendResult, SseEvent, WireRequest } from '@shared/types';
+import { parseSse } from '@shared/sse';
 
 /**
  * Happy eyeballs: Node tries a host's addresses (IPv6 and IPv4 in turn) and gives each only 250 ms by default. On a slow
@@ -157,6 +158,9 @@ function decode(res: http.IncomingMessage): Readable {
 }
 
 interface Hop {
+  /** A live SSE answer: the open, decoded body (the rest of it is read as events). */
+  stream?: Readable;
+  streamCut?: boolean;
   status: number;
   statusText: string;
   headers: [string, string][];
@@ -167,6 +171,7 @@ interface Hop {
 }
 
 function once(w: WireRequest, body: Buffer | undefined, signal: AbortSignal, opts: Required<SendOptions>, started: number): Promise<Hop> {
+  const isSse = (res: http.IncomingMessage) => /^text\/event-stream/i.test(String(res.headers['content-type'] ?? ''));
   return new Promise((resolve, reject) => {
     let u: URL;
     try {
@@ -196,6 +201,23 @@ function once(w: WireRequest, body: Buffer | undefined, signal: AbortSignal, opt
       let size = 0;
       let truncated = false;
       const stream = decode(res);
+      const rawHeaders = () => {
+        const hdrs: [string, string][] = [];
+        for (let i = 0; i < res.rawHeaders.length; i += 2) hdrs.push([res.rawHeaders[i], res.rawHeaders[i + 1]]);
+        return hdrs;
+      };
+      // SSE: the answer never ends by itself. A request tab gets it at once and reads the events as they come; anything
+      // else (runner, clients) gets what arrived in the first few seconds.
+      let cut = false;
+      if (isSse(res) && !(res.statusCode && res.statusCode >= 300 && res.statusCode < 400)) {
+        req.setTimeout(0);
+        if (opts.stream) return resolve({ status: res.statusCode ?? 0, statusText: res.statusMessage ?? '', headers: rawHeaders(), buf: Buffer.alloc(0), truncated: false, ttfb, stream });
+        setTimeout(() => {
+          cut = true;
+          res.destroy();
+          finish();
+        }, SSE_COLLECT_MS);
+      }
       stream.on('data', (c: Buffer) => {
         if (truncated) return;
         size += c.length;
@@ -212,10 +234,10 @@ function once(w: WireRequest, body: Buffer | undefined, signal: AbortSignal, opt
         done = true;
         const hdrs: [string, string][] = [];
         for (let i = 0; i < res.rawHeaders.length; i += 2) hdrs.push([res.rawHeaders[i], res.rawHeaders[i + 1]]);
-        resolve({ status: res.statusCode ?? 0, statusText: res.statusMessage ?? '', headers: hdrs, location: res.headers.location, buf: Buffer.concat(chunks), truncated, ttfb });
+        resolve({ status: res.statusCode ?? 0, statusText: res.statusMessage ?? '', headers: hdrs, location: res.headers.location, buf: Buffer.concat(chunks), truncated, ttfb, ...(cut ? { streamCut: true } : {}) });
       };
       stream.on('end', finish);
-      stream.on('error', (e) => (truncated ? finish() : reject(e)));
+      stream.on('error', (e) => (truncated || cut ? finish() : reject(e)));
     });
     req.on('timeout', () => req.destroy(new Error(`No answer within ${Math.round(opts.timeoutMs / 1000)} s (timeout)`)));
     req.on('error', reject);
@@ -270,8 +292,9 @@ function friendly(err: NetError, url: string): string {
   }
 }
 
-export async function send(w: WireRequest, token: string, options: SendOptions = {}): Promise<SendResult> {
-  const opts: Required<SendOptions> = { timeoutMs: options.timeoutMs ?? 30_000, followRedirects: options.followRedirects ?? true, insecure: options.insecure ?? false };
+export async function send(w: WireRequest, token: string, options: SendOptions = {}, onSse?: (e: SseEvent) => void): Promise<SendResult> {
+  const opts: Required<SendOptions> = { timeoutMs: options.timeoutMs ?? 30_000, followRedirects: options.followRedirects ?? true, insecure: options.insecure ?? false, stream: !!options.stream && !!onSse };
+  let keepOpen = false;
   running.get(token)?.abort();
   const ctl = new AbortController();
   running.set(token, ctl);
@@ -318,11 +341,48 @@ export async function send(w: WireRequest, token: string, options: SendOptions =
       url: cur.url,
       redirected: redirects > 0,
       truncated: hop.truncated,
+      ...(hop.streamCut ? { streamCut: true } : {}),
     };
+    if (hop.stream && onSse) {
+      // Live SSE: the send answers now; the events follow until the server ends it or Stop cancels the token.
+      keepOpen = true;
+      response.streaming = true;
+      readSse(hop.stream, token, ctl, onSse);
+    }
     return { response, sent };
   } catch (e) {
     return { error: friendly(e as Error & { code?: string }, cur.url), sent };
   } finally {
-    if (running.get(token) === ctl) running.delete(token);
+    if (!keepOpen && running.get(token) === ctl) running.delete(token);
   }
+}
+
+/** How long a runner / client send collects an SSE answer before closing it. */
+const SSE_COLLECT_MS = 3000;
+const SSE_MAX_RAW = 5 * 1024 * 1024;
+
+function readSse(stream: Readable, token: string, ctl: AbortController, emit: (e: SseEvent) => void): void {
+  const raw: Buffer[] = [];
+  let rawSize = 0;
+  const feed = parseSse((e) => emit({ token, type: 'event', at: Date.now(), ...e }));
+  let ended = false;
+  const end = (type: 'end' | 'error', reason: string) => {
+    if (ended) return;
+    ended = true;
+    lastBodies.set(token, Buffer.concat(raw));
+    if (running.get(token) === ctl) running.delete(token);
+    emit({ token, type, at: Date.now(), reason });
+  };
+  stream.setEncoding('utf8');
+  stream.on('data', (s: string) => {
+    if (rawSize < SSE_MAX_RAW) {
+      const b = Buffer.from(s);
+      raw.push(b);
+      rawSize += b.length;
+    }
+    feed(s);
+  });
+  stream.on('end', () => end('end', 'The server ended the stream'));
+  stream.on('close', () => end(ctl.signal.aborted ? 'end' : 'end', ctl.signal.aborted ? 'Stopped' : 'The connection closed'));
+  stream.on('error', (e) => end(ctl.signal.aborted ? 'end' : 'error', ctl.signal.aborted ? 'Stopped' : e.message));
 }

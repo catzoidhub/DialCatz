@@ -1,4 +1,5 @@
 import { emptyBody, HTTP_METHODS, type EnvVariable, type HttpMethod, type KeyValue, type RequestAuth, type RequestSpec, type WireRequest } from './types';
+import { rpcEnvelope } from './jsonrpc';
 
 export type { WireRequest };
 
@@ -161,6 +162,16 @@ export function toWire(spec: RequestSpec, vars: Vars, auth: RequestAuth = spec.a
           }
         }
         body = JSON.stringify(variables === undefined ? { query: v(b.raw) } : { query: v(b.raw), variables });
+        setType('application/json');
+        break;
+      }
+      case 'jsonrpc': {
+        // An envelope that cannot be built (params not JSON) is sent as typed: the server's error says what is wrong.
+        try {
+          body = JSON.stringify(rpcEnvelope({ method: v(b.rpcMethod ?? ''), params: v(b.raw), batch: b.rpcBatch, notify: b.rpcNotify }));
+        } catch {
+          body = v(b.raw);
+        }
         setType('application/json');
         break;
       }

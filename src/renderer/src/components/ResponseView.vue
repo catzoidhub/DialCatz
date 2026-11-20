@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Tab } from '../state';
 import { aiOn, history, isWs, notify, plain, section, workspace } from '../state';
 import { checkResponse } from '@shared/speccheck';
+import { rpcReplies } from '@shared/jsonrpc';
 import type { ExplainAnswer } from '@shared/types';
 import { prettyJson, prettyXml } from '../highlight';
 import { base64ToBytes, bytesAsText, decodeBase64, hexDump, parseSetCookies, prettyHtml, sniff, tableOf } from '../formats';
@@ -23,7 +24,7 @@ import WsLog from './WsLog.vue';
  */
 const props = defineProps<{ tab: Tab }>();
 
-type Pane = 'body' | 'headers' | 'cookies' | 'tests' | 'spec' | 'sent';
+type Pane = 'body' | 'events' | 'rpc' | 'headers' | 'cookies' | 'tests' | 'spec' | 'sent';
 type View = 'tree' | 'pretty' | 'raw' | 'preview' | 'table' | 'base64' | 'hex';
 type Kind = 'json' | 'xml' | 'html' | 'image' | 'pdf' | 'text' | 'binary';
 const pane = ref<Pane>('body');
@@ -220,6 +221,32 @@ const scriptTests = computed(() => [...(props.tab.scripts?.pre?.tests ?? []), ..
 const passed = computed(() => scriptTests.value.filter((t) => t.pass).length);
 const hasScripts = computed(() => !!(props.tab.scripts?.pre || props.tab.scripts?.tests));
 
+/** #97: a JSON-RPC answer, each reply matched to its call by id (only for a request sent in JSON-RPC mode). */
+const rpc = computed(() => (r.value && !r.value.binary && props.tab.spec.body.mode === 'jsonrpc' ? rpcReplies(props.tab.result?.sent.body, r.value.body) : null));
+const rpcFailed = computed(() => rpc.value?.filter((x) => !x.ok).length ?? 0);
+watch(() => props.tab.sentAt, () => rpc.value && (pane.value = 'rpc'));
+const pretty = (v: unknown) => (v === undefined ? '' : JSON.stringify(v, null, 2));
+
+/** A live SSE answer (text/event-stream): its events, newest first, as they come; Stop closes it. */
+const sse = computed(() => props.tab.sse ?? null);
+watch(() => props.tab.result?.response?.streaming && props.tab.sentAt, (on) => on && (pane.value = 'events'), { immediate: true });
+watch(sse, (s) => !s && pane.value === 'events' && (pane.value = 'body'));
+const sseEvents = computed(() => [...(sse.value?.events ?? [])].reverse());
+const stopSse = () => void window.dialcatz.cancel(props.tab.id);
+const clockOf = (t: number) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+/** An event's data shown as JSON when it is JSON. */
+function sseData(d: string | undefined): { json: boolean; text: string } {
+  const t = (d ?? '').trim();
+  if (/^[[{]/.test(t)) {
+    try {
+      return { json: true, text: JSON.stringify(JSON.parse(t), null, 2) };
+    } catch {
+      /* text after all */
+    }
+  }
+  return { json: false, text: d ?? '' };
+}
+
 /** #93: the response against what the request's spec describes (requests imported from an OpenAPI document). */
 const specResponses = computed(() => workspace.value?.items.find((i) => i.id === props.tab.itemId)?.specResponses ?? null);
 const specResult = computed(() => (r.value && specResponses.value?.length ? checkResponse(specResponses.value, r.value) : null));
@@ -338,12 +365,18 @@ function closeDecoded() {
         </span>
         <span class="resp-meta"><b>{{ size(r.size) }}</b></span>
         <span v-if="r.redirected" class="badge badge-soft badge-info badge-sm" :title="r.url">redirected</span>
+        <span v-if="r.grpc" class="badge badge-soft badge-sm font-mono" :class="r.grpc.code === 0 ? 'badge-success' : 'badge-error'" :title="r.grpc.details || `gRPC status ${r.grpc.code}`">gRPC {{ r.grpc.name }}<template v-if="r.grpc.messages > 1"> · {{ r.grpc.messages }} messages</template></span>
+        <span v-if="r.streaming" class="badge badge-soft badge-success badge-sm" title="Server-Sent Events: the answer stays open">event stream</span>
         <span v-if="r.truncated" class="badge badge-soft badge-warning badge-sm">cut at 25 MB</span>
         <span v-if="tab.sending" class="loading loading-spinner loading-xs" />
         <span class="flex-1" />
         <DbCatzCheck :tab="tab" />
         <button v-if="aiOn('explain')" class="btn btn-ghost btn-xs gap-1" :disabled="explaining" title="Explain this response (AI)" @click="explain"><span v-if="explaining" class="loading loading-spinner loading-xs" /><span v-else class="text-primary">✦</span>Explain</button>
         <div class="seg seg-xs" role="tablist">
+          <button v-if="sse" role="tab" class="seg-item" :class="{ 'is-active': pane === 'events' }" :title="sse.open ? 'Server-Sent Events, live' : 'Server-Sent Events'" @click="pane = 'events'">
+            <span v-if="sse.open" class="sse-live" />Events<span class="pane-count">{{ sse.events.length }}</span>
+          </button>
+          <button v-if="rpc" role="tab" class="seg-item" :class="{ 'is-active': pane === 'rpc' }" title="JSON-RPC replies by id" @click="pane = 'rpc'">RPC<span class="pane-count" :class="{ 'is-bad': rpcFailed }">{{ rpcFailed ? `${rpcFailed} error${rpcFailed > 1 ? 's' : ''}` : rpc.length }}</span></button>
           <button role="tab" class="seg-item" :class="{ 'is-active': pane === 'body' }" @click="pane = 'body'">Body</button>
           <button role="tab" class="seg-item" :class="{ 'is-active': pane === 'headers' }" @click="pane = 'headers'">Headers<span class="pane-count">{{ r.headers.length }}</span></button>
           <button role="tab" class="seg-item" :class="{ 'is-active': pane === 'cookies' }" @click="pane = 'cookies'">Cookies<span v-if="cookies.length" class="pane-count">{{ cookies.length }}</span></button>
@@ -374,7 +407,44 @@ function closeDecoded() {
         </div>
       </div>
 
-      <div v-if="pane === 'body'" class="flex min-h-0 flex-1 flex-col gap-2 px-4 py-2">
+      <div v-if="pane === 'events' && sse" class="flex min-h-0 flex-1 flex-col gap-2 px-4 py-2">
+        <div class="flex items-center gap-2 text-sm">
+          <template v-if="sse.open"><span class="sse-live" /><span class="font-medium">Streaming</span><span class="opacity-60">· events arrive as the server sends them</span></template>
+          <template v-else><span class="font-medium">Closed</span><span class="opacity-60">· {{ sse.reason ?? 'the stream ended' }}</span></template>
+          <span class="flex-1" />
+          <button v-if="sse.open" class="btn btn-ghost btn-xs gap-1 text-error" @click="stopSse"><Icon name="stop" class="size-3.5" />Stop</button>
+          <button v-else-if="sse.events.length" class="btn btn-ghost btn-xs" @click="sse.events.splice(0)">Clear</button>
+        </div>
+        <p v-if="!sse.events.length" class="py-10 text-center text-sm opacity-50">{{ sse.open ? 'Waiting for the first event…' : 'No events came.' }}</p>
+        <div v-else class="min-h-0 flex-1 space-y-1.5 overflow-auto">
+          <div v-for="(e, i) in sseEvents" :key="sse.events.length - i" class="sse-event">
+            <div class="flex items-center gap-2 text-xs">
+              <span class="font-mono opacity-50">{{ clockOf(e.at) }}</span>
+              <span class="sse-name font-mono">{{ e.event }}</span>
+              <span v-if="e.id" class="font-mono opacity-50">id {{ e.id }}</span>
+              <span v-if="e.retry" class="opacity-50">retry {{ e.retry }} ms</span>
+            </div>
+            <pre class="selectable mt-1 font-mono text-xs whitespace-pre-wrap break-all" :class="{ 'opacity-80': !sseData(e.data).json }">{{ sseData(e.data).text || '(no data)' }}</pre>
+          </div>
+        </div>
+      </div>
+
+      <div v-else-if="pane === 'rpc' && rpc" class="min-h-0 flex-1 space-y-2 overflow-auto px-4 py-3">
+        <div v-for="(x, i) in rpc" :key="i" class="rpc-reply" :class="x.ok ? 'is-ok' : 'is-bad'">
+          <div class="flex items-center gap-2 text-xs">
+            <span class="test-badge">{{ x.ok ? 'RESULT' : 'ERROR' }}</span>
+            <span class="font-mono font-medium">{{ x.method ?? '(unknown call)' }}</span>
+            <span class="font-mono opacity-50">id {{ JSON.stringify(x.id) }}</span>
+          </div>
+          <template v-if="x.error">
+            <p class="mt-1 text-sm"><span class="font-mono">{{ x.error.code }}</span> {{ x.error.message }}<span v-if="x.error.meaning" class="opacity-60"> · {{ x.error.meaning }}</span></p>
+            <pre v-if="x.error.data !== undefined" class="selectable mt-1 font-mono text-xs whitespace-pre-wrap break-all opacity-80">{{ pretty(x.error.data) }}</pre>
+          </template>
+          <pre v-else class="selectable mt-1 font-mono text-xs whitespace-pre-wrap break-all">{{ pretty(x.result) }}</pre>
+        </div>
+      </div>
+
+      <div v-else-if="pane === 'body'" class="flex min-h-0 flex-1 flex-col gap-2 px-4 py-2">
         <div class="flex flex-wrap items-center gap-2">
           <div class="seg seg-xs seg-choice">
             <button v-for="v in views" :key="v.id" role="tab" class="seg-item" :class="{ 'is-active': view === v.id }" @click="view = v.id">{{ v.label }}</button>
@@ -545,3 +615,41 @@ function closeDecoded() {
     </dialog>
   </div>
 </template>
+
+<style scoped>
+.rpc-reply {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.625rem;
+  background: var(--color-base-200);
+  border-left: 3px solid var(--color-success);
+}
+.rpc-reply.is-bad {
+  border-left-color: var(--color-error);
+}
+.sse-live {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 0.375rem;
+  border-radius: 999px;
+  background: var(--color-success);
+  box-shadow: 0 0 0 3px oklch(from var(--color-success) l c h / 0.2);
+  animation: sse-pulse 1.6s ease-in-out infinite;
+}
+@keyframes sse-pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+.sse-event {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.625rem;
+  background: var(--color-base-200);
+}
+.sse-name {
+  padding: 0 0.375rem;
+  border-radius: 0.375rem;
+  color: var(--primary-ink, var(--color-primary));
+  background: oklch(from var(--color-primary) l c h / 0.12);
+}
+</style>

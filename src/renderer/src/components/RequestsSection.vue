@@ -109,6 +109,8 @@ function run(fn: (t: Tab) => void) {
 }
 
 const methodClass = (t: Tab) => `m-${t.spec.method.toLowerCase()}`;
+/** What the tab is: its HTTP method, or gRPC / WS / SIO (Socket.IO) for those addresses (#98). */
+const methodLabel = (t: { spec: { url: string; method: string; socketIo?: boolean } }) => (/^grpcs?:\/\//i.test(t.spec.url) ? 'gRPC' : /^wss?:\/\//i.test(t.spec.url) ? (t.spec.socketIo ? 'SIO' : 'WS') : t.spec.method);
 
 defineExpose({
   newRequest: () => tree.value?.newRequestIn(),
@@ -142,7 +144,7 @@ defineExpose({
             @auxclick.middle="askClose(t)"
             @contextmenu.prevent="showMenu(t, $event)"
           >
-            <span class="tree-method font-mono" :class="methodClass(t)">{{ t.spec.method }}</span>
+            <span class="tree-method font-mono" :class="methodClass(t)" :style="methodLabel(t) !== t.spec.method ? 'color: var(--color-primary)' : ''">{{ methodLabel(t) }}</span>
             <span class="truncate" :class="{ italic: !t.itemId }">{{ t.name }}</span>
             <span v-if="t.itemId && presenceByItem[t.itemId]" class="tree-presence" :title="`${presenceByItem[t.itemId].join(', ')} also ${presenceByItem[t.itemId].length === 1 ? 'has' : 'have'} this open`">{{ presenceByItem[t.itemId].map((n) => n[0]).join('') }}</span>
             <span v-if="t.sending" class="loading loading-spinner loading-xs" />
@@ -157,7 +159,7 @@ defineExpose({
             <ul tabindex="0" class="dropdown-content menu z-40 mt-1 max-h-96 w-72 flex-nowrap overflow-y-auto rounded-box border border-base-300/60 bg-base-100 p-1 shadow-xl">
               <li v-for="t in workspaceTabs" :key="t.id">
                 <button :class="{ 'menu-active': t.id === activeTabId }" @click="((activeTabId = t.id), ($event.currentTarget as HTMLElement).blur())">
-                  <span class="tree-method font-mono" :class="methodClass(t)">{{ t.spec.method }}</span>
+                  <span class="tree-method font-mono" :class="methodClass(t)" :style="methodLabel(t) !== t.spec.method ? 'color: var(--color-primary)' : ''">{{ methodLabel(t) }}</span>
                   <span class="flex-1 truncate">{{ t.name }}</span>
                   <span v-if="t.dirty" class="tree-dirty" />
                 </button>

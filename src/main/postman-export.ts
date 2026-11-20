@@ -1,4 +1,5 @@
 import type { KeyValue, RequestAuth, RequestSpec, TreeItem } from '@shared/types';
+import { rpcEnvelope } from '@shared/jsonrpc';
 import { splitUrl, stripLocalFiles } from '@shared/request';
 
 /**
@@ -71,6 +72,16 @@ function body(spec: RequestSpec): Pm | undefined {
       };
     case 'graphql':
       return { mode: 'graphql', graphql: { query: b.raw, variables: b.variables ?? '' } };
+    case 'jsonrpc': {
+      // Postman has no JSON-RPC mode: the envelope as raw JSON ({{variables}} kept as they are).
+      let raw = b.raw;
+      try {
+        raw = JSON.stringify(rpcEnvelope({ method: b.rpcMethod ?? '', params: b.raw, batch: b.rpcBatch, notify: b.rpcNotify }), null, 2);
+      } catch {
+        /* as typed */
+      }
+      return { mode: 'raw', raw, options: { raw: { language: 'json' } } };
+    }
     case 'binary':
       return { mode: 'file', file: {} };
     default:

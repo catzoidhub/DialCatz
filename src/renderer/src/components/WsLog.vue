@@ -69,7 +69,7 @@ function clear() {
           <CatMood v-if="e.type === 'error'" mood="error" class="size-5" />
           <template v-else>{{ e.type === 'in' ? '↓' : e.type === 'out' ? '↑' : '•' }}</template>
         </span>
-        <span class="ws-text font-mono"><b v-if="label[e.type]">{{ `${label[e.type]} ` }}</b>{{ preview(e) }}</span>
+        <span class="ws-text font-mono"><b v-if="label[e.type]">{{ `${label[e.type]} ` }}</b><span v-if="e.event" class="ws-event">{{ e.event }}</span>{{ preview(e) }}</span>
         <button v-if="e.type === 'in' || e.type === 'out'" class="ws-copy" title="Copy" @click.stop="copy(e)"><Icon name="copy" class="size-3.5" /></button>
       </div>
     </div>
@@ -84,3 +84,13 @@ function clear() {
     </dialog>
   </div>
 </template>
+
+<style scoped>
+.ws-event {
+  margin-right: 0.5rem;
+  padding: 0 0.375rem;
+  border-radius: 0.375rem;
+  color: var(--primary-ink, var(--color-primary));
+  background: oklch(from var(--color-primary) l c h / 0.12);
+}
+</style>

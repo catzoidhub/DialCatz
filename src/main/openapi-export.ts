@@ -1,4 +1,5 @@
 import type { KeyValue, RequestAuth, TreeItem } from '@shared/types';
+import { rpcEnvelope } from '@shared/jsonrpc';
 
 /**
  * A collection as an OpenAPI 3.0 document (#95): for collections made by hand, the start of a contract. Each request
@@ -95,6 +96,13 @@ function bodyOf(r: NonNullable<TreeItem['request']>): Schema | null {
       return { content: { 'application/xml': { schema: { type: 'string' }, ...(b.raw.trim() ? { example: b.raw } : {}) } } };
     case 'text':
       return { content: { 'text/plain': { schema: { type: 'string' }, ...(b.raw.trim() ? { example: b.raw } : {}) } } };
+    case 'jsonrpc':
+      try {
+        const env = rpcEnvelope({ method: r.body.rpcMethod ?? '', params: r.body.raw.replace(/\{\{([^}]+)\}\}/g, '"<$1>"'), batch: r.body.rpcBatch, notify: r.body.rpcNotify });
+        return { content: { 'application/json': { schema: schemaOf(env), example: env } } };
+      } catch {
+        return { content: { 'application/json': { schema: {} } } };
+      }
     case 'graphql':
       return { content: { 'application/json': { schema: { type: 'object', properties: { query: { type: 'string' }, variables: { type: 'object' } } }, example: { query: b.raw } } } };
     case 'binary':

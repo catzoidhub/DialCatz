@@ -27,7 +27,9 @@ const REQUEST_FIELDS = {
   url: { type: 'string', maxLength: 8000, description: 'May use {{variables}}.' },
   params: ROWS('Query parameters. A secret-looking one must be a {{variable}}.'),
   headers: ROWS('Headers. A secret-looking one must be a {{variable}}.'),
-  body: { type: 'object', additionalProperties: false, required: ['mode'], properties: { mode: { type: 'string', enum: ['none', 'json', 'text', 'xml', 'form', 'graphql'] }, raw: { type: 'string', maxLength: 500_000 }, fields: ROWS('form: the fields.'), variables: { type: 'string', maxLength: 100_000 } } },
+  grpc: { type: 'object', additionalProperties: false, properties: { service: { type: 'string', maxLength: 300 }, method: { type: 'string', maxLength: 200 } }, description: 'grpc:// / grpcs:// requests: the service (full name) and method (see grpc_describe); the body (mode json) is the message.' },
+  socket_io: { type: 'boolean', description: 'ws:// / wss:// requests: speak Socket.IO (events by name; websocket_send then takes event).' },
+  body: { type: 'object', additionalProperties: false, required: ['mode'], properties: { mode: { type: 'string', enum: ['none', 'json', 'text', 'xml', 'form', 'graphql', 'jsonrpc'] }, raw: { type: 'string', maxLength: 500_000, description: 'json / text / xml: the body; graphql: the query; jsonrpc: the params (JSON), or the list of calls for a batch.' }, fields: ROWS('form: the fields.'), variables: { type: 'string', maxLength: 100_000 }, rpcMethod: { type: 'string', maxLength: 500, description: 'jsonrpc: the method.' }, rpcBatch: { type: 'boolean', description: 'jsonrpc: raw is a list of { method, params?, notify? }.' }, rpcNotify: { type: 'boolean', description: 'jsonrpc: a notification (no id, no reply).' } } },
   auth: { type: 'object', additionalProperties: false, required: ['mode'], description: 'How it logs in. The values must be {{variables}}: a client never sets a secret. inherit: from the folder or collection.', properties: { mode: { type: 'string', enum: ['none', 'inherit', 'bearer', 'basic', 'apikey'] }, token: S('bearer: a {{variable}}.'), username: S('basic: a {{variable}}.'), password: S('basic: a {{variable}}.'), key: S('apikey: the header or parameter name.'), value: S('apikey: a {{variable}}.'), in: { type: 'string', enum: ['header', 'query'] } } },
 };
 type Fact = Extract<McatzpAsk, { kind: 'change' }>['facts'][number];
@@ -83,15 +85,17 @@ function urlFrom(url: string): string {
 }
 function specFrom(a: Record<string, unknown>, old?: RequestSpec): RequestSpec {
   const base = old ?? newRequest();
-  const b = a.body as { mode: RequestSpec['body']['mode']; raw?: string; fields?: unknown; variables?: string } | undefined;
+  const b = a.body as { mode: RequestSpec['body']['mode']; raw?: string; fields?: unknown; variables?: string; rpcMethod?: string; rpcBatch?: boolean; rpcNotify?: boolean } | undefined;
   return {
     ...base,
     ...(a.method ? { method: a.method as RequestSpec['method'] } : {}),
     ...(typeof a.url === 'string' ? { url: urlFrom(a.url) } : {}),
     ...(a.params ? { params: rowsFrom(a.params, base.params, 'Parameter') } : {}),
     ...(a.headers ? { headers: rowsFrom(a.headers, base.headers, 'Header') } : {}),
-    ...(b ? { body: { mode: b.mode, raw: noMask(b.raw, 'The body') ?? '', fields: rowsFrom(b.fields, base.body.fields, 'Field'), ...(b.variables ? { variables: noMask(b.variables, 'The GraphQL variables') } : {}) } } : {}),
+    ...(b ? { body: { mode: b.mode, raw: noMask(b.raw, 'The body') ?? '', fields: rowsFrom(b.fields, base.body.fields, 'Field'), ...(b.variables ? { variables: noMask(b.variables, 'The GraphQL variables') } : {}), ...(b.rpcMethod ? { rpcMethod: String(b.rpcMethod).slice(0, 500) } : {}), ...(b.rpcBatch === true ? { rpcBatch: true } : {}), ...(b.rpcNotify === true ? { rpcNotify: true } : {}) } } : {}),
     auth: authFrom(a.auth as Record<string, unknown> | undefined, base.auth),
+    ...(typeof a.socket_io === 'boolean' ? { socketIo: a.socket_io || undefined } : {}),
+    ...(a.grpc && typeof a.grpc === 'object' ? { grpc: { ...(base.grpc ?? {}), ...((g) => ({ ...(g.service ? { service: String(g.service).slice(0, 300) } : {}), ...(g.method ? { method: String(g.method).slice(0, 200) } : {}) }))(a.grpc as { service?: unknown; method?: unknown }) } } : {}),
   };
 }
 const rowText = (rows: KeyValue[]) => short(rows.map((r) => `${r.key}: ${r.value}`).join(', '), 300);
@@ -553,7 +557,7 @@ export function changeActions(api: DialCatzApi, scopes: Scopes, command: WindowC
       const w = await workspaceOf(a.workspace);
       return done(await command('wsConnect', { workspaceId: w.id, itemId: requestOf(w, a.request).id }, 10_000));
     }),
-    asked('websocket_send', 'Send a WebSocket message', 'Sends a text message on a connected WebSocket tab (id from list_open_tabs).', { tab: S('The tab.'), text: S('The message; may use {{variables}}.', 1_000_000) }, ['tab', 'text'], async (a) => q('Send this message?', [{ label: 'Message', value: short(maskText(String(a.text), await secrets()), 500) }], null), async (a) => done(await command('wsSend', { tab: String(a.tab), text: noMask(String(a.text), 'The message') }, 5000)), false),
+    asked('websocket_send', 'Send a WebSocket message', 'Sends a text message on a connected WebSocket tab (id from list_open_tabs). A Socket.IO tab emits the event named in event, with text as its args (a JSON list sends several).', { tab: S('The tab.'), text: S('The message (Socket.IO: the args, may be empty); may use {{variables}}.', 1_000_000), event: S('Socket.IO: the event name.', 500) }, ['tab', 'text'], async (a) => q(a.event ? `Emit ${String(a.event)}?` : 'Send this message?', [{ label: a.event ? 'Args' : 'Message', value: short(maskText(String(a.text), await secrets()), 500) || '(none)' }], null), async (a) => done(await command('wsSend', { tab: String(a.tab), text: noMask(String(a.text), 'The message'), ...(a.event ? { event: String(a.event) } : {}) }, 5000)), false),
     stopper('websocket_close', 'Close a WebSocket', 'Closes a WebSocket tab’s connection. Asks nothing: it only stops.', { tab: S('The tab.') }, ['tab'], async (a) => done(await command('wsClose', { tab: String(a.tab) }, 5000))),
   ];
 

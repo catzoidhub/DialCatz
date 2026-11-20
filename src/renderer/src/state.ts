@@ -1,5 +1,5 @@
 import { computed, reactive, ref, toRaw, watch } from 'vue';
-import { newRequest, uid, type ConnectRequest, type McatzpAsk, type McatzpInstallProgress, type McatzpRun, type McatzpTab, type McatzpTabResponse, type DialCatzSettings, type Environment, type EnvVariable, type PresenceEntry, type WsEvent, type HistoryEntry, type RequestAuth, type RequestSpec, type SendResult, type ServerConnection, type TreeItem, type Workspace, type WorkspaceSummary, type MockState } from '@shared/types';
+import { newRequest, uid, type ConnectRequest, type McatzpAsk, type McatzpInstallProgress, type McatzpRun, type McatzpTab, type McatzpTabResponse, type DialCatzSettings, type Environment, type EnvVariable, type PresenceEntry, type WsEvent, type SseEvent, type HistoryEntry, type RequestAuth, type RequestSpec, type SendResult, type ServerConnection, type TreeItem, type Workspace, type WorkspaceSummary, type MockState } from '@shared/types';
 import { AUTO_HEADERS, buildVars, effectiveAuth, interpolate, nameFromUrl, toWire, type Vars } from '@shared/request';
 import { store } from './store';
 import { requestContext, responseContext, runScript, type ScriptResult } from './scripts';
@@ -27,7 +27,9 @@ export interface Tab {
   /** Results of the request's scripts for the last send. */
   scripts?: { pre?: ScriptResult; tests?: ScriptResult };
   /** WebSocket tabs (ws:// or wss:// URL): connection state, message log and the message being written. */
-  ws?: { state: 'idle' | 'connecting' | 'open' | 'closed'; log: WsEvent[]; draft: string };
+  ws?: { state: 'idle' | 'connecting' | 'open' | 'closed'; log: WsEvent[]; draft: string; event?: string };
+  /** A live SSE answer (text/event-stream): its events as they come, and whether it is still open. */
+  sse?: { open: boolean; events: SseEvent[]; reason?: string };
 }
 
 const api = window.dialcatz;
@@ -376,6 +378,9 @@ export function syncTabsWithWorkspace(w: Workspace): void {
 // ------------------------------------------------------------------ WebSocket tabs
 
 export const isWs = (tab: Tab) => /^wss?:\/\//i.test(interpolate(tab.spec.url.trim(), vars.value));
+/** #98: a gRPC request (grpc:// or grpcs://). */
+export const isGrpcUrl = (url: string) => /^grpcs?:\/\//i.test(url.trim());
+export const isGrpc = (tab: Tab) => isGrpcUrl(interpolate(tab.spec.url, vars.value));
 const WS_LOG_MAX = 2000;
 
 /** Connect (or disconnect) a WebSocket tab: the request's headers go with the handshake. */
@@ -389,10 +394,16 @@ export async function toggleWs(tab: Tab): Promise<void> {
   const hop = /^(connection|upgrade|sec-websocket-(key|version|extensions)|accept-encoding|cache-control|content-type|content-length)$/i;
   const protocols = (wire.headers.find(([k]) => /^sec-websocket-protocol$/i.test(k))?.[1] ?? '').split(',').map((p) => p.trim()).filter(Boolean);
   tab.ws.state = 'connecting';
-  await attempt(() => api.wsConnect(tab.id, wire.url, plain(wire.headers.filter(([k]) => !hop.test(k) && !/^sec-websocket-protocol$/i.test(k))), protocols));
+  await attempt(() => api.wsConnect(tab.id, wire.url, plain(wire.headers.filter(([k]) => !hop.test(k) && !/^sec-websocket-protocol$/i.test(k))), protocols, { socketIo: tab.spec.socketIo === true }));
 }
 
 export async function sendWs(tab: Tab): Promise<void> {
+  if (tab.spec.socketIo) {
+    // Socket.IO: an event by name; its args may be empty.
+    if (!tab.ws?.event?.trim()) return notify('warning', 'Type the event name');
+    await attempt(() => api.wsSend(tab.id, interpolate(tab.ws!.draft ?? '', vars.value), interpolate(tab.ws!.event!, vars.value)));
+    return;
+  }
   if (!tab.ws?.draft) return;
   await attempt(() => api.wsSend(tab.id, interpolate(tab.ws!.draft, vars.value)));
 }
@@ -468,7 +479,7 @@ async function runChain(chain: { from: string | null; code: string }[], ctx: () 
  * changes are saved before the request is built), send, then test scripts in the same order. Used by request tabs
  * and the collection runner; the runner passes its iteration's data row, which wins over environment variables.
  */
-export async function execute(spec: RequestSpec, itemId: string | null, token: string, data?: Record<string, string>, opts: { checkSpec?: boolean } = {}): Promise<{ result: SendResult; scripts: { pre?: ScriptResult; tests?: ScriptResult } }> {
+export async function execute(spec: RequestSpec, itemId: string | null, token: string, data?: Record<string, string>, opts: { checkSpec?: boolean; stream?: boolean } = {}): Promise<{ result: SendResult; scripts: { pre?: ScriptResult; tests?: ScriptResult } }> {
   const scripts: { pre?: ScriptResult; tests?: ScriptResult } = {};
   const vars = () => new Map([...varsFor(itemId), ...Object.entries(data ?? {})]);
   const wireNow = () => toWire(spec, vars(), effectiveAuth(spec.auth, inheritedAuth(itemId)), { version: appVersion.value });
@@ -477,7 +488,11 @@ export async function execute(spec: RequestSpec, itemId: string | null, token: s
   const wire = wireNow();
   let result: SendResult;
   try {
-    result = await api.send(plain(wire), token, insecureFor(itemId) ? { insecure: true } : {});
+    if (isGrpcUrl(wire.url)) {
+      // #98: a gRPC call. Headers are its metadata (the HTTP ones DialCatz adds by itself stay out); the body is the message.
+      const auto = /^(user-agent|accept|accept-encoding|connection|cache-control|content-type|content-length|host)$/i;
+      result = await api.grpcCall(plain({ url: wire.url.split('?')[0], service: spec.grpc?.service ?? '', method: spec.grpc?.method ?? '', message: interpolate(spec.body.raw, vars()), metadata: wire.headers.filter(([k]) => !auto.test(k)), protoFiles: spec.grpc?.protoFiles, ...(insecureFor(itemId) ? { insecure: true } : {}) }), token);
+    } else result = await api.send(plain(wire), token, { ...(insecureFor(itemId) ? { insecure: true } : {}), ...(opts.stream ? { stream: true } : {}) });
   } catch (e) {
     result = { error: (e as Error).message, sent: { method: wire.method, url: wire.url, headers: wire.headers, body: wire.body } };
   }
@@ -496,6 +511,20 @@ export async function execute(spec: RequestSpec, itemId: string | null, token: s
 /** Requests that got a response in this window's session: Support Catzoid's success moment (Catzoid #94). */
 export const sentOk = ref(0);
 
+const SSE_MAX = 2000;
+/** A live SSE answer's event or end, for the tab that sent it (token = tab id). */
+export function onSseEvent(e: SseEvent): void {
+  const tab = tabs.value.find((t) => t.id === e.token);
+  if (!tab?.sse) return;
+  if (e.type === 'event') {
+    tab.sse.events.push(e);
+    if (tab.sse.events.length > SSE_MAX) tab.sse.events.splice(0, tab.sse.events.length - SSE_MAX);
+  } else {
+    tab.sse.open = false;
+    tab.sse.reason = e.reason;
+  }
+}
+
 export async function sendTab(tab: Tab): Promise<void> {
   if (isWs(tab)) return toggleWs(tab);
   if (tab.sending) {
@@ -508,8 +537,11 @@ export async function sendTab(tab: Tab): Promise<void> {
   }
   tab.sending = true;
   tab.sentAt = new Date().toISOString();
+  // Ready for a live SSE answer before it can start (its first events may beat the send's own answer).
+  tab.sse = { open: true, events: [] };
   try {
-    const { result: r, scripts } = await execute(plain(tab.spec), tab.itemId, tab.id);
+    const { result: r, scripts } = await execute(plain(tab.spec), tab.itemId, tab.id, undefined, { stream: true });
+    if (!r.response?.streaming) tab.sse = undefined;
     tab.result = r;
     tab.scripts = scripts;
     if (r.response) sentOk.value++;
@@ -579,6 +611,7 @@ export function mcatzpTabResponse(id: string | null): McatzpTabResponse | null {
     scriptLogs: [...(t.scripts?.pre?.logs ?? []), ...(t.scripts?.tests?.logs ?? [])].slice(-200),
     scriptError: t.scripts?.pre?.error ?? t.scripts?.tests?.error ?? null,
     log: (t.ws?.log ?? []).slice(-200).map((e) => ({ dir: e.type, text: e.binary ? '(binary)' : e.data.slice(0, 20_000), at: e.at })),
+    ...(t.sse ? { events: { open: t.sse.open, list: t.sse.events.slice(-200).map((e) => ({ event: e.event ?? 'message', data: (e.data ?? '').slice(0, 20_000), ...(e.id ? { id: e.id } : {}), at: e.at })) } } : {}),
   };
 }
 
@@ -726,6 +759,7 @@ export async function mcatzpCommand(what: string, a: Record<string, unknown>): P
     const tab = clientTab(a.tab);
     if (tab.ws?.state !== 'open') throw new Error(`${tab.name} is not connected (websocket_connect)`);
     tab.ws.draft = String(a.text);
+    if (a.event !== undefined) tab.ws.event = String(a.event);
     await sendWs(tab);
     return { sent: true };
   }

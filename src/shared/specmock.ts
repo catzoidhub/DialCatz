@@ -125,6 +125,13 @@ export function exampleFromSchema(schema: unknown, depth = 0): unknown {
 
 /** What the mock answers for a spec response: content type and body text. */
 export function mockBody(r: SpecResponse): { contentType: string; body: string } {
+  // An event stream (SSE) the spec describes: its example as events (a list: one event each), then the stream ends.
+  if (r.types.some((t) => /^text\/event-stream/i.test(t))) {
+    const value = r.example !== undefined ? r.example : r.schema ? exampleFromSchema(r.schema) : undefined;
+    if (typeof value === 'string') return { contentType: 'text/event-stream', body: /\n\n$/.test(value) ? value : `${value.replace(/\n*$/, '')}\n\n` };
+    const list = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
+    return { contentType: 'text/event-stream', body: list.map((v) => `data: ${typeof v === 'string' ? v : JSON.stringify(v)}\n\n`).join('') };
+  }
   const type = r.types.find((t) => /json/i.test(t)) ?? r.types[0] ?? '';
   if (!type) return { contentType: '', body: '' };
   const value = r.example !== undefined ? r.example : r.schema ? exampleFromSchema(r.schema) : undefined;

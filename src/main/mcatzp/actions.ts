@@ -274,6 +274,7 @@ export function readActions(api: DialCatzApi, scopes: Scopes, win: WindowReads):
       const b = await api.browsers();
       return reply({ systemDefault: b.systemDefault?.name ?? null, browsers: b.list.map((x) => ({ name: x.name, path: x.path })) });
     }),
+    read('grpc_describe', 'Describe a gRPC server', "The services and methods a gRPC server offers through server reflection (grpc://host:port, grpcs:// for TLS): each method's request and response types, whether it streams, and an example request message. A request whose URL is grpc:// sends its JSON body to request.grpc.service / method.", OBJECT({ url: NAME('grpc://host:port or grpcs://host:port.') }, ['url']), async (a) => reply(await api.grpcDescribe(String(a.url), {}))),
     read('list_mocks', 'Mock servers', 'The mock servers DialCatz runs now (start_mock): collection, address, how many requests they answer, and their latest calls.', OBJECT(), async () => reply({ mocks: (await api.mockList()).map((m) => ({ workspace: m.workspaceId, collection: m.collectionId, name: m.name, url: m.url, ...(m.devcatz ? { domain: m.devcatz.url } : m.docatz ? { domain: m.docatz.url } : {}), routes: m.routes, latest: m.hits.slice(0, 10) })) })),
     read('list_dbcatz_connections', 'DBCatz connections', 'The connections Check in DBCatz can use: names and engines from DBCatz, never a password.', OBJECT(), async () => {
       const r = await api.dbcatzInfo();

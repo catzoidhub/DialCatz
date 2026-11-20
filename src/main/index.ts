@@ -37,6 +37,7 @@ import { mergeRoutes } from './routemerge';
 import { specApply, specDiff, withBase, type Fresh, type SpecPick } from './specsync';
 import { fetchSpecText, freshFor, hashText, readSpecFile } from './specsource';
 import * as mock from './mock';
+import * as grpcClient from './grpc';
 import { toOpenApi } from './openapi-export';
 import { stringify as toYaml } from 'yaml';
 import { scanFolder } from './specscan';
@@ -1055,7 +1056,8 @@ function api(): DialCatzApi {
         multipart: Array.isArray(wire.multipart) ? wire.multipart.map((p) => (p.file !== undefined ? { name: String(p.name), file: String(p.file) } : { name: String(p.name), value: String(p.value ?? '') })) : undefined,
         bodyFile: wire.bodyFile === undefined ? undefined : String(wire.bodyFile),
       };
-      return http.send(w, token, { ...settings().requests, ...(options ?? {}) });
+      // A live SSE answer's events go to the window (request tabs ask for it with stream: true).
+      return http.send(w, token, { ...settings().requests, ...(options ?? {}) }, (e) => send('app:sse', e));
     },
     aiModels: (provider) => ai.models(provider),
     aiTest: () => ai.test(),
@@ -1083,9 +1085,48 @@ function api(): DialCatzApi {
       http.allowFile(r.filePaths[0]);
       return r.filePaths[0];
     },
-    cancel: async (token) => http.cancel(token),
-    wsConnect: async (token, url, headers, protocols) => sockets.connect(String(token), String(url), (Array.isArray(headers) ? headers : []).map(([k, v]) => [String(k), String(v)] as [string, string]), (Array.isArray(protocols) ? protocols : []).map(String)),
-    wsSend: async (token, data) => sockets.send(String(token), String(data)),
+    cancel: async (token) => {
+      http.cancel(token);
+      grpcClient.cancel(String(token));
+    },
+    grpcDescribe: async (url, o) => grpcClient.describe(String(url), { protoFiles: protoList(o?.protoFiles), insecure: o?.insecure === true || settings().requests.insecure, metadata: (Array.isArray(o?.metadata) ? o.metadata : []).map(([k, v]) => [String(k), String(v)] as [string, string]), timeoutMs: settings().requests.timeoutMs }),
+    grpcPickProto: async () => {
+      const r = await openDialog(win, { title: 'Choose the .proto files of the service', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Protocol Buffers', extensions: ['proto'] }] });
+      if (r.canceled || !r.filePaths.length) return null;
+      return r.filePaths;
+    },
+    grpcCall: async (req, token) => {
+      const started = performance.now();
+      const metadata = (Array.isArray(req?.metadata) ? req.metadata : []).map(([k, v]) => [String(k), String(v)] as [string, string]);
+      const sent = { method: 'GRPC', url: `${String(req.url)}/${String(req.service)}/${String(req.method)}`, headers: metadata, body: String(req.message ?? '') };
+      try {
+        const r = await grpcClient.call({ url: String(req.url), service: String(req.service), method: String(req.method), message: String(req.message ?? ''), metadata, protoFiles: protoList(req.protoFiles), insecure: req.insecure === true || settings().requests.insecure, timeoutMs: settings().requests.timeoutMs, token: String(token) });
+        const body = r.messages.length === 1 ? JSON.stringify(r.messages[0], null, 2) : r.messages.length ? JSON.stringify(r.messages, null, 2) : '';
+        const name = grpcClient.CODES[r.code] ?? `CODE_${r.code}`;
+        return {
+          response: {
+            ok: r.code === 0,
+            status: grpcClient.HTTP_OF[r.code] ?? 500,
+            statusText: r.code === 0 ? 'OK' : `${name}${r.details ? `: ${r.details}` : ''}`,
+            headers: r.headers,
+            body,
+            binary: false,
+            contentType: 'application/json',
+            size: Buffer.byteLength(body),
+            timings: { total: Math.round(performance.now() - started), ttfb: Math.round(r.ttfb) },
+            url: String(req.url),
+            redirected: false,
+            truncated: false,
+            grpc: { code: r.code, name, details: r.details, messages: r.messages.length },
+          },
+          sent,
+        };
+      } catch (e) {
+        return { error: (e as Error).message, sent };
+      }
+    },
+    wsConnect: async (token, url, headers, protocols, options) => sockets.connect(String(token), String(url), (Array.isArray(headers) ? headers : []).map(([k, v]) => [String(k), String(v)] as [string, string]), (Array.isArray(protocols) ? protocols : []).map(String), { socketIo: options?.socketIo === true }),
+    wsSend: async (token, data, event) => sockets.send(String(token), String(data), event === undefined ? undefined : String(event)),
     wsClose: async (token) => sockets.close(String(token)),
     saveResponse: async (token, suggestedName) => {
       const body = http.lastBody(token);
@@ -1307,6 +1348,12 @@ function ownVariable(w: Workspace, collection: TreeItem, items: TreeItem[]): Tre
   const own = w.items.find((i) => i.kind === 'request' && i.request && ids.has(i.id))?.request?.url.match(/^\{\{[^}]+\}\}/)?.[0];
   if (!own || own === '{{baseUrl}}') return items;
   return items.map((i) => (i.request ? { ...i, request: { ...i.request, url: i.request.url.replace(/^\{\{[^}]+\}\}/, own) }, ...(i.specBase ? { specBase: { ...i.specBase, url: i.specBase.url.replace(/^\{\{[^}]+\}\}/, own) } } : {}) } : i));
+}
+
+/** .proto paths from the window: absolute .proto files that exist on this computer (#98). */
+function protoList(x: unknown): string[] | undefined {
+  const list = (Array.isArray(x) ? x : []).map(String).filter((p) => isAbsolute(p) && /\.proto$/i.test(p) && existsSync(p));
+  return list.length ? list : undefined;
 }
 
 // ---------------------------------------------------------------- a mock's environment (#94)
@@ -1705,6 +1752,7 @@ if (primary) app.whenReady().then(async () => {
   }
   if (app.isPackaged && !isLinux) app.setAsDefaultProtocolClient('dialcatz');
   ws.ensureDefault();
+  ws.addProtocolSamples();
   startSupportClock();
   // Once: the cap only trims a cache Chromium opens, and the window's file:// pages never open it, so the dev-mode
   // copies left before the cap (up to 1.2 GB) would stay forever. The V8 Code Cache has no size switch at all and

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { activeTab, activeTabId, mcatzpAsk, mcatzpUpdate, mcatzpCommand, mcatzpInstalling, mcatzpOpen, mcatzpRefresh, mcatzpRun, runnerRunning, mcatzpTabResponse, mcatzpTabs, plain, notify, selectWorkspace, aiOn, askOpen, connectRequest as connect, goSection, importRequest, loadHistory, onWsEvent, presence, loadSettings, loadWorkspaces, reloadWorkspace, restoreTabs, section, sendTab, settings, settingsTab, syncTabsWithWorkspace, updateState, updateOpen, collectionAsk, workspaces, attempt, refreshMocks, setWorkspace, updateOpenAuto, reportOpen, uninstallOpen, tabs, toast, workspace, type Section } from './state';
+import { activeTab, activeTabId, mcatzpAsk, mcatzpUpdate, mcatzpCommand, mcatzpInstalling, mcatzpOpen, mcatzpRefresh, mcatzpRun, runnerRunning, mcatzpTabResponse, mcatzpTabs, plain, notify, selectWorkspace, aiOn, askOpen, connectRequest as connect, goSection, importRequest, loadHistory, onWsEvent, onSseEvent, presence, loadSettings, loadWorkspaces, reloadWorkspace, restoreTabs, section, sendTab, settings, settingsTab, syncTabsWithWorkspace, updateState, updateOpen, collectionAsk, workspaces, attempt, refreshMocks, setWorkspace, updateOpenAuto, reportOpen, uninstallOpen, tabs, toast, workspace, type Section } from './state';
 import { backIndex, backList, canBack, canForward, forwardList, goBack, goForward, goTo, navApply, navPrune, navVisit, type NavEntry } from './nav';
 import PopMenu from './components/PopMenu.vue';
 import UpdateDialog from './components/UpdateDialog.vue';
@@ -275,6 +275,7 @@ onMounted(async () => {
   offs.push(api.onSynced(() => void reloadWorkspace()));
   offs.push(api.onConnect((r) => (connect.value = r)));
   offs.push(api.onWs(onWsEvent));
+  offs.push(api.onSse(onSseEvent));
   // "Open in DialCatz" from DevCatz: the site's workspace in its repository when it has one, else the import.
   offs.push(
     api.onDevCatz(async (siteId) => {

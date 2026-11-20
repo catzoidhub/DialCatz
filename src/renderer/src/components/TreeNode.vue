@@ -44,6 +44,12 @@ const link = computed(() => {
   return undefined;
 });
 const method = computed(() => props.item.request?.method ?? 'GET');
+/** What the request is: its HTTP method, or gRPC / WS / SIO (Socket.IO) for those addresses (#98). */
+const kindLabel = computed(() => {
+  const r = props.item.request;
+  if (!r) return null;
+  return /^grpcs?:\/\//i.test(r.url) ? 'gRPC' : /^wss?:\/\//i.test(r.url) ? (r.socketIo ? 'SIO' : 'WS') : null;
+});
 const short: Record<string, string> = { DELETE: 'DEL', OPTIONS: 'OPT', PATCH: 'PATCH' };
 
 // Reordering works in the user's own order only; by name the rows can still be dropped into a folder.
@@ -77,7 +83,8 @@ const dropClass = computed(() => (props.drop?.id === props.item.id ? `is-drop-${
       @drop.prevent.stop="emit('drop')"
     >
       <template v-if="item.kind === 'request'">
-        <span class="tree-method font-mono" :class="`m-${method.toLowerCase()}`">{{ short[method] ?? method }}</span>
+        <span v-if="kindLabel" class="tree-method font-mono" style="color: var(--color-primary)">{{ kindLabel }}</span>
+        <span v-else class="tree-method font-mono" :class="`m-${method.toLowerCase()}`">{{ short[method] ?? method }}</span>
       </template>
       <template v-else>
         <input v-if="ticks" type="checkbox" class="checkbox checkbox-xs checkbox-primary" :checked="ticked" :aria-label="`Select ${item.name}`" @click.stop="emit('select', item)" />
