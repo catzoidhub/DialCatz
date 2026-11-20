@@ -866,6 +866,9 @@ body.is-resizing * {
   color: var(--color-success);
   background: oklch(from var(--color-success) l c h / 0.14);
 }
+.tree-mock:hover {
+  background: oklch(from var(--color-success) l c h / 0.24);
+}
 .tree-spec:hover {
   background: oklch(from var(--color-primary) l c h / 0.24);
 }
