@@ -9,19 +9,22 @@
   <a href="https://catzoid.com/community">Community</a>
 </p>
 
-An API client for macOS, Windows and Linux: REST, GraphQL and WebSocket requests, collections, environments, scripts, tests and a runner. Share them with your team through Git, as files in a repository you already have with no server at all, or live through your team’s own server, [DialCatz Den](https://github.com/catzoidhub/DialCatz-Den).
+An API client for HTTP, GraphQL and the live protocols — WebSocket, Socket.IO, Pusher, gRPC, Server-Sent Events and JSON-RPC — on macOS, Windows and Linux. Collections can follow an OpenAPI spec, check every response against it and run it as a mock server. Share your work with your team through Git, as files in a repository you already have, or live through your team’s own server, [DialCatz Den](https://github.com/catzoidhub/DialCatz-Den).
 
 Part of [Catzoid](https://catzoid.com) — free, open-source developer tools with nine lives. All cats, no catch: no
 account, no Pro tier, nothing locked behind a payment.
 
 ## What it does
 
-- **Requests** — REST, GraphQL and WebSocket; params, headers, auth, bodies (JSON, form, multipart, binary); paste a cURL command and it becomes a request.
+- **Requests** — every HTTP method, with params, headers, auth and bodies (JSON, form, multipart, binary, GraphQL, JSON-RPC); paste a cURL command and it becomes a request. A Server-Sent Events answer streams in as it comes.
+- **Other protocols** — pick one from the request-kind menu: WebSocket; Socket.IO; Pusher for Reverb, Sockudo, Soketi or Pusher Channels, with private and presence channels signed from a `{{variable}}`; gRPC through server reflection or your `.proto` files.
+- **OpenAPI** — a collection follows its spec (a file, a URL, a DevCatz site or a DoCatz service) and a review dialog shows new, changed and gone requests before anything updates, keeping what you edited. Responses are checked against the spec in the Spec pane and in the runner. A mock server made from the spec runs on 127.0.0.1 (ports 4010–4099), and Send requests here points the collection at it. Import → OpenAPI finds the spec files in a project folder; any collection exports as OpenAPI 3.0.
 - **Collections and environments** — folders, variables, pre-request and test scripts, a runner with iterations; results export as JSON or JUnit XML.
 - **Import** — Postman collections and data exports, Postman workspaces with an API key, OpenAPI / Swagger, cURL.
 - **Teams, two ways** — through Git, with no server: a workspace kept as small YAML files in your repository, reviewed in pull requests and shared with pull and push. Or live through a self-hosted [DialCatz Den](https://github.com/catzoidhub/DialCatz-Den): invite links instead of accounts, a teammate’s change within a second. Either way, environment values stay on each computer. [Git or DialCatz Den?](https://catzoid.com/docs/dialcatz/git#git-or-dialcatz-den)
 - **AI, optional** — explain a response, write tests, generate a body; names and URLs only, never your secrets.
-- **The family** — every [DevCatz](https://github.com/catzoidhub/DevCatz) site is an environment; Check in DBCatz opens the table a request touched.
+- **MCatzP** — let an AI assistant read your workspaces, send requests, follow specs and start mocks through [MCatzP](https://github.com/catzoidhub/MCatzP) (155 tools); anything that changes something asks in DialCatz first.
+- **The family** — every [DevCatz](https://github.com/catzoidhub/DevCatz) site and [DoCatz](https://github.com/catzoidhub/DoCatz) project is an environment, with its routes, sockets and mocks; Check in DBCatz opens the table a request touched.
 
 ## Install
 
@@ -40,7 +43,7 @@ Windows 10 / 11 (x64): `DialCatz-Setup-<version>.exe` from the same page or the
 [latest release](https://github.com/catzoidhub/DialCatz/releases/latest). It installs for your account only, no
 administrator rights needed, and updates itself too. It is not code-signed yet (see Code signing below).
 
-Linux (x64): `DialCatz-<version>-x64.AppImage` or `DialCatz-<version>-amd64.deb` from the same page or the
+Linux (x64 and ARM64): `DialCatz-<version>-<arch>.AppImage` or the `.deb` from the same page or the
 [latest release](https://github.com/catzoidhub/DialCatz/releases/latest). The AppImage offers to install itself into
 `~/Applications` with a menu entry on its first run; the `.deb` suits Ubuntu and Debian. Neither is signed yet.
 
