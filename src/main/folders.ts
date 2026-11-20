@@ -78,7 +78,7 @@ function specDoc(spec: RequestSpec): Record<string, unknown> {
 function itemDoc(i: TreeItem): Record<string, unknown> {
   const base = { id: i.id, name: i.name, sort: i.sort, description: i.description };
   if (i.kind === 'request') return compact({ ...base, request: i.request ? specDoc(i.request) : undefined });
-  return compact({ ...base, auth: i.auth, preRequest: i.preRequest, tests: i.tests, ...(i.kind === 'collection' ? { insecure: i.insecure, environmentId: i.environmentId, origin: i.origin } : {}) });
+  return compact({ ...base, auth: i.auth, preRequest: i.preRequest, tests: i.tests, ...(i.kind === 'collection' ? { insecure: i.insecure, environmentId: i.environmentId, origin: i.origin, spec: i.spec } : {}) });
 }
 
 const yaml = (o: unknown) => stringify(o, { lineWidth: 0 });
@@ -210,6 +210,12 @@ function containerFrom(d: Record<string, unknown>, kind: 'collection' | 'folder'
   if (kind === 'collection' && d.insecure === true) item.insecure = true;
   if (kind === 'collection' && (typeof d.environmentId === 'string' || d.environmentId === null)) item.environmentId = d.environmentId as string | null;
   if (kind === 'collection' && typeof d.origin === 'string' && d.origin) item.origin = str(d.origin, 300);
+  // #92: the spec it follows (a file path is this computer's; a teammate whose copy is elsewhere picks it again).
+  // What the spec made of each request is not kept in the files: updates then take the spec's version only when ticked.
+  if (kind === 'collection' && d.spec && typeof d.spec === 'object') {
+    const sp = d.spec as Record<string, unknown>;
+    if ((sp.kind === 'file' || sp.kind === 'url') && typeof sp.path === 'string') item.spec = { kind: sp.kind, path: str(sp.path, 2000), hash: str(sp.hash, 100) };
+  }
   return item;
 }
 

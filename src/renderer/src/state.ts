@@ -48,6 +48,20 @@ export const connectRequest = ref<ConnectRequest | null>(null);
 export const settings = ref<DialCatzSettings | null>(null);
 export const workspaces = ref<WorkspaceSummary[]>([]);
 export const workspace = ref<Workspace | null>(null);
+/** #92: collections whose spec file or URL changed since they last took it in (the tree marks them). */
+export const specStale = ref<Set<string>>(new Set());
+/** #92: the collection whose spec review is asked for (the tree opens the dialog). */
+export const specAsk = ref<string | null>(null);
+/** #92: asks main which followed specs changed (on focus and when the workspace changes; URLs at most once a minute). */
+export async function refreshSpecStale(): Promise<void> {
+  const w = workspace.value;
+  if (!w || !w.items.some((i) => i.kind === 'collection' && i.spec)) {
+    if (specStale.value.size) specStale.value = new Set();
+    return;
+  }
+  const ids = await api.specStale(w.id).catch(() => null);
+  if (ids && workspace.value?.id === w.id) specStale.value = new Set(ids);
+}
 export const servers = ref<ServerConnection[]>([]);
 export const history = ref<HistoryEntry[]>([]);
 export const tabs = ref<Tab[]>([]);

@@ -302,6 +302,38 @@ export function changeActions(api: DialCatzApi, scopes: Scopes, command: WindowC
       const r = await api.copyCollection(w.id, c.id, to.id, a.mode as 'new' | 'replace' | 'merge', String(a.name ?? c.name));
       return done({ collection: r.collectionId });
     }),
+    asked('apply_spec_changes', 'Apply spec changes', "Takes the picked changes of the last check_collection_spec on this collection: routes to add, requests to update (the user's edits stay), requests whose route is gone to delete. Changes not picked are marked as seen; removed requests not picked stay as the user's own.", { workspace: WORKSPACE, collection: COLLECTION, add: { type: 'array', maxItems: 5000, items: S('A route key from check_collection_spec ("GET /users/:").') }, update: { type: 'array', maxItems: 5000, items: S('A route key.') }, remove: { type: 'array', maxItems: 5000, items: S('A route key.') } }, ['workspace', 'collection'], async (a) => {
+      const w = await writeOf(a.workspace);
+      const c = collectionOf(w, a.collection);
+      const n = (x: unknown) => (Array.isArray(x) ? x.length : 0);
+      return q(`Update ${c.name} from its spec?`, [...fact('Adds', n(a.add) || null), ...fact('Updates', n(a.update) || null), ...fact('Deletes', n(a.remove) ? `${n(a.remove)} request(s) whose route is gone` : null)], { workspaceId: w.id, section: 'requests' });
+    }, async (a) => {
+      const w = await writeOf(a.workspace);
+      const c = collectionOf(w, a.collection);
+      const list = (x: unknown) => (Array.isArray(x) ? x.map(String) : []);
+      const r = await api.specApply(w.id, c.id, { add: list(a.add), update: list(a.update), remove: list(a.remove) });
+      return done({ added: r.added, updated: r.updated, removed: r.removed });
+    }),
+    asked('follow_spec', 'Follow a spec', 'The collection follows an OpenAPI / Swagger document from now on: a URL, or a file the user picks in a dialog. Answers with the first check (as check_collection_spec).', { workspace: WORKSPACE, collection: COLLECTION, how: { type: 'string', enum: ['file', 'url'] }, url: S('The http(s) address of the document (how: url).', 2000) }, ['workspace', 'collection', 'how'], async (a) => {
+      const w = await writeOf(a.workspace);
+      const c = collectionOf(w, a.collection);
+      return q(`Let ${c.name} follow a spec?`, [{ label: 'Spec', value: a.how === 'url' ? String(a.url ?? '') : 'A file you pick next' }], { workspaceId: w.id, section: 'requests' });
+    }, async (a) => {
+      const w = await writeOf(a.workspace);
+      const c = collectionOf(w, a.collection);
+      if (a.how !== 'url') await windowUp();
+      const r = await api.specFollow(w.id, c.id, a.how === 'url' ? 'url' : 'file', a.url ? String(a.url) : undefined);
+      return done(r ? { review: r } : { cancelled: true });
+    }),
+    asked('unfollow_spec', 'Stop following a spec', "The collection stops following its OpenAPI file or URL; its requests stay as they are.", { workspace: WORKSPACE, collection: COLLECTION }, ['workspace', 'collection'], async (a) => {
+      const w = await writeOf(a.workspace);
+      const c = collectionOf(w, a.collection);
+      return q(`Stop ${c.name} following its spec?`, [{ label: 'Requests', value: 'Stay as they are' }], { workspaceId: w.id, section: 'requests' });
+    }, async (a) => {
+      const w = await writeOf(a.workspace);
+      await api.specUnfollow(w.id, collectionOf(w, a.collection).id);
+      return done({});
+    }),
     asked('import_text', 'Import text', 'Text as a new collection: a Postman collection, an OpenAPI / Swagger document (JSON or YAML), a DialCatz export or a cURL command.', { workspace: WORKSPACE, text: S('The text.', 5_000_000) }, ['workspace', 'text'], async (a) => {
       const w = await writeOf(a.workspace);
       return q(`Import this into ${w.name}?`, [{ label: 'Text', value: short(maskText(String(a.text), await secrets()), 300) }], { workspaceId: w.id, section: 'requests' });

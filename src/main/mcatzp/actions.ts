@@ -264,6 +264,11 @@ export function readActions(api: DialCatzApi, scopes: Scopes, win: WindowReads):
       const w = await workspaceOf(a.workspace);
       return reply({ collections: await api.importedBefore(w.id, a.from as 'devcatz' | 'docatz', String(a.key)) });
     }),
+    read('check_collection_spec', 'Check a collection against its spec', "How a collection differs from the OpenAPI file or URL it follows, or from the DevCatz / DoCatz routes it was imported from: routes added to the spec, requests the spec changed (and which parts the user edited, which an update keeps), and requests whose route is gone. Nothing changes; apply_spec_changes takes what the user picks.", OBJECT({ workspace: WORKSPACE, collection: NAME("The collection's id or name (see list_collections).") }, ['workspace', 'collection']), async (a) => {
+      const w = await workspaceOf(a.workspace);
+      const c = collectionOf(w, a.collection);
+      return reply(await api.specCheck(w.id, c.id));
+    }),
     read('list_dbcatz_connections', 'DBCatz connections', 'The connections Check in DBCatz can use: names and engines from DBCatz, never a password.', OBJECT(), async () => {
       const r = await api.dbcatzInfo();
       return reply({ installed: r.installed, connections: r.connections.map((c) => ({ id: c.id, name: c.name, engine: c.engine, database: c.database, source: c.source })) });

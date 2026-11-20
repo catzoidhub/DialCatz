@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { API_METHODS, uid, type ConnectRequest, type DevCatzSite, type DoCatzProject, type McatzpRun, type McatzpTab, type McatzpTabResponse, type Workspace, type EnvVariable, type PostmanChoice, type DialCatzApi, type HistoryEntry, type TreeItem, type WireRequest } from '@shared/types';
+import { API_METHODS, uid, type ConnectRequest, type DevCatzSite, type DoCatzProject, type McatzpRun, type McatzpTab, type McatzpTabResponse, type Workspace, type EnvVariable, type PostmanChoice, type DialCatzApi, type HistoryEntry, type SpecLink, type SpecReview, type TreeItem, type WireRequest } from '@shared/types';
 import { dataDir, store } from './store';
 import { applySettings, setAiKey, setSettings, settings, startSupportClock } from './settings';
 import * as http from './http';
@@ -15,7 +15,7 @@ import * as sockets from './ws';
 import * as ws from './workspaces';
 import * as srv from './servers';
 import * as live from './live';
-import { copyPlan, exportCollection, importText } from './importers';
+import { copyPlan, exportCollection, importSpec, importText } from './importers';
 import * as devcatz from './devcatz';
 import * as docatz from './docatz';
 import * as dbcatz from './dbcatz';
@@ -34,6 +34,8 @@ import * as reviews from './reviews';
 import * as uninstall from './uninstall';
 import * as reports from './reports';
 import { mergeRoutes } from './routemerge';
+import { specApply, specDiff, withBase, type Fresh, type SpecPick } from './specsync';
+import { fetchSpecText, freshFor, hashText, readSpecFile } from './specsource';
 import { Mcatzp } from './mcatzp';
 import * as mcatzpSetup from './mcatzp/install';
 import { MCATZP_TARGETS } from '@catzoid/mcatzp-host';
@@ -536,7 +538,8 @@ function api(): DialCatzApi {
     setActiveEnvironment: async (id, envId) => ws.setActiveEnvironment(id, envId),
     saveGlobals: async (id, globals) => ws.saveGlobals(id, globals),
     saveLayout: async (id, layout) => ws.saveLayout(id, layout),
-    importText: async (id, text) => doImport(id, text),
+    // A bare http(s) address: the document it serves (an OpenAPI one keeps following that address, #92).
+    importText: async (id, text) => (/^https?:\/\/\S+$/.test(text.trim()) ? doImport(id, await fetchSpecText(text.trim()), { kind: 'url', path: text.trim() }) : doImport(id, text)),
     importFile: async (id) => {
       const r = await openDialog(win, {
         title: 'Import a collection, environment or export',
@@ -547,7 +550,7 @@ function api(): DialCatzApi {
       // One collection file goes straight in; an export (zip), several files or an environment go through the pick list.
       if (r.filePaths.length === 1 && !/\.zip$/i.test(r.filePaths[0])) {
         const text = readFileSync(r.filePaths[0], 'utf8');
-        if (!isVariablesFile(text)) return { kind: 'collection' as const, ...doImport(id, text) };
+        if (!isVariablesFile(text)) return { kind: 'collection' as const, ...doImport(id, text, { kind: 'file', path: r.filePaths[0] }) };
       }
       const found = await postman.read(r.filePaths);
       if (!found.collections.length && !found.environments.length && !found.globals.length) throw new Error(`No collections or environments in there${found.skipped.length ? ` (${found.skipped.length} file(s) skipped)` : ''}`);
@@ -564,6 +567,34 @@ function api(): DialCatzApi {
       if (w.serverId) void srv.sync(toId).then(() => send('app:workspaces', null));
       return { workspace: w, collectionId: plan.collectionId };
     },
+    specCheck: async (id, collectionId) => specCheck(id, String(collectionId)),
+    specApply: async (id, collectionId, pick) => specApplyNow(id, String(collectionId), pick),
+    specFollow: async (id, collectionId, how, url) => {
+      const { col } = specCollection(id, String(collectionId));
+      let link: SpecLink;
+      if (how === 'url') {
+        const u = String(url ?? '').trim();
+        importSpec(await fetchSpecText(u));
+        link = { kind: 'url', path: u, hash: '' };
+      } else {
+        const r = await openDialog(win, { title: 'Choose the OpenAPI or Swagger file this collection follows', properties: ['openFile'], filters: [{ name: 'OpenAPI / Swagger (JSON, YAML)', extensions: ['json', 'yaml', 'yml'] }] });
+        if (r.canceled || !r.filePaths.length) return null;
+        importSpec(readSpecFile(r.filePaths[0]));
+        link = { kind: 'file', path: r.filePaths[0], hash: '' };
+      }
+      // No hash yet: the first review shows how the collection differs from the spec it now follows.
+      ws.saveItems(id, [{ ...col, spec: link }]);
+      return specCheck(id, col.id);
+    },
+    specUnfollow: async (id, collectionId) => {
+      const { col } = specCollection(id, String(collectionId));
+      const next = { ...col };
+      delete next.spec;
+      const w = ws.saveItems(id, [next]);
+      if (w.serverId) void srv.sync(id).then(() => send('app:workspaces', null));
+      return w;
+    },
+    specStale: async (id) => specStale(id),
     devcatzSites: async () => ({ installed: devcatz.installed(), sites: devcatz.sites() }),
     dbcatzInfo: async () => ({ installed: dbcatz.installed(), ...dbcatz.connections() }),
     dbcatzOpen: (target) => dbcatz.open(target),
@@ -1006,7 +1037,9 @@ const shortSkip = (f: string) => f.replace(/^.*dialcatz-postman-[^\\/]+[\\/]/, '
  * An imported collection of routes into the workspace: merged into the one an earlier import made (same `origin`, or
  * — imports from before origins were kept — no origin, the same name and the same environment), else added as new.
  */
-function placeRoutes(id: string, w: Workspace, r: { root: TreeItem; items: TreeItem[] }, origin: string, envName: string, into?: string): { w: Workspace; collectionId: string; requests: number; merged: boolean; gone: number } {
+function placeRoutes(id: string, w: Workspace, r0: { root: TreeItem; items: TreeItem[] }, origin: string, envName: string, into?: string): { w: Workspace; collectionId: string; requests: number; merged: boolean; gone: number } {
+  // Each request remembers what the routes made, so a later spec check can tell the user's edits apart (#92).
+  const r = { root: r0.root, items: withBase(r0.items) };
   const envId = w.environments.find((e) => e.name === envName)?.id;
   const fromHere = w.items.filter((i) => i.kind === 'collection' && (i.origin === origin || (!i.origin && i.name === r.root.name && !!envId && i.environmentId === envId)));
   // `into`: the collection the user picked, 'all' (every one imported from here) or 'new'; none: the first from here.
@@ -1020,15 +1053,84 @@ function placeRoutes(id: string, w: Workspace, r: { root: TreeItem; items: TreeI
   let requests = 0;
   let gone = 0;
   for (const existing of targets) {
-    // New requests use the variable the collection's own requests use ({{baseUrl}}, or {{<service>Url}} from "All").
-    const own = w.items.find((i) => i.kind === 'request' && i.request && under(w.items, existing.id).has(i.id))?.request?.url.match(/^\{\{[^}]+\}\}/)?.[0];
-    const items = own && own !== '{{baseUrl}}' ? r.items.map((i) => (i.request ? { ...i, request: { ...i.request, url: i.request.url.replace(/^\{\{[^}]+\}\}/, own) } } : i)) : r.items;
+    const items = ownVariable(w, existing, r.items);
     const m = mergeRoutes(w.items, existing, { root: r.root, items });
     w = ws.saveItems(id, [...(existing.origin === origin ? [] : [{ ...existing, origin }]), ...m.save]);
     requests += m.added;
     gone += m.gone;
   }
   return { w, collectionId: targets[0].id, requests, merged: true, gone };
+}
+
+/** New requests use the variable the collection's own requests use ({{baseUrl}}, or {{<service>Url}} from "All"). */
+function ownVariable(w: Workspace, collection: TreeItem, items: TreeItem[]): TreeItem[] {
+  const ids = under(w.items, collection.id);
+  const own = w.items.find((i) => i.kind === 'request' && i.request && ids.has(i.id))?.request?.url.match(/^\{\{[^}]+\}\}/)?.[0];
+  if (!own || own === '{{baseUrl}}') return items;
+  return items.map((i) => (i.request ? { ...i, request: { ...i.request, url: i.request.url.replace(/^\{\{[^}]+\}\}/, own) }, ...(i.specBase ? { specBase: { ...i.specBase, url: i.specBase.url.replace(/^\{\{[^}]+\}\}/, own) } } : {}) } : i));
+}
+
+// ---------------------------------------------------------------- a collection follows its spec (#92)
+
+/** The spec each review read, so Apply takes exactly what the review showed. */
+const specCache = new Map<string, { fresh: Fresh; hash?: string }>();
+/** URL specs read for specStale: not fetched again within a minute (focus can come often). */
+const specSeen = new Map<string, { at: number; hash: string }>();
+
+function specCollection(id: string, collectionId: string): { w: Workspace; col: TreeItem } {
+  const w = ws.load(id);
+  const col = w.items.find((i) => i.id === collectionId && i.kind === 'collection');
+  if (!col) throw new Error('That collection is gone');
+  return { w, col };
+}
+
+async function specCheck(id: string, collectionId: string): Promise<SpecReview> {
+  const { w, col } = specCollection(id, collectionId);
+  const got = await freshFor(col);
+  const fresh = { root: got.fresh.root, items: ownVariable(w, col, got.fresh.items) };
+  specCache.set(`${id}:${collectionId}`, { fresh, hash: got.hash });
+  if (col.spec && got.hash) specSeen.set(col.spec.path, { at: Date.now(), hash: got.hash });
+  return { collectionId, source: got.source, ...specDiff(w.items, col, fresh) };
+}
+
+function specApplyNow(id: string, collectionId: string, pick: SpecPick) {
+  const key = `${id}:${collectionId}`;
+  const read = specCache.get(key);
+  if (!read) throw new Error('Check the spec again first');
+  const { w, col } = specCollection(id, collectionId);
+  const list = (x: unknown) => (Array.isArray(x) ? x.map(String) : []);
+  const out = specApply(w.items, col, read.fresh, { add: list(pick?.add), update: list(pick?.update), remove: list(pick?.remove) });
+  if (out.remove.length) ws.deleteItems(id, out.remove);
+  // The collection has now taken this version in: no "spec changed" until the document changes again.
+  const next = ws.saveItems(id, [...(col.spec && read.hash ? [{ ...col, spec: { ...col.spec, hash: read.hash } }] : []), ...out.save]);
+  specCache.delete(key);
+  if (next.serverId) void srv.sync(id).then(() => send('app:workspaces', null));
+  return { workspace: next, added: out.added, updated: out.updated, removed: out.removed };
+}
+
+/** Collections whose spec file or URL changed since they last took it in (DevCatz / DoCatz routes: only on request). */
+async function specStale(id: string): Promise<string[]> {
+  const cols = ws.load(id).items.filter((i) => i.kind === 'collection' && i.spec);
+  const stale = await Promise.all(
+    cols.map(async (c) => {
+      const link = c.spec!;
+      try {
+        let hash: string;
+        if (link.kind === 'file') {
+          if (!existsSync(link.path)) return null;
+          hash = hashText(readFileSync(link.path, 'utf8'));
+        } else {
+          const seen = specSeen.get(link.path);
+          hash = seen && Date.now() - seen.at < 60_000 ? seen.hash : hashText(await fetchSpecText(link.path));
+          specSeen.set(link.path, { at: seen && Date.now() - seen.at < 60_000 ? seen.at : Date.now(), hash });
+        }
+        return hash !== link.hash ? c.id : null;
+      } catch {
+        return null; // offline or gone: nothing to say until it can be read
+      }
+    }),
+  );
+  return stale.filter((x): x is string => !!x);
 }
 
 const countRequests = (w: Workspace, collectionId: string) => [...under(w.items, collectionId)].filter((i) => w.items.find((x) => x.id === i)?.kind === 'request').length;
@@ -1137,8 +1239,12 @@ function deviceName(): Promise<string> {
   return new Promise((resolve) => execFile('/usr/sbin/scutil', ['--get', 'ComputerName'], { timeout: 3000 }, (err, out) => resolve(!err && String(out).trim() ? String(out).trim() : fallback())));
 }
 
-function doImport(workspaceId: string, text: string) {
-  const { root, items, baseUrl, variables } = importText(text);
+function doImport(workspaceId: string, text: string, link?: Omit<SpecLink, 'hash'>) {
+  const got = importText(text);
+  const { root, baseUrl, variables } = got;
+  // An OpenAPI document: each request remembers what the spec made, and a file or URL import keeps following it (#92).
+  const items = got.openapi ? withBase(got.items) : got.items;
+  if (got.openapi && link) root.spec = { ...link, hash: hashText(text) };
   const w0 = ws.load(workspaceId);
   root.sort = w0.items.filter((i) => i.kind === 'collection').length;
   let w = ws.saveItems(workspaceId, [root, ...items]);

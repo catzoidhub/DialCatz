@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import CodeEditor from './CodeEditor.vue';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import { emptyLayout, uid, type ExportFormat, type RequestAuth, type SidebarLayout, type TreeItem } from '@shared/types';
-import { attempt, closeTab, defaultEnvironment, freshRequest, importRequest, newTab, notify, openItem, plain, presenceByItem, readOnly, section, syncTabsWithWorkspace, tabs, workspace } from '../state';
+import { emptyLayout, uid, type ExportFormat, type RequestAuth, type SidebarLayout, type SpecReview, type TreeItem, type Workspace } from '@shared/types';
+import { attempt, closeTab, defaultEnvironment, freshRequest, importRequest, newTab, notify, openItem, plain, presenceByItem, readOnly, refreshSpecStale, section, specAsk, specStale, syncTabsWithWorkspace, tabs, workspace } from '../state';
 import TreeNode, { type DropTarget } from './TreeNode.vue';
 import PromptDialog from './PromptDialog.vue';
 import ConfirmDialog from './ConfirmDialog.vue';
@@ -10,6 +10,7 @@ import AuthEditor from './AuthEditor.vue';
 import ImportDialog from './ImportDialog.vue';
 import RunnerDialog from './RunnerDialog.vue';
 import CopyCollectionDialog from './CopyCollectionDialog.vue';
+import SpecReviewDialog from './SpecReviewDialog.vue';
 import Icon from './Icon.vue';
 import CopyName from './CopyName.vue';
 import { store } from '../store';
@@ -272,6 +273,55 @@ async function saveAuth() {
   if (a.item.kind !== 'collection' || a.env === '') delete next.environmentId;
   await apply(() => api.saveItems(workspace.value!.id, [next]), 'Saved');
 }
+
+// ---------------------------------------------------------------- a collection follows its spec (#92)
+
+/** Its spec: an OpenAPI file or URL it follows, or the DevCatz / DoCatz routes it was imported from. */
+const followsSpec = (i: TreeItem) => i.kind === 'collection' && (!!i.spec || /^(devcatz|docatz):/.test(i.origin ?? ''));
+const specLabel = (i: TreeItem) => (i.spec ? (i.spec.kind === 'url' ? i.spec.path : i.spec.path.split(/[\\/]/).pop()) : i.origin?.startsWith('devcatz:') ? 'DevCatz routes' : 'DoCatz routes');
+const reviewing = ref<{ review: SpecReview; name: string } | null>(null);
+const checking = ref<string | null>(null);
+async function checkSpec(item: TreeItem) {
+  checking.value = item.id;
+  const r = await attempt(() => api.specCheck(workspace.value!.id, item.id));
+  checking.value = null;
+  if (r) reviewing.value = { review: r, name: item.name };
+}
+async function followSpec(item: TreeItem, how: 'file' | 'url') {
+  let url: string | undefined;
+  if (how === 'url') {
+    url = ((await ask('Follow a spec URL', item.spec?.kind === 'url' ? item.spec.path : 'https://', 'Follow')) ?? '').trim();
+    if (!url || url === 'https://') return;
+  }
+  const r = await attempt(() => api.specFollow(workspace.value!.id, item.id, how, url));
+  if (!r) return;
+  const w = await attempt(() => api.workspace(workspace.value!.id));
+  if (w) workspace.value = w;
+  reviewing.value = { review: r, name: item.name };
+}
+async function unfollowSpec(item: TreeItem) {
+  await apply(() => api.specUnfollow(workspace.value!.id, item.id), `“${item.name}” no longer follows its spec`);
+  void refreshSpecStale();
+}
+function specDone(w: Workspace, summary: string) {
+  reviewing.value = null;
+  workspace.value = w;
+  syncTabsWithWorkspace(w);
+  notify('success', summary);
+  void refreshSpecStale();
+}
+// The tree's "spec" mark asks for a review.
+watch(specAsk, (id) => {
+  if (!id) return;
+  specAsk.value = null;
+  const item = workspace.value?.items.find((i) => i.id === id);
+  if (item) void checkSpec(item);
+});
+// A spec file or URL that changed is noticed when DialCatz comes to the front and when the workspace changes.
+const onFocus = () => void refreshSpecStale();
+onMounted(() => (window.addEventListener('focus', onFocus), void refreshSpecStale()));
+onBeforeUnmount(() => window.removeEventListener('focus', onFocus));
+watch(() => workspace.value?.id, () => void refreshSpecStale());
 
 // ---------------------------------------------------------------- context menu
 
@@ -548,6 +598,18 @@ const SORTS: { id: SidebarLayout['sortBy']; label: string }[] = [
             </ul>
           </details>
         </li>
+        <li>
+          <details>
+            <summary>Spec<span v-if="specStale.has(menu.item.id)" class="tree-spec ml-auto">changed</span></summary>
+            <ul>
+              <li v-if="followsSpec(menu.item)" class="menu-title max-w-48 truncate normal-case" :title="specLabel(menu.item)">{{ specLabel(menu.item) }}</li>
+              <li v-if="followsSpec(menu.item)"><button :disabled="readOnly || checking === menu.item.id" @click="run(checkSpec)">Check for changes…</button></li>
+              <li><button :disabled="readOnly" @click="run((i) => followSpec(i, 'file'))">{{ menu.item.spec ? 'Follow another file…' : 'Follow a spec file…' }}</button></li>
+              <li><button :disabled="readOnly" @click="run((i) => followSpec(i, 'url'))">{{ menu.item.spec ? 'Follow another URL…' : 'Follow a spec URL…' }}</button></li>
+              <li v-if="menu.item.spec"><button :disabled="readOnly" @click="run(unfollowSpec)">Stop following</button></li>
+            </ul>
+          </details>
+        </li>
         <li><button @click="run((i) => (copying = i))">Copy to workspace…</button></li>
         <li><button @click="run(exportIt)">Export…</button></li>
       </template>
@@ -626,6 +688,7 @@ const SORTS: { id: SidebarLayout['sortBy']; label: string }[] = [
       <div class="modal-backdrop" @click="exporting = null" />
     </dialog>
     <CopyCollectionDialog v-if="copying" :collection="copying" @close="copying = null" />
+    <SpecReviewDialog v-if="reviewing" :review="reviewing.review" :name="reviewing.name" :workspace-id="workspace!.id" @close="reviewing = null" @done="specDone" />
     <RunnerDialog v-if="running" :root="running" @close="running = null" />
     <ImportDialog v-if="importing" :tab="importTab.tab" :site-id="importTab.siteId" :project="importTab.project" :service="importTab.service" @done="imported" @cancel="((importing = false), (importTab = { tab: 'choose' }))" />
   </div>

@@ -829,6 +829,21 @@ body.is-resizing * {
   border-radius: 999px;
   background: var(--color-accent);
 }
+/* #92: the collection's spec changed since it last took it in; a click opens the review. */
+.tree-spec {
+  flex-shrink: 0;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 16px;
+  color: var(--primary-ink, var(--color-primary));
+  background: oklch(from var(--color-primary) l c h / 0.14);
+}
+.tree-spec:hover {
+  background: oklch(from var(--color-primary) l c h / 0.24);
+}
 .tree-empty {
   height: 24px;
   font-size: 11px;

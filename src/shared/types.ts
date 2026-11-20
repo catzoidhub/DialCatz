@@ -101,6 +101,13 @@ export interface TreeItem {
    * `docatz:<project>:<service>`), so importing again — or Open in DialCatz — adds the new routes to it.
    */
   origin?: string;
+  /**
+   * Collections that follow an OpenAPI / Swagger document (#92): where it is read from, and a hash of the text last
+   * taken in, so a changed file or URL is noticed and its changes are offered for review.
+   */
+  spec?: SpecLink;
+  /** Requests made from a spec (#92): the request as the spec made it, so an update can tell the user's edits apart. */
+  specBase?: SpecBase;
   /** Collections: where "Check in DBCatz" looks. This computer only (connections differ per computer): never synced. */
   database?: { conn: string; db: string };
   /** Requests: the table "Check in DBCatz" opens when the guess from the URL is wrong. This computer only. */
@@ -110,6 +117,52 @@ export interface TreeItem {
   dirty?: boolean;
   updatedBy?: string;
   updatedAt?: string;
+}
+
+/** Where a collection's spec is read from (#92). */
+export interface SpecLink {
+  kind: 'file' | 'url';
+  /** A file path on this computer, or an http(s) address. */
+  path: string;
+  /** sha256 of the document text the collection last took in. */
+  hash: string;
+}
+
+/** The parts of a request a spec decides (#92); everything else (auth, scripts, …) is always the user's. */
+export interface SpecBase {
+  name: string;
+  method: HttpMethod;
+  url: string;
+  params: KeyValue[];
+  headers: KeyValue[];
+  body: RequestBody;
+  description?: string;
+}
+
+/** One difference between a collection and its spec (#92). `key` is the route ("GET /users/:"). */
+export interface SpecChange {
+  key: string;
+  kind: 'added' | 'changed' | 'removed';
+  name: string;
+  method: string;
+  url: string;
+  /** changed / removed: the request in the collection. */
+  requestId?: string;
+  /** changed: which parts the spec changed (name, method, url, params, headers, body, description). */
+  parts?: string[];
+  /** changed: parts the user edited that the spec changed too — the user's version stays. */
+  kept?: string[];
+  /** changed: no record of what the spec made before (imported before #92), so ticking takes the spec's version. */
+  noBase?: boolean;
+}
+
+export interface SpecReview {
+  collectionId: string;
+  /** Where the document came from, for the dialog ("api.yaml", "https://…/openapi.json", "DevCatz · shop"). */
+  source: string;
+  changes: SpecChange[];
+  /** Requests that match the spec already. */
+  unchanged: number;
 }
 
 export interface EnvVariable {
@@ -1137,6 +1190,16 @@ export interface DialCatzApi {
   saveLayout(workspaceId: string, layout: SidebarLayout): Promise<Workspace>;
   /** Imports a Postman v2 collection, an OpenAPI 3 document or a DialCatz export (JSON / YAML text) as a collection. */
   importText(workspaceId: string, text: string): Promise<{ workspace: Workspace; collectionId: string; count: number }>;
+  /** #92: how a collection differs from its spec now (reads the file, URL, or the DevCatz / DoCatz routes). */
+  specCheck(workspaceId: string, collectionId: string): Promise<SpecReview>;
+  /** #92: takes the picked changes (route keys) from the spec the last specCheck read; the rest are marked as seen. */
+  specApply(workspaceId: string, collectionId: string, pick: { add: string[]; update: string[]; remove: string[] }): Promise<{ workspace: Workspace; added: number; updated: number; removed: number }>;
+  /** #92: the collection follows an OpenAPI file (picked now) or URL from now on; returns the first review (null: cancelled). */
+  specFollow(workspaceId: string, collectionId: string, how: 'file' | 'url', url?: string): Promise<SpecReview | null>;
+  /** #92: the collection stops following its spec file or URL (its requests stay as they are). */
+  specUnfollow(workspaceId: string, collectionId: string): Promise<Workspace>;
+  /** #92: collections whose spec file or URL changed since they last took it in. */
+  specStale(workspaceId: string): Promise<string[]>;
   /** Picks a file and imports it like importText (null: cancelled). */
   /**
    * Picks files: one collection file goes straight in (`collection`); an export zip, several files or an environment
@@ -1304,7 +1367,7 @@ export const API_METHODS = [
   'workspaces', 'workspace', 'createWorkspace', 'renameWorkspace', 'deleteWorkspace', 'openFolderWorkspace', 'useFolder', 'stopUsingFolder', 'revealFolder', 'folderGitStatus', 'folderGitDiff', 'folderGitCommit', 'folderGitPull', 'folderGitPush', 'folderGitInit', 'folderGitAbortMerge',
   'gitState', 'gitInstall', 'gitUpdateCheck', 'gitUpdate', 'gitWatch', 'gitRepoAdd', 'gitRepoRemove', 'gitRepoLog', 'gitRevealRepo', 'gitOpenWorkspace', 'gitPickFolder', 'gitStatus', 'gitInit', 'gitDiff', 'gitStage', 'gitUnstage', 'gitDiscard', 'gitCommit', 'gitSync', 'gitCancel', 'gitLog', 'gitShow', 'gitBranches', 'gitBranch', 'gitStashes', 'gitStash', 'gitTags', 'gitTag', 'gitOperation', 'gitSquash', 'gitCherryPick', 'gitRevert', 'gitReset', 'gitRestoreFile', 'gitOpenFile', 'gitIgnoreSuggestions', 'gitIgnoreAdd', 'gitignoreRead', 'gitignoreSave', 'gitSetIdentity', 'gitAddRemote', 'gitWorktrees', 'gitWorktreeAdd', 'gitWorktreeRemove', 'gitWorktreePrune', 'gitPulls', 'gitCreatePull', 'gitCheckoutPull', 'gitAddAccount', 'gitRemoveAccount', 'gitRepos', 'gitSshKeys', 'gitSshGenerate', 'gitSshAddToAccount', 'gitClone', 'gitCancelClone', 'gitDismissClone', 'gitAccounts', 'gitCreateRemoteRepo', 'gitDevCatzAccounts', 'gitImportDevCatz', 'folderGitConnect', 'createFolderWorkspace', 'pickFolder', 'teamAdminUrl', 'appMenu', 'menuShortcuts', 'menuKey',
   'saveItems', 'deleteItems',
-  'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'importedBefore', 'docatzProjects', 'docatzImport', 'docatzOpen', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection',
+  'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'specCheck', 'specApply', 'specFollow', 'specUnfollow', 'specStale', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'importedBefore', 'docatzProjects', 'docatzImport', 'docatzOpen', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection',
   'aiModels', 'aiTest', 'aiAsk', 'aiExplain', 'aiTests', 'aiBody', 'aiCancel',
   'send', 'pickFile', 'pickDataFile', 'saveText', 'cancel', 'wsConnect', 'wsSend', 'wsClose', 'saveResponse', 'history', 'addHistory', 'clearHistory',
   'servers', 'probeServer', 'connectWithToken', 'connectWithCode', 'refreshServer', 'disconnectServer', 'subscribeWorkspace', 'setPresence', 'presence', 'syncWorkspace', 'resolveConflict',

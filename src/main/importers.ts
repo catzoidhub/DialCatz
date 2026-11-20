@@ -321,7 +321,7 @@ function fromDialCatz(doc: DialCatzExport): { root: TreeItem; items: TreeItem[] 
   return { root, items };
 }
 
-export function importText(text: string): { root: TreeItem; items: TreeItem[]; baseUrl?: string; variables?: EnvVariable[] } {
+export function importText(text: string): { root: TreeItem; items: TreeItem[]; baseUrl?: string; variables?: EnvVariable[]; openapi?: boolean } {
   const trimmed = text.trim();
   if (trimmed.startsWith('curl')) {
     const spec = parseCurl(trimmed);
@@ -342,7 +342,7 @@ export function importText(text: string): { root: TreeItem; items: TreeItem[]; b
     if (!doc || typeof doc !== 'object') throw new Error('Not a format DialCatz knows (Postman v2 collection, OpenAPI 3 / Swagger 2 in JSON or YAML, DialCatz export, cURL)');
   }
   if (doc.dialcatz === 1) return fromDialCatz(doc as unknown as DialCatzExport);
-  if (typeof doc.openapi === 'string' || typeof doc.swagger === 'string') return fromOpenApi(doc);
+  if (typeof doc.openapi === 'string' || typeof doc.swagger === 'string') return { ...fromOpenApi(doc), openapi: true };
   if (doc.info && Array.isArray(doc.item)) return fromPostman(doc);
   throw new Error('Not a format DialCatz knows (Postman v2 collection, OpenAPI 3 / Swagger 2, DialCatz export)');
 }
@@ -388,4 +388,12 @@ export function copyPlan(target: TreeItem[], data: DialCatzExport, mode: CopyMod
   }
   fresh.root.sort = rootSort;
   return { save: [fresh.root, ...fresh.items], remove: [], collectionId: fresh.root.id };
+}
+
+/** An OpenAPI 3 / Swagger 2 document (JSON or YAML) as a collection; anything else is an error (#92). */
+export function importSpec(text: string): { root: TreeItem; items: TreeItem[]; baseUrl?: string } {
+  if (/^\s*curl\b/.test(text)) throw new Error('Not an OpenAPI or Swagger document');
+  const r = importText(text);
+  if (!r.openapi) throw new Error('Not an OpenAPI or Swagger document');
+  return r;
 }
