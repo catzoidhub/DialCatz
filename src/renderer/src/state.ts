@@ -2,7 +2,7 @@ import { computed, reactive, ref, toRaw, watch } from 'vue';
 import { newRequest, uid, type ConnectRequest, type McatzpAsk, type McatzpInstallProgress, type McatzpRun, type McatzpTab, type McatzpTabResponse, type DialCatzSettings, type Environment, type EnvVariable, type PresenceEntry, type WsEvent, type SseEvent, type HistoryEntry, type RequestAuth, type RequestSpec, type SendResult, type ServerConnection, type TreeItem, type Workspace, type WorkspaceSummary, type MockState } from '@shared/types';
 import { AUTO_HEADERS, buildVars, effectiveAuth, interpolate, nameFromUrl, resolveOAuth, toWire, type Vars } from '@shared/request';
 import { store } from './store';
-import { requestContext, responseContext, runScript, type ScriptResult } from './scripts';
+import { requestContext, responseContext, runScript, type ScriptResult, type WsRunMessage } from './scripts';
 import { checkResponse } from '@shared/speccheck';
 
 /**
@@ -223,6 +223,9 @@ export async function authForSend(spec: RequestSpec, itemId: string | null, with
   return { ...a, token: r.token };
 }
 
+/** An OAuth device sign-in's code is on screen in the Auth tab that started it (DeviceCodeCard stays away then). */
+export const deviceCodeInline = ref(false);
+
 export const appVersion = ref('0.1.0');
 export function wireFor(tab: Tab) {
   return toWire(tab.spec, varsFor(tab.itemId), effectiveAuth(tab.spec.auth, inheritedAuth(tab.itemId)), { version: appVersion.value });
@@ -439,7 +442,92 @@ export async function sendWs(tab: Tab): Promise<void> {
 }
 
 /** Events from the main process land in their tab's log. */
+// Connections the runner opens for a WebSocket request (not a tab's): their events go to the run, not to a tab.
+const runSockets = new Map<string, (e: WsEvent) => void>();
+
+/** What a run's row calls a request: its method, or the kind of socket / gRPC it speaks. */
+export const runLabel = (spec: RequestSpec): string => (spec.pusher ? 'PSH' : spec.socketIo ? 'SIO' : /^\s*wss?:\/\//i.test(spec.url) ? 'WS' : isGrpcUrl(spec.url) ? 'gRPC' : spec.method);
+
+/** How long a WebSocket request listens in a run after it connected and sent its first message. */
+const WS_RUN_WAIT_MS = 2000;
+
+/**
+ * A WebSocket / Socket.IO / Pusher request in a run (the collection runner, MCatzP's run_collection), as the CLI does
+ * it: connect with the request's handshake headers, join its saved Pusher channels, send the first message kept with
+ * the request, listen for a moment, close. The answer is a 101 whose body lists what arrived; tests get it as
+ * dc.messages.
+ */
+async function wsRun(spec: RequestSpec, wire: ReturnType<typeof toWire>, itemId: string | null, vars: Vars): Promise<{ result: SendResult; messages: WsRunMessage[] }> {
+  const token = `run-ws-${uid('')}`;
+  const started = performance.now();
+  const messages: WsRunMessage[] = [];
+  const sent = { method: spec.pusher ? 'PSH' : spec.socketIo ? 'SIO' : 'WS', url: wire.url, headers: wire.headers };
+  const hop = /^(connection|upgrade|sec-websocket-(key|version|extensions)|accept-encoding|cache-control|content-type|content-length)$/i;
+  const protocols = (wire.headers.find(([k]) => /^sec-websocket-protocol$/i.test(k))?.[1] ?? '').split(',').map((p) => p.trim()).filter(Boolean);
+  const first = spec.wsMessage;
+  const timeoutMs = settings.value?.requests.timeoutMs ?? 30_000;
+  try {
+    await new Promise<void>((done, fail) => {
+      const timer = setTimeout(() => fail(new Error(`No connection within ${Math.round(timeoutMs / 1000)} s`)), timeoutMs);
+      let ready = false;
+      let sentFirst = false;
+      const channels = spec.pusher ? (spec.pusher.channels ?? []).map((ch) => interpolate(ch, vars)) : [];
+      const joined = new Set<string>();
+      const sendFirst = () => {
+        if (sentFirst) return;
+        sentFirst = true;
+        if (first && (first.text.trim() || first.event?.trim())) {
+          void api.wsSend(token, interpolate(first.text, vars), first.event?.trim() ? interpolate(first.event, vars) : undefined, first.channel?.trim() ? interpolate(first.channel, vars) : undefined).catch((e: Error) => fail(e));
+        }
+        setTimeout(done, WS_RUN_WAIT_MS);
+      };
+      // Raw and Socket.IO are ready when the connection opens; Pusher once the server has given the socket id.
+      const start = () => {
+        ready = true;
+        clearTimeout(timer);
+        if (!spec.pusher) return sendFirst();
+        for (const ch of channels) void api.wsPusherChannel(token, 'subscribe', ch, plain({ secret: interpolate(spec.pusher.secret ?? '', vars) || undefined, userId: interpolate(spec.pusher.userId ?? '', vars) || undefined })).catch((e: Error) => fail(e));
+        // A client event goes out once its channels are joined (or after a moment, when one was refused).
+        if (!channels.length) sendFirst();
+        else setTimeout(sendFirst, 2000);
+      };
+      runSockets.set(token, (e) => {
+        if (e.type === 'error') {
+          clearTimeout(timer);
+          fail(new Error(e.data || 'The connection failed'));
+        } else if (e.type === 'close' && !ready) {
+          clearTimeout(timer);
+          fail(new Error(`The server closed the connection (${e.data || 'no reason'})`));
+        } else if (e.type === 'in') {
+          const pair = / · /.test(e.event ?? '') ? /^(.*?) · (.*)$/.exec(e.event!) : null;
+          const sub = /^subscribed (.+)$/.exec(e.event ?? '');
+          messages.push({ data: e.data, ...(pair ? { channel: pair[1], event: pair[2] } : sub ? { channel: sub[1], event: 'subscribed' } : e.event ? { event: e.event } : {}) });
+          if (spec.pusher && !ready && e.event === 'connected') start();
+          if (sub) {
+            joined.add(sub[1]);
+            if (ready && channels.every((c) => joined.has(c))) sendFirst();
+          }
+        } else if (e.type === 'open' && !ready && !spec.pusher) start();
+      });
+      api.wsConnect(token, wire.url, plain(wire.headers.filter(([k]) => !hop.test(k) && !/^sec-websocket-protocol$/i.test(k))), protocols, { socketIo: spec.socketIo === true, pusher: !!spec.pusher }).catch((e: Error) => {
+        clearTimeout(timer);
+        fail(e);
+      });
+    });
+    const ms = Math.round(performance.now() - started);
+    const body = JSON.stringify(messages, null, 2);
+    return { messages, result: { sent, response: { ok: true, status: 101, statusText: 'Switching Protocols', headers: [], body, binary: false, contentType: 'application/json', size: new TextEncoder().encode(body).length, timings: { total: ms, ttfb: ms }, url: wire.url } as unknown as SendResult['response'] } };
+  } catch (e) {
+    return { messages, result: { sent, error: String((e as Error).message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '') } };
+  } finally {
+    runSockets.delete(token);
+    void api.wsClose(token).catch(() => undefined);
+  }
+}
+
 export function onWsEvent(e: WsEvent): void {
+  const run = runSockets.get(e.token);
+  if (run) return run(e);
   const tab = tabs.value.find((t) => t.id === e.token);
   if (!tab) return;
   tab.ws ??= { state: 'idle', log: [], draft: '' };
@@ -521,10 +609,16 @@ export async function execute(spec: RequestSpec, itemId: string | null, token: s
   scripts.pre = await runChain(pre, () => ({ request: requestContext(wireNow()), vars: Object.fromEntries(vars()), data }), itemId);
   let wire = wireNow();
   let result: SendResult;
+  let messages: WsRunMessage[] | undefined;
   try {
     // OAuth 2.0: the token is got after the pre-request scripts (they may set what it is asked with).
     if (effectiveAuth(spec.auth, inheritedAuth(itemId)).mode === 'oauth2') wire = toWire(spec, vars(), await authForSend(spec, itemId, vars(), opts.interactive === true), { version: appVersion.value });
-    if (isGrpcUrl(wire.url)) {
+    if (/^wss?:\/\//i.test(wire.url)) {
+      // A WebSocket request in a run (a tab connects itself instead, through toggleWs).
+      const r = await wsRun(spec, wire, itemId, vars());
+      result = r.result;
+      messages = r.messages;
+    } else if (isGrpcUrl(wire.url)) {
       // #98: a gRPC call. Headers are its metadata (the HTTP ones DialCatz adds by itself stay out); the body is the message.
       const auto = /^(user-agent|accept|accept-encoding|connection|cache-control|content-type|content-length|host)$/i;
       result = await api.grpcCall(plain({ url: wire.url.split('?')[0], service: spec.grpc?.service ?? '', method: spec.grpc?.method ?? '', message: interpolate(spec.body.raw, vars()), metadata: wire.headers.filter(([k]) => !auto.test(k)), protoFiles: spec.grpc?.protoFiles, ...(insecureFor(itemId) ? { insecure: true } : {}) }), token);
@@ -533,9 +627,9 @@ export async function execute(spec: RequestSpec, itemId: string | null, token: s
     result = { error: String((e as Error).message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), sent: { method: wire.method, url: wire.url, headers: wire.headers, body: wire.body } };
   }
   const tests = [...scriptChain(itemId, 'tests'), ...(spec.tests?.trim() ? [{ from: null, code: spec.tests }] : [])];
-  if (result.response) scripts.tests = await runChain(tests, () => ({ request: requestContext(wire), response: responseContext(result.response!), vars: Object.fromEntries(vars()), data }), itemId);
+  if (result.response) scripts.tests = await runChain(tests, () => ({ request: requestContext(wire), response: responseContext(result.response!), vars: Object.fromEntries(vars()), data, ...(messages ? { messages } : {}) }), itemId);
   // #93: the runner's "Check responses against the spec" counts as one more test.
-  const specResponses = opts.checkSpec ? workspace.value?.items.find((i) => i.id === itemId)?.specResponses : undefined;
+  const specResponses = opts.checkSpec && !messages ? workspace.value?.items.find((i) => i.id === itemId)?.specResponses : undefined;
   if (result.response && specResponses?.length) {
     const c = checkResponse(specResponses, result.response);
     scripts.tests ??= { tests: [], logs: [], changes: {}, error: null };
@@ -729,7 +823,7 @@ async function runForClient(target: string, iterations: number, delay: number, s
       const tests = [...(scripts.pre?.tests ?? []), ...(scripts.tests?.tests ?? [])];
       const error = result.error ?? scripts.pre?.error ?? scripts.tests?.error ?? undefined;
       const failed = tests.filter((t) => !t.pass);
-      run.rows.push({ iteration: it, name: item.name, method: item.request!.method, url: result.sent?.url ?? item.request!.url, status: result.response?.status ?? null, timeMs: result.response?.timings.total ?? 0, passed: tests.length - failed.length, failed: failed.length, ...(error ? { error } : {}), failures: failed.map((t) => `${t.name}: ${t.error}`) });
+      run.rows.push({ iteration: it, name: item.name, method: runLabel(item.request!), url: result.sent?.url ?? item.request!.url, status: result.response?.status ?? null, timeMs: result.response?.timings.total ?? 0, passed: tests.length - failed.length, failed: failed.length, ...(error ? { error } : {}), failures: failed.map((t) => `${t.name}: ${t.error}`) });
       if (stopOnFail && (failed.length || error)) break outer;
       if (delay > 0) await new Promise((r) => setTimeout(r, delay));
     }

@@ -25,6 +25,14 @@ export interface ScriptContext {
   vars: Record<string, string>;
   /** The runner's data row for this iteration (CSV / JSON data file). */
   data?: Record<string, string>;
+  /** A WebSocket request run on its own (the runner): what arrived while it listened. */
+  messages?: WsRunMessage[];
+}
+export interface WsRunMessage {
+  data: string;
+  /** Socket.IO: the event. Pusher: the event, with its channel. */
+  event?: string;
+  channel?: string;
 }
 
 /** The sandbox stops a script after 10 s itself; this is the backstop if the frame stops answering. */

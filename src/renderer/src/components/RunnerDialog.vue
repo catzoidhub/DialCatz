@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { uid, type TreeItem } from '@shared/types';
-import { envFor, execute, notify, plain, runnerRunning, workspace } from '../state';
+import { envFor, execute, notify, plain, runnerRunning, workspace, runLabel } from '../state';
 import CatMood from './CatMood.vue';
 
 /**
@@ -99,7 +99,7 @@ async function run() {
         key: `${it}-${item.id}`,
         iteration: it,
         name: item.name,
-        method: item.request!.method,
+        method: runLabel(item.request!),
         status: result.response?.status ?? null,
         time: result.response?.timings.total ?? 0,
         passed: tests.filter((t) => t.pass).length,

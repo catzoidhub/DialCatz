@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { OAUTH_REDIRECT, type AuthMode, type OAuthDevicePrompt, type OAuthGrant, type OAuthSettings, type OAuthStatus, type RequestAuth } from '@shared/types';
 import { resolveOAuth } from '@shared/request';
 import { oauthProblem } from '@shared/oauth';
-import { insecureFor, notify, plain, varsFor } from '../state';
+import { deviceCodeInline, insecureFor, notify, plain, varsFor } from '../state';
 import VarInput from './VarInput.vue';
 import Icon from './Icon.vue';
 
@@ -45,6 +45,8 @@ const tick = setInterval(() => (now.value = Date.now()), 15_000);
 let timer: ReturnType<typeof setTimeout> | null = null;
 onBeforeUnmount(() => {
   offDevice();
+  // Left while its sign-in still waits: the global card takes over.
+  if (busy.value) deviceCodeInline.value = false;
   clearInterval(tick);
   if (timer) clearTimeout(timer);
 });
@@ -64,6 +66,8 @@ watch(
 async function getToken() {
   failed.value = '';
   busy.value = true;
+  // A device code started here shows in this tab; the global card stays away.
+  if (o.value.grant === 'device_code') deviceCodeInline.value = true;
   try {
     const r = await window.dialcatz.oauthToken(plain(resolved.value), { interactive: true, fresh: true, ...(insecureFor(props.itemId) ? { insecure: true } : {}) });
     status.value = r.status;
@@ -72,6 +76,7 @@ async function getToken() {
     failed.value = clean(e);
   } finally {
     busy.value = false;
+    deviceCodeInline.value = false;
   }
 }
 const cancelSignIn = () => void window.dialcatz.oauthCancel();

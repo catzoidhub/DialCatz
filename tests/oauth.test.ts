@@ -123,3 +123,14 @@ test('discovery: where a provider describes itself, and what is taken from it', 
   expect(() => readDiscovery('{"issuer":"https://id"}')).toThrow('token_endpoint');
   expect(() => readDiscovery('<html>')).toThrow('discovery document');
 });
+
+test('Postman export: grants Postman knows go out as themselves; a device code is left out', async () => {
+  const { toPostman } = await import('../src/main/postman-export');
+  const col = (auth: object) => [{ id: 'c', kind: 'collection' as const, parentId: null, name: 'C', sort: 0, auth }, { id: 'r', kind: 'request' as const, parentId: 'c', name: 'R', sort: 0, request: { ...newRequest(), url: 'https://x.test', auth: { mode: 'inherit' as const } } }];
+  const out = (auth: object) => (toPostman(col(auth) as never, 'c') as { auth?: { type: string; oauth2?: { key: string; value: string }[] } }).auth;
+  const grantOf = (a: ReturnType<typeof out>) => a?.oauth2?.find((x) => x.key === 'grant_type')?.value;
+  expect(grantOf(out({ mode: 'oauth2', oauth2: { grant: 'client_credentials', tokenUrl: 't', clientId: 'c' } }))).toBe('client_credentials');
+  expect(grantOf(out({ mode: 'oauth2', oauth2: { grant: 'authorization_code', authUrl: 'a', tokenUrl: 't', clientId: 'c' } }))).toBe('authorization_code_with_pkce');
+  expect(grantOf(out({ mode: 'oauth2', oauth2: { grant: 'password', tokenUrl: 't', clientId: 'c' } }))).toBe('password_credentials');
+  expect(out({ mode: 'oauth2', oauth2: { grant: 'device_code', deviceUrl: 'd', tokenUrl: 't', clientId: 'c' } })).toEqual({ type: 'noauth' });
+});

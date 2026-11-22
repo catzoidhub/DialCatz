@@ -26,6 +26,9 @@ function auth(a: RequestAuth | undefined, top: boolean): Pm | undefined {
       return { type: 'apikey', apikey: [s('key', a.key), s('value', a.value), s('in', a.in === 'query' ? 'query' : 'header')] };
     case 'oauth2': {
       const o = a.oauth2;
+      // Postman has no device code grant: written as another grant it would ask for a sign-in that cannot work.
+      // The request then inherits (a collection: no auth); DialCatz's own export keeps it whole.
+      if (o?.grant === 'device_code') return top ? { type: 'noauth' } : undefined;
       const grant = o?.grant === 'client_credentials' ? 'client_credentials' : o?.grant === 'password' ? 'password_credentials' : o?.pkce === false ? 'authorization_code' : 'authorization_code_with_pkce';
       return {
         type: 'oauth2',

@@ -163,7 +163,7 @@ export interface RequestSpec {
   pusher?: { channels?: string[]; secret?: string; userId?: string };
   /**
    * ws:// / wss:// requests: the first message, sent once the connection is open when the request runs on its own
-   * (the CLI, dialcatz run). Raw: the text. Socket.IO: `event` with the text as its args. Pusher: a client
+   * (the collection runner, the CLI). Raw: the text. Socket.IO: `event` with the text as its args. Pusher: a client
    * event on `channel`. A tab keeps sending whatever is typed in its Message pane.
    */
   wsMessage?: { text: string; event?: string; channel?: string };

@@ -18,6 +18,7 @@ import GitSection from './components/GitSection.vue';
 import TeamSection from './components/TeamSection.vue';
 import SettingsSection from './components/SettingsSection.vue';
 import ConnectDialog from './components/ConnectDialog.vue';
+import DeviceCodeCard from './components/DeviceCodeCard.vue';
 import AskDialCatz from './components/AskDialCatz.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import askMark from './assets/logos/ask-catzoid.svg';
@@ -419,6 +420,7 @@ onBeforeUnmount(() => offs.forEach((f) => f()));
       @cancel="mockImportAsk = null"
     />
     <SupportNudge v-if="ready" />
+    <DeviceCodeCard />
     <UpdatePrompt v-if="ready" />
     <McatzpPairDialog />
     <UninstallDialog v-if="uninstallOpen" @close="uninstallOpen = false" />
