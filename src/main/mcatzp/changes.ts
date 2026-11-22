@@ -31,7 +31,7 @@ const REQUEST_FIELDS = {
   pusher: { type: 'object', additionalProperties: false, properties: { channels: { type: 'array', maxItems: 50, items: { type: 'string', maxLength: 164 } }, secret: { type: 'string', maxLength: 200, description: 'The app secret as a {{variable}} only (e.g. {{REVERB_APP_SECRET}}).' }, userId: { type: 'string', maxLength: 200 } }, description: 'ws:// / wss:// requests: speak Pusher (Reverb, Sockudo, Soketi): the address ends in /app/<key>; channels join on Connect.' },
   socket_io: { type: 'boolean', description: 'ws:// / wss:// requests: speak Socket.IO (events by name; websocket_send then takes event).' },
   body: { type: 'object', additionalProperties: false, required: ['mode'], properties: { mode: { type: 'string', enum: ['none', 'json', 'text', 'xml', 'form', 'graphql', 'jsonrpc'] }, raw: { type: 'string', maxLength: 500_000, description: 'json / text / xml: the body; graphql: the query; jsonrpc: the params (JSON), or the list of calls for a batch.' }, fields: ROWS('form: the fields.'), variables: { type: 'string', maxLength: 100_000 }, rpcMethod: { type: 'string', maxLength: 500, description: 'jsonrpc: the method.' }, rpcBatch: { type: 'boolean', description: 'jsonrpc: raw is a list of { method, params?, notify? }.' }, rpcNotify: { type: 'boolean', description: 'jsonrpc: a notification (no id, no reply).' } } },
-  auth: { type: 'object', additionalProperties: false, required: ['mode'], description: 'How it logs in. The values must be {{variables}}: a client never sets a secret. inherit: from the folder or collection.', properties: { mode: { type: 'string', enum: ['none', 'inherit', 'bearer', 'basic', 'apikey'] }, token: S('bearer: a {{variable}}.'), username: S('basic: a {{variable}}.'), password: S('basic: a {{variable}}.'), key: S('apikey: the header or parameter name.'), value: S('apikey: a {{variable}}.'), in: { type: 'string', enum: ['header', 'query'] } } },
+  auth: { type: 'object', additionalProperties: false, required: ['mode'], description: 'How it logs in. The values must be {{variables}}: a client never sets a secret. inherit: from the folder or collection.', properties: { mode: { type: 'string', enum: ['none', 'inherit', 'bearer', 'basic', 'apikey', 'oauth2'] }, token: S('bearer: a {{variable}}.'), username: S('basic, or oauth2 password grant: a {{variable}}.'), password: S('basic, or oauth2 password grant: a {{variable}}.'), key: S('apikey: the header or parameter name.'), value: S('apikey: a {{variable}}.'), in: { type: 'string', enum: ['header', 'query'] }, grant: { type: 'string', enum: ['authorization_code', 'client_credentials', 'password'], description: 'oauth2: how the token is got. DialCatz gets and renews it when the request is sent; an authorization_code sign-in happens in the user\'s browser.' }, auth_url: S('oauth2 authorization_code: where the user signs in.'), token_url: S('oauth2: the token address.'), client_id: S('oauth2: the client id (may be a {{variable}}).'), client_secret: S('oauth2: a {{variable}}.'), scope: S('oauth2: scopes, a space between them.'), audience: S('oauth2: only when the provider asks for one.'), pkce: { type: 'boolean', description: 'oauth2 authorization_code: PKCE, on unless false.' }, client_sent_as: { type: 'string', enum: ['basic', 'body'], description: 'oauth2: the client id and secret in a Basic header (default) or in the body.' }, redirect_uri: S('oauth2 authorization_code: a loopback address (http://127.0.0.1:<port>/…) when the default cannot be used.') } },
 };
 type Fact = Extract<McatzpAsk, { kind: 'change' }>['facts'][number];
 /** Where DialCatz opens once the user allows it, so they watch it happen. */
@@ -76,6 +76,35 @@ function authFrom(raw: Record<string, unknown> | undefined, old: RequestAuth | u
     if (!isVariable(v)) throw new Error(`The ${name} must be a {{variable}}: a client never sets a secret, the user fills in its value`);
     return { [name]: v.trim() };
   };
+  if (raw.mode === 'oauth2') {
+    const before = old?.mode === 'oauth2' ? old.oauth2 : undefined;
+    const text = (v: unknown, was: string | undefined) => (typeof v === 'string' ? (noMask(v, 'An OAuth 2.0 setting') ?? '').trim() : was);
+    const secret = (name: string, v: unknown, was: string | undefined) => {
+      if (typeof v !== 'string') return was;
+      if (v.includes(MASK) && was) return was;
+      if (v && !isVariable(v)) throw new Error(`The ${name} must be a {{variable}}: a client never sets a secret, the user fills in its value`);
+      return v.trim();
+    };
+    const grant = (['authorization_code', 'client_credentials', 'password'] as const).find((g) => g === raw.grant) ?? before?.grant ?? 'authorization_code';
+    return {
+      mode: 'oauth2',
+      oauth2: {
+        ...before,
+        grant,
+        authUrl: text(raw.auth_url, before?.authUrl),
+        tokenUrl: text(raw.token_url, before?.tokenUrl) ?? '',
+        clientId: text(raw.client_id, before?.clientId) ?? '',
+        clientSecret: secret('client secret', raw.client_secret, before?.clientSecret),
+        scope: text(raw.scope, before?.scope),
+        audience: text(raw.audience, before?.audience),
+        username: text(raw.username, before?.username),
+        password: secret('password', raw.password, before?.password),
+        ...(typeof raw.pkce === 'boolean' ? { pkce: raw.pkce } : {}),
+        ...(raw.client_sent_as === 'body' || raw.client_sent_as === 'basic' ? { clientAuth: raw.client_sent_as } : {}),
+        redirectUri: text(raw.redirect_uri, before?.redirectUri),
+      },
+    };
+  }
   return { mode: raw.mode as RequestAuth['mode'], ...val('token', raw.token), ...val('username', raw.username), ...val('password', raw.password), ...(typeof raw.key === 'string' ? { key: raw.key } : {}), ...val('value', raw.value), ...(raw.in ? { in: raw.in as 'header' | 'query' } : {}) };
 }
 /** Literal secrets in a query string count as well. */
@@ -124,17 +153,24 @@ function inherited(w: Workspace, item: TreeItem | null): RequestAuth[] {
   return out;
 }
 
+const hostOf = (url: string): string => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return '';
+  }
+};
 /** Where a request really goes and what secret it takes along: what the user has to see before it leaves. */
 function sendFacts(w: Workspace, spec: RequestSpec, item: TreeItem | null, secrets: string[]): Fact[] {
   const env = envOf(w, item);
   const vars = buildVars(w.globals, env?.variables);
   const url = interpolate(spec.url, vars);
   const auth = effectiveAuth(spec.auth, inherited(w, item));
-  const text = [spec.url, ...spec.params.map((r) => r.value), ...spec.headers.map((r) => r.value), spec.body.raw, ...spec.body.fields.map((r) => r.value), spec.body.variables ?? '', auth.token ?? '', auth.username ?? '', auth.password ?? '', auth.value ?? ''].join('\n');
+  const text = [spec.url, ...spec.params.map((r) => r.value), ...spec.headers.map((r) => r.value), spec.body.raw, ...spec.body.fields.map((r) => r.value), spec.body.variables ?? '', auth.token ?? '', auth.username ?? '', auth.password ?? '', auth.value ?? '', ...(auth.mode === 'oauth2' ? [auth.oauth2?.clientId ?? '', auth.oauth2?.clientSecret ?? '', auth.oauth2?.username ?? '', auth.oauth2?.password ?? '', auth.oauth2?.tokenUrl ?? '', auth.oauth2?.authUrl ?? ''] : [])].join('\n');
   const names = new Set([...text.matchAll(/\{\{\s*([\w.$-]+)\s*\}\}/g)].map((m) => m[1]));
   const list = [...(w.globals ?? []), ...(env?.variables ?? [])];
   const carried = [...names].filter((n) => list.some((v) => v.key.trim() === n && isSecretVar(v)));
-  const saved = ['bearer', 'basic', 'apikey'].includes(auth.mode) && [auth.token, auth.password, auth.value].some((v) => v && !v.includes('{{'));
+  const saved = (['bearer', 'basic', 'apikey'].includes(auth.mode) && [auth.token, auth.password, auth.value].some((v) => v && !v.includes('{{'))) || (auth.mode === 'oauth2' && [auth.oauth2?.clientSecret, auth.oauth2?.password].some((v) => v && !v.includes('{{')));
   let host = '';
   try {
     host = new URL(url).host;
@@ -146,6 +182,8 @@ function sendFacts(w: Workspace, spec: RequestSpec, item: TreeItem | null, secre
     { label: 'Request', value: short(`${spec.method} ${maskUrl(url, secrets)}`, 300) },
     ...fact('Using', env?.name),
     ...fact('Carries', [...carried.map((n) => `{{${n}}}`), ...(saved ? [`the saved ${auth.mode} login`] : [])].join(', ') || null),
+    // OAuth 2.0: the client's login also goes to the token address, which may be another host.
+    ...fact('Token from', auth.mode === 'oauth2' ? hostOf(interpolate(auth.oauth2?.tokenUrl ?? '', vars)) || 'a token address that is not complete yet' : null),
     ...fact('Script', item?.request?.preRequest || item?.request?.tests ? 'Its scripts run too, with your variables' : null),
   ];
 }

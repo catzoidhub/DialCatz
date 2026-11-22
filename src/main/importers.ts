@@ -66,6 +66,27 @@ function pmAuth(a: PmAuth | undefined): RequestAuth {
       return { mode: 'basic', username: get('basic', 'username'), password: get('basic', 'password') };
     case 'apikey':
       return { mode: 'apikey', key: get('apikey', 'key'), value: get('apikey', 'value'), in: get('apikey', 'in') === 'query' ? 'query' : 'header' };
+    case 'oauth2': {
+      // Postman's settings (its own token, if one was saved in the export, is left behind).
+      const g = get('oauth2', 'grant_type');
+      const grant = g === 'client_credentials' ? 'client_credentials' : g === 'password_credentials' ? 'password' : 'authorization_code';
+      const prefix = get('oauth2', 'headerPrefix').trim();
+      return {
+        mode: 'oauth2',
+        oauth2: {
+          grant,
+          tokenUrl: get('oauth2', 'accessTokenUrl'),
+          clientId: get('oauth2', 'clientId'),
+          clientSecret: get('oauth2', 'clientSecret') || undefined,
+          scope: get('oauth2', 'scope') || undefined,
+          audience: get('oauth2', 'audience') || undefined,
+          clientAuth: get('oauth2', 'client_authentication') === 'body' ? 'body' : 'basic',
+          ...(grant === 'authorization_code' ? { authUrl: get('oauth2', 'authUrl'), pkce: g !== 'authorization_code' } : {}),
+          ...(grant === 'password' ? { username: get('oauth2', 'username'), password: get('oauth2', 'password') } : {}),
+          ...(prefix && prefix !== 'Bearer' ? { headerPrefix: prefix } : {}),
+        },
+      };
+    }
     default:
       return { mode: 'inherit' };
   }
@@ -311,12 +332,62 @@ function isWebOp(op: Record<string, unknown>): boolean {
   return responses.every(([code]) => /^3/.test(code));
 }
 
+/**
+ * How the API says it is called (OpenAPI 3 components.securitySchemes, Swagger 2 securityDefinitions): the scheme the
+ * document asks for everywhere (its top-level `security`), or its only one. Secrets become {{variables}} the user fills
+ * in. OpenID Connect and the implicit flow have no counterpart here and are left out.
+ */
+export function openApiAuth(doc: Record<string, unknown>, base: string): RequestAuth | null {
+  const schemes = ((doc.components as { securitySchemes?: Record<string, Record<string, unknown>> } | undefined)?.securitySchemes ?? doc.securityDefinitions ?? {}) as Record<string, Record<string, unknown>>;
+  const names = Object.keys(schemes);
+  if (!names.length) return null;
+  const asked = (Array.isArray(doc.security) ? doc.security : []).flatMap((r) => Object.entries((r ?? {}) as Record<string, unknown>));
+  const [name, scopesAsked] = asked.find(([n]) => schemes[n]) ?? (names.length === 1 ? [names[0], undefined] : []);
+  const sc = name ? (follow(schemes[name], doc) as Record<string, unknown>) : null;
+  if (!sc) return null;
+  const abs = (u: unknown) => {
+    if (typeof u !== 'string' || !u) return '';
+    try {
+      return new URL(u, base || undefined).toString();
+    } catch {
+      return u;
+    }
+  };
+  const type = String(sc.type ?? '').toLowerCase();
+  if (type === 'http' && String(sc.scheme ?? '').toLowerCase() === 'bearer') return { mode: 'bearer', token: '{{token}}' };
+  if ((type === 'http' && String(sc.scheme ?? '').toLowerCase() === 'basic') || type === 'basic') return { mode: 'basic', username: '{{username}}', password: '{{password}}' };
+  if (type === 'apikey' && (sc.in === 'header' || sc.in === 'query') && sc.name) return { mode: 'apikey', key: String(sc.name), value: '{{apiKey}}', in: sc.in };
+  if (type !== 'oauth2') return null;
+  // OpenAPI 3: flows.{authorizationCode, clientCredentials, password}; Swagger 2: flow accessCode / application / password.
+  const flows = (sc.flows ?? {}) as Record<string, Record<string, unknown>>;
+  const v2 = typeof sc.flow === 'string' ? sc.flow : '';
+  const pick = (v3: string, old: string) => flows[v3] ?? (v2 === old ? sc : undefined);
+  const code = pick('authorizationCode', 'accessCode');
+  const client = pick('clientCredentials', 'application');
+  const password = pick('password', 'password');
+  const flow = code ?? client ?? password;
+  if (!flow) return null;
+  const scopes = Array.isArray(scopesAsked) && scopesAsked.length ? (scopesAsked as unknown[]).map(String) : Object.keys((flow.scopes ?? {}) as Record<string, unknown>);
+  return {
+    mode: 'oauth2',
+    oauth2: {
+      grant: code ? 'authorization_code' : client ? 'client_credentials' : 'password',
+      tokenUrl: abs(flow.tokenUrl),
+      clientId: '{{clientId}}',
+      clientSecret: '{{clientSecret}}',
+      ...(scopes.length ? { scope: scopes.join(' ') } : {}),
+      ...(code ? { authUrl: abs(flow.authorizationUrl) } : {}),
+      ...(!code && !client ? { username: '{{username}}', password: '{{password}}' } : {}),
+    },
+  };
+}
+
 function fromOpenApi(doc: Record<string, unknown>): { root: TreeItem; items: TreeItem[]; baseUrl?: string } {
   const info = (doc.info ?? {}) as { title?: string; description?: string };
   const servers = doc.servers as { url: string }[] | undefined;
   const swaggerBase = doc.host ? `${(doc.schemes as string[] | undefined)?.[0] ?? 'https'}://${doc.host}${doc.basePath ?? ''}` : '';
   const base = servers?.[0]?.url ?? swaggerBase;
-  const root: TreeItem = { id: uid('c_'), kind: 'collection', parentId: null, name: info.title || 'API', sort: 0, auth: { mode: 'none' }, description: [info.description, base ? `Base URL: ${base} (variable {{baseUrl}})` : ''].filter(Boolean).join('\n\n') };
+  const root: TreeItem = { id: uid('c_'), kind: 'collection', parentId: null, name: info.title || 'API', sort: 0, auth: openApiAuth(doc, base) ?? { mode: 'none' }, description: [info.description, base ? `Base URL: ${base} (variable {{baseUrl}})` : ''].filter(Boolean).join('\n\n') };
   const items: TreeItem[] = [];
   const ops = Object.entries((doc.paths ?? {}) as Record<string, Record<string, Record<string, unknown>>>).flatMap(([path, o]) =>
     Object.entries(o)
@@ -349,6 +420,8 @@ function fromOpenApi(doc: Record<string, unknown>): { root: TreeItem; items: Tre
     const urlPath = path.replace(/\{([^}]+)\}/g, ':$1');
     const spec: RequestSpec = { ...newRequest(), method: method(m), url: joinUrl(`{{baseUrl}}${urlPath}`, query), params: query, headers };
     spec.body = openApiBody(op, params, doc);
+    // `security: []` on an operation: open to everyone, whatever the collection logs in with.
+    if (Array.isArray(op.security) && !op.security.length && root.auth?.mode !== 'none') spec.auth = { mode: 'none' };
     const responses = specResponses(op, doc);
     items.push({ id: uid('r_'), kind: 'request', parentId, name: String(op.summary ?? op.operationId ?? `${m.toUpperCase()} ${path}`).slice(0, 200), sort: n++, request: spec, description: op.description as string | undefined, ...(responses.length ? { specResponses: responses } : {}) });
   }

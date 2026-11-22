@@ -1,6 +1,6 @@
 import { computed, reactive, ref, toRaw, watch } from 'vue';
 import { newRequest, uid, type ConnectRequest, type McatzpAsk, type McatzpInstallProgress, type McatzpRun, type McatzpTab, type McatzpTabResponse, type DialCatzSettings, type Environment, type EnvVariable, type PresenceEntry, type WsEvent, type SseEvent, type HistoryEntry, type RequestAuth, type RequestSpec, type SendResult, type ServerConnection, type TreeItem, type Workspace, type WorkspaceSummary, type MockState } from '@shared/types';
-import { AUTO_HEADERS, buildVars, effectiveAuth, interpolate, nameFromUrl, toWire, type Vars } from '@shared/request';
+import { AUTO_HEADERS, buildVars, effectiveAuth, interpolate, nameFromUrl, resolveOAuth, toWire, type Vars } from '@shared/request';
 import { store } from './store';
 import { requestContext, responseContext, runScript, type ScriptResult } from './scripts';
 import { checkResponse } from '@shared/speccheck';
@@ -212,6 +212,17 @@ export function inheritedAuth(itemId: string | null, w: Workspace | null = works
   return out;
 }
 
+/**
+ * The auth a send goes with. OAuth 2.0 (#100) gets its token now: the kept one while it lasts, renewed or asked again
+ * otherwise; `interactive` (a request the user sends by hand) may open the browser for a sign-in.
+ */
+export async function authForSend(spec: RequestSpec, itemId: string | null, withVars: Vars, interactive: boolean): Promise<RequestAuth> {
+  const a = effectiveAuth(spec.auth, inheritedAuth(itemId));
+  if (a.mode !== 'oauth2') return a;
+  const r = await api.oauthToken(plain(resolveOAuth(a.oauth2, withVars)), { interactive, ...(insecureFor(itemId) ? { insecure: true } : {}) });
+  return { ...a, token: r.token };
+}
+
 export const appVersion = ref('0.1.0');
 export function wireFor(tab: Tab) {
   return toWire(tab.spec, varsFor(tab.itemId), effectiveAuth(tab.spec.auth, inheritedAuth(tab.itemId)), { version: appVersion.value });
@@ -390,7 +401,13 @@ export async function toggleWs(tab: Tab): Promise<void> {
     await api.wsClose(tab.id);
     return;
   }
-  const wire = wireFor(tab);
+  let wire = wireFor(tab);
+  // OAuth 2.0: the handshake carries the token too.
+  if (effectiveAuth(tab.spec.auth, inheritedAuth(tab.itemId)).mode === 'oauth2') {
+    const auth = await attempt(() => authForSend(tab.spec, tab.itemId, varsFor(tab.itemId), true));
+    if (!auth) return;
+    wire = toWire(tab.spec, varsFor(tab.itemId), auth, { version: appVersion.value });
+  }
   const hop = /^(connection|upgrade|sec-websocket-(key|version|extensions)|accept-encoding|cache-control|content-type|content-length)$/i;
   const protocols = (wire.headers.find(([k]) => /^sec-websocket-protocol$/i.test(k))?.[1] ?? '').split(',').map((p) => p.trim()).filter(Boolean);
   tab.ws.state = 'connecting';
@@ -458,7 +475,7 @@ export async function applyVarChanges(changes: Record<string, string | null>, it
 const varsObject = (itemId: string | null) => Object.fromEntries(varsFor(itemId));
 
 /** Whether the request's collection skips certificate checks (otherwise the app setting applies). */
-const insecureFor = (itemId: string | null) => collectionOf(itemId)?.insecure === true;
+export const insecureFor = (itemId: string | null) => collectionOf(itemId)?.insecure === true;
 
 /** The scripts of the collection and folders above an item, outermost first (Postman's order), with their names. */
 function scriptChain(itemId: string | null, kind: 'preRequest' | 'tests'): { from: string; code: string }[] {
@@ -496,22 +513,24 @@ async function runChain(chain: { from: string | null; code: string }[], ctx: () 
  * changes are saved before the request is built), send, then test scripts in the same order. Used by request tabs
  * and the collection runner; the runner passes its iteration's data row, which wins over environment variables.
  */
-export async function execute(spec: RequestSpec, itemId: string | null, token: string, data?: Record<string, string>, opts: { checkSpec?: boolean; stream?: boolean } = {}): Promise<{ result: SendResult; scripts: { pre?: ScriptResult; tests?: ScriptResult } }> {
+export async function execute(spec: RequestSpec, itemId: string | null, token: string, data?: Record<string, string>, opts: { checkSpec?: boolean; stream?: boolean; interactive?: boolean } = {}): Promise<{ result: SendResult; scripts: { pre?: ScriptResult; tests?: ScriptResult } }> {
   const scripts: { pre?: ScriptResult; tests?: ScriptResult } = {};
   const vars = () => new Map([...varsFor(itemId), ...Object.entries(data ?? {})]);
   const wireNow = () => toWire(spec, vars(), effectiveAuth(spec.auth, inheritedAuth(itemId)), { version: appVersion.value });
   const pre = [...scriptChain(itemId, 'preRequest'), ...(spec.preRequest?.trim() ? [{ from: null, code: spec.preRequest }] : [])];
   scripts.pre = await runChain(pre, () => ({ request: requestContext(wireNow()), vars: Object.fromEntries(vars()), data }), itemId);
-  const wire = wireNow();
+  let wire = wireNow();
   let result: SendResult;
   try {
+    // OAuth 2.0: the token is got after the pre-request scripts (they may set what it is asked with).
+    if (effectiveAuth(spec.auth, inheritedAuth(itemId)).mode === 'oauth2') wire = toWire(spec, vars(), await authForSend(spec, itemId, vars(), opts.interactive === true), { version: appVersion.value });
     if (isGrpcUrl(wire.url)) {
       // #98: a gRPC call. Headers are its metadata (the HTTP ones DialCatz adds by itself stay out); the body is the message.
       const auto = /^(user-agent|accept|accept-encoding|connection|cache-control|content-type|content-length|host)$/i;
       result = await api.grpcCall(plain({ url: wire.url.split('?')[0], service: spec.grpc?.service ?? '', method: spec.grpc?.method ?? '', message: interpolate(spec.body.raw, vars()), metadata: wire.headers.filter(([k]) => !auto.test(k)), protoFiles: spec.grpc?.protoFiles, ...(insecureFor(itemId) ? { insecure: true } : {}) }), token);
     } else result = await api.send(plain(wire), token, { ...(insecureFor(itemId) ? { insecure: true } : {}), ...(opts.stream ? { stream: true } : {}) });
   } catch (e) {
-    result = { error: (e as Error).message, sent: { method: wire.method, url: wire.url, headers: wire.headers, body: wire.body } };
+    result = { error: String((e as Error).message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), sent: { method: wire.method, url: wire.url, headers: wire.headers, body: wire.body } };
   }
   const tests = [...scriptChain(itemId, 'tests'), ...(spec.tests?.trim() ? [{ from: null, code: spec.tests }] : [])];
   if (result.response) scripts.tests = await runChain(tests, () => ({ request: requestContext(wire), response: responseContext(result.response!), vars: Object.fromEntries(vars()), data }), itemId);
@@ -557,7 +576,7 @@ export async function sendTab(tab: Tab): Promise<void> {
   // Ready for a live SSE answer before it can start (its first events may beat the send's own answer).
   tab.sse = { open: true, events: [] };
   try {
-    const { result: r, scripts } = await execute(plain(tab.spec), tab.itemId, tab.id, undefined, { stream: true });
+    const { result: r, scripts } = await execute(plain(tab.spec), tab.itemId, tab.id, undefined, { stream: true, interactive: true });
     if (!r.response?.streaming) tab.sse = undefined;
     tab.result = r;
     tab.scripts = scripts;

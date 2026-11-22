@@ -41,10 +41,53 @@ export interface RequestBody {
   file?: string;
 }
 
-export type AuthMode = 'none' | 'inherit' | 'bearer' | 'basic' | 'apikey';
+export type AuthMode = 'none' | 'inherit' | 'bearer' | 'basic' | 'apikey' | 'oauth2';
+export type OAuthGrant = 'authorization_code' | 'client_credentials' | 'password';
+/**
+ * OAuth 2.0 (#100): how the token is got. Every text may hold {{variables}} (the client secret and the password should
+ * be ones). The tokens themselves are never part of this: DialCatz keeps them on this computer (main/oauth.ts) and
+ * gets or refreshes one when a request is sent.
+ */
+export interface OAuthSettings {
+  grant: OAuthGrant;
+  /** authorization_code: where the browser signs in. */
+  authUrl?: string;
+  tokenUrl: string;
+  clientId: string;
+  clientSecret?: string;
+  scope?: string;
+  audience?: string;
+  /** password grant. */
+  username?: string;
+  password?: string;
+  /** authorization_code: PKCE (S256); on unless false. */
+  pkce?: boolean;
+  /** The client's id and secret at the token address: a Basic header (default) or fields in the body. */
+  clientAuth?: 'basic' | 'body';
+  /** authorization_code: the loopback address the browser returns to (OAUTH_REDIRECT when empty). */
+  redirectUri?: string;
+  /** What goes before the token in the Authorization header (Bearer when empty). */
+  headerPrefix?: string;
+}
+/** The address the browser comes back to after signing in, unless the request names another loopback one. */
+export const OAUTH_REDIRECT = 'http://127.0.0.1:47200/callback';
+/** What the window may know of a kept token: never the token itself. */
+export interface OAuthStatus {
+  has: boolean;
+  /** ms since the epoch; null: the server gave no lifetime. */
+  expiresAt: number | null;
+  expired: boolean;
+  scope: string;
+  tokenType: string;
+  /** A refresh token is kept: DialCatz renews by itself. */
+  refreshable: boolean;
+  obtainedAt: number | null;
+}
 export interface RequestAuth {
   mode: AuthMode;
+  /** bearer: the token ({{variables}} allowed). oauth2: the token just fetched for one send, never saved. */
   token?: string;
+  oauth2?: OAuthSettings;
   username?: string;
   password?: string;
   /** API key: header or query parameter name, value and where it goes. */
@@ -1450,6 +1493,17 @@ export interface DialCatzApi {
   wsSend(token: string, data: string, event?: string, channel?: string): Promise<void>;
   /** #99: joins or leaves a channel on a Pusher connection (private / presence signed with `secret`). */
   wsPusherChannel(token: string, action: 'subscribe' | 'unsubscribe', channel: string, options?: { secret?: string; userId?: string }): Promise<void>;
+  /** OAuth 2.0 (#100), settings with their variables filled (resolveOAuth). What is kept for them, never the token. */
+  oauthStatus(settings: OAuthSettings): Promise<OAuthStatus>;
+  /**
+   * A token to send with now: the kept one while it lasts, else renewed or asked again. `interactive` may open the
+   * browser for a sign-in (authorization code); `fresh` never uses the kept one.
+   */
+  oauthToken(settings: OAuthSettings, options?: { interactive?: boolean; fresh?: boolean; insecure?: boolean }): Promise<{ token: string; status: OAuthStatus }>;
+  /** Forgets the kept token. */
+  oauthClear(settings: OAuthSettings): Promise<void>;
+  /** Stops a sign-in that waits for the browser. */
+  oauthCancel(): Promise<void>;
   wsClose(token: string): Promise<void>;
   /** Saves the last response body to a file. */
   saveResponse(token: string, suggestedName: string): Promise<boolean>;
@@ -1555,7 +1609,7 @@ export const API_METHODS = [
   'saveItems', 'deleteItems',
   'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'specCheck', 'specApply', 'specFollow', 'specUnfollow', 'specStale', 'browsers', 'specScanFolder', 'specImportFile', 'mockList', 'mockEnvironmentRestore', 'mockStart', 'mockStop', 'mockEnvironment', 'mockSiteSpec', 'mockSiteImport', 'devcatzLinks', 'devcatzLinkSet', 'mockOpenIn', 'mockServiceSpec', 'docatzLinks', 'docatzLinkSet', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'importedBefore', 'docatzProjects', 'docatzImport', 'docatzOpen', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection',
   'aiModels', 'aiTest', 'aiAsk', 'aiExplain', 'aiTests', 'aiBody', 'aiCancel',
-  'send', 'grpcDescribe', 'grpcPickProto', 'grpcCall', 'pickFile', 'pickDataFile', 'saveText', 'cancel', 'wsConnect', 'wsSend', 'wsPusherChannel', 'wsClose', 'saveResponse', 'history', 'addHistory', 'clearHistory',
+  'send', 'grpcDescribe', 'grpcPickProto', 'grpcCall', 'pickFile', 'pickDataFile', 'saveText', 'cancel', 'wsConnect', 'wsSend', 'wsPusherChannel', 'wsClose', 'oauthStatus', 'oauthToken', 'oauthClear', 'oauthCancel', 'saveResponse', 'history', 'addHistory', 'clearHistory',
   'servers', 'probeServer', 'connectWithToken', 'connectWithCode', 'refreshServer', 'disconnectServer', 'subscribeWorkspace', 'setPresence', 'presence', 'syncWorkspace', 'resolveConflict',
   'openUrl', 'exportWorkspace', 'exportEnvironment', 'importEnvironments', 'dbcatzInfo', 'dbcatzOpen', 'saveDbTarget', 'copyText', 'hostName',
   'updateState', 'updateCheck', 'updateNotes', 'updateDownload', 'updateCancel', 'updateInstall', 'updateSkip', 'updatePrefs', 'setUpdatePrefs', 'ratingSend', 'ratingRefresh', 'setCloseGuard',

@@ -30,6 +30,8 @@ export function secretValues(workspaces: Workspace[]): string[] {
     add(out, a.password);
     add(out, a.value);
     if (a.username && a.password) add(out, `${a.username}:${a.password}`);
+    add(out, a.oauth2?.clientSecret);
+    add(out, a.oauth2?.password);
   };
   for (const w of workspaces) {
     for (const v of w.globals ?? []) if (variableIsSecret(v)) add(out, v.value);

@@ -24,6 +24,26 @@ function auth(a: RequestAuth | undefined, top: boolean): Pm | undefined {
       return { type: 'basic', basic: [s('username', a.username), s('password', a.password)] };
     case 'apikey':
       return { type: 'apikey', apikey: [s('key', a.key), s('value', a.value), s('in', a.in === 'query' ? 'query' : 'header')] };
+    case 'oauth2': {
+      const o = a.oauth2;
+      const grant = o?.grant === 'client_credentials' ? 'client_credentials' : o?.grant === 'password' ? 'password_credentials' : o?.pkce === false ? 'authorization_code' : 'authorization_code_with_pkce';
+      return {
+        type: 'oauth2',
+        oauth2: [
+          s('grant_type', grant),
+          s('accessTokenUrl', o?.tokenUrl),
+          ...(o?.grant === 'client_credentials' || o?.grant === 'password' ? [] : [s('authUrl', o?.authUrl), s('redirect_uri', o?.redirectUri)]),
+          s('clientId', o?.clientId),
+          s('clientSecret', o?.clientSecret),
+          s('scope', o?.scope),
+          ...(o?.audience ? [s('audience', o.audience)] : []),
+          ...(o?.grant === 'password' ? [s('username', o.username), s('password', o.password)] : []),
+          s('client_authentication', o?.clientAuth === 'body' ? 'body' : 'header'),
+          s('headerPrefix', o?.headerPrefix?.trim() || 'Bearer'),
+          s('addTokenTo', 'header'),
+        ],
+      };
+    }
     case 'none':
       return { type: 'noauth' };
     default:

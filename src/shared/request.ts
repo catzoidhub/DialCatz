@@ -1,4 +1,4 @@
-import { emptyBody, HTTP_METHODS, type EnvVariable, type HttpMethod, type KeyValue, type RequestAuth, type RequestSpec, type WireRequest } from './types';
+import { emptyBody, HTTP_METHODS, OAUTH_REDIRECT, type EnvVariable, type HttpMethod, type KeyValue, type OAuthSettings, type RequestAuth, type RequestSpec, type WireRequest } from './types';
 import { rpcEnvelope } from './jsonrpc';
 
 export type { WireRequest };
@@ -105,6 +105,23 @@ export function effectiveAuth(own: RequestAuth, inherited: RequestAuth[]): Reque
   return inherited.find((a) => a.mode !== 'inherit') ?? { mode: 'none' };
 }
 
+/** OAuth settings with their {{variables}} filled: what the token is asked with. */
+export function resolveOAuth(o: OAuthSettings | undefined, vars: Vars): OAuthSettings {
+  const v = (s: string | undefined) => interpolate(s ?? '', vars).trim();
+  const grant = o?.grant ?? 'authorization_code';
+  return {
+    grant,
+    tokenUrl: v(o?.tokenUrl),
+    clientId: v(o?.clientId),
+    clientSecret: interpolate(o?.clientSecret ?? '', vars),
+    scope: v(o?.scope),
+    audience: v(o?.audience),
+    clientAuth: o?.clientAuth === 'body' ? 'body' : 'basic',
+    ...(grant === 'authorization_code' ? { authUrl: v(o?.authUrl), pkce: o?.pkce !== false, redirectUri: v(o?.redirectUri) || OAUTH_REDIRECT } : {}),
+    ...(grant === 'password' ? { username: v(o?.username), password: interpolate(o?.password ?? '', vars) } : {}),
+  };
+}
+
 /** A request with variables filled, auth applied and the body encoded. */
 export function toWire(spec: RequestSpec, vars: Vars, auth: RequestAuth = spec.auth, ctx: AutoContext = { version: '0.1' }): WireRequest {
   const v = (s: string | undefined) => interpolate(s ?? '', vars);
@@ -116,6 +133,10 @@ export function toWire(spec: RequestSpec, vars: Vars, auth: RequestAuth = spec.a
   switch (auth.mode) {
     case 'bearer':
       if (auth.token && !hasHeader(headers, 'authorization')) headers.push(['Authorization', `Bearer ${v(auth.token)}`]);
+      break;
+    case 'oauth2':
+      // The token was fetched for this send (state.ts / MCatzP / the CLI put it in auth.token); it is used as it is.
+      if (auth.token && !hasHeader(headers, 'authorization')) headers.push(['Authorization', `${v(auth.oauth2?.headerPrefix).trim() || 'Bearer'} ${auth.token}`]);
       break;
     case 'basic':
       if (!hasHeader(headers, 'authorization')) headers.push(['Authorization', `Basic ${base64(`${v(auth.username)}:${v(auth.password)}`)}`]);

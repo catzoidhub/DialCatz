@@ -688,7 +688,7 @@ const SORTS: { id: SidebarLayout['sortBy']; label: string }[] = [
       <div class="modal-box w-[40rem] max-w-[95vw] space-y-4">
         <h3 class="text-lg font-semibold tracking-tight">{{ authFor.item.name }}</h3>
         <p class="text-sm opacity-60">Requests inside that are set to “Inherit” use this auth.</p>
-        <AuthEditor v-model="authFor.auth" :allow-inherit="authFor.item.kind !== 'collection'" inherited-label="Uses the auth of the folder or collection above." />
+        <AuthEditor v-model="authFor.auth" :item-id="authFor.item.id" :allow-inherit="authFor.item.kind !== 'collection'" inherited-label="Uses the auth of the folder or collection above." />
         <div v-if="authFor.item.kind === 'collection'" class="opt-row">
           <span class="flex flex-col"><span class="label-caps">Environment</span><span class="text-xs opacity-50">{{ ENV_HINT }}</span></span>
           <select v-model="authFor.env" class="select select-sm w-60">

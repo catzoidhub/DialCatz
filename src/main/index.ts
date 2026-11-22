@@ -49,6 +49,16 @@ import * as mcatzpSetup from './mcatzp/install';
 import { MCATZP_TARGETS } from '@catzoid/mcatzp-host';
 import { randomUUID } from 'node:crypto';
 import { systemVersion } from './system';
+import * as oauth from './oauth';
+import type { OAuthSettings } from '@shared/types';
+
+/** OAuth settings as the window sent them: texts only, nothing else gets through. */
+function oauthSettings(raw: unknown): OAuthSettings {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  const s = (v: unknown, max = 4000) => (typeof v === 'string' ? v.slice(0, max) : '');
+  const grant = o.grant === 'client_credentials' || o.grant === 'password' ? o.grant : 'authorization_code';
+  return { grant, tokenUrl: s(o.tokenUrl), clientId: s(o.clientId), clientSecret: s(o.clientSecret), scope: s(o.scope), audience: s(o.audience), clientAuth: o.clientAuth === 'body' ? 'body' : 'basic', authUrl: s(o.authUrl), redirectUri: s(o.redirectUri), pkce: o.pkce !== false, username: s(o.username), password: s(o.password) };
+}
 
 /**
  * DialCatz — an API client: collections, environments and history on this computer, team workspaces synced
@@ -1141,6 +1151,14 @@ function api(): DialCatzApi {
     wsConnect: async (token, url, headers, protocols, options) => sockets.connect(String(token), String(url), (Array.isArray(headers) ? headers : []).map(([k, v]) => [String(k), String(v)] as [string, string]), (Array.isArray(protocols) ? protocols : []).map(String), { socketIo: options?.socketIo === true, pusher: options?.pusher === true, insecure: settings().requests.insecure === true }),
     wsSend: async (token, data, event, channel) => sockets.send(String(token), String(data), event === undefined ? undefined : String(event), channel === undefined ? undefined : String(channel)),
     wsPusherChannel: async (token, action, channel, o) => sockets.pusherChannel(String(token), action === 'unsubscribe' ? 'unsubscribe' : 'subscribe', String(channel), { secret: o?.secret ? String(o.secret) : undefined, userId: o?.userId ? String(o.userId) : undefined }),
+    oauthStatus: async (c) => oauth.status(oauthSettings(c)),
+    oauthToken: async (c, o) => {
+      const cfg = oauthSettings(c);
+      const t = await oauth.token(cfg, { interactive: o?.interactive === true, fresh: o?.fresh === true, insecure: o?.insecure === true || settings().requests.insecure === true });
+      return { token: t.accessToken, status: oauth.status(cfg) };
+    },
+    oauthClear: async (c) => oauth.clear(oauthSettings(c)),
+    oauthCancel: async () => oauth.cancel(),
     wsClose: async (token) => sockets.close(String(token)),
     saveResponse: async (token, suggestedName) => {
       const body = http.lastBody(token);
@@ -1788,6 +1806,8 @@ if (primary) app.whenReady().then(async () => {
   });
   applySettings((s) => send('app:settings', s));
   sockets.onEvent((e) => send('app:ws', e));
+  // A sign-in page opens in the browser chosen in Settings (shared with the Catzoid apps).
+  oauth.setBrowser((url) => openWeb(url, settings().browser));
   // Git accounts connected or removed in another Catzoid app; avatars that arrived.
   onSharedChange(() => repos.changed());
   gitHosts.setAccountsListener(() => repos.changed());

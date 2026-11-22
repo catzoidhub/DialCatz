@@ -66,6 +66,11 @@ function authOut(a: RequestAuth | undefined): Record<string, unknown> {
   if (a.mode === 'bearer') return { mode: 'bearer', token: used(a.token) };
   if (a.mode === 'basic') return { mode: 'basic', username: isVariable(a.username) ? a.username : a.username ? 'set' : undefined, password: used(a.password) };
   if (a.mode === 'apikey') return { mode: 'apikey', name: a.key, in: a.in ?? 'header', value: used(a.value) };
+  if (a.mode === 'oauth2') {
+    const o = a.oauth2;
+    // Addresses, client id and scope are not secrets; the client secret and password show only as a variable's name.
+    return { mode: 'oauth2', grant: o?.grant ?? 'authorization_code', auth_url: o?.authUrl || undefined, token_url: o?.tokenUrl || undefined, client_id: o?.clientId || undefined, client_secret: used(o?.clientSecret), scope: o?.scope || undefined, audience: o?.audience || undefined, username: o?.username ? (isVariable(o.username) ? o.username : 'set') : undefined, password: used(o?.password), pkce: o?.grant === 'client_credentials' || o?.grant === 'password' ? undefined : o?.pkce !== false, client_sent_as: o?.clientAuth === 'body' ? 'body' : 'basic', redirect_uri: o?.redirectUri || undefined };
+  }
   return { mode: a.mode };
 }
 

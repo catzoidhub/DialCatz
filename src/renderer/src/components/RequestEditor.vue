@@ -194,7 +194,7 @@ function beautify() {
 
 const inherited = computed(() => {
   const a = effectiveAuth({ mode: 'inherit' }, inheritedAuth(props.tab.itemId));
-  const label = { none: 'no auth', bearer: 'a Bearer token', basic: 'Basic auth', apikey: 'an API key', inherit: 'no auth' }[a.mode];
+  const label = { none: 'no auth', bearer: 'a Bearer token', basic: 'Basic auth', apikey: 'an API key', oauth2: 'OAuth 2.0', inherit: 'no auth' }[a.mode];
   return props.tab.itemId ? `Uses the auth of the folder or collection above: ${label}.` : 'Not saved in a collection yet: nothing to inherit (no auth).';
 });
 
@@ -550,7 +550,7 @@ defineExpose({ focusUrl: () => urlInput.value?.select() });
         <p class="text-xs opacity-50">JavaScript in a sandbox (no network, no access to DialCatz). <code>dc.response</code> (status, headers, body, json(), time), <code>dc.env.get/set</code>, <code>dc.test</code>, <code>dc.expect</code>, <code>dc.log</code>. Basic Postman <code>pm.*</code> scripts work too.</p>
       </div>
 
-      <AuthEditor v-else-if="pane === 'auth'" class="max-w-2xl pt-1" :model-value="spec.auth" :inherited-label="inherited" @update:model-value="setAuth" />
+      <AuthEditor v-else-if="pane === 'auth'" class="max-w-2xl pt-1" :model-value="spec.auth" :inherited-label="inherited" :item-id="tab.itemId" @update:model-value="setAuth" />
 
       <div v-else class="flex h-full min-h-48 flex-col gap-2">
         <div class="flex items-center gap-2">

@@ -58,7 +58,7 @@ export function pathOf(url: string): { path: string; params: string[] } {
 const example = (v: string) => (!v || /\{\{[^}]+\}\}/.test(v) ? undefined : v);
 const camel = (s: string) => s.replace(/[^A-Za-z0-9]+(.)?/g, (_, c: string | undefined) => (c ? c.toUpperCase() : '')).replace(/^[A-Z]/, (c) => c.toLowerCase()) || 'operation';
 
-function securityOf(auth: RequestAuth | undefined): { name: string; scheme: Schema } | null {
+function securityOf(auth: RequestAuth | undefined): { name: string; scheme: Schema; scopes?: string[] } | null {
   switch (auth?.mode) {
     case 'bearer':
       return { name: 'bearerAuth', scheme: { type: 'http', scheme: 'bearer' } };
@@ -66,6 +66,13 @@ function securityOf(auth: RequestAuth | undefined): { name: string; scheme: Sche
       return { name: 'basicAuth', scheme: { type: 'http', scheme: 'basic' } };
     case 'apikey':
       return auth.key ? { name: `apiKey_${camel(auth.key)}`, scheme: { type: 'apiKey', name: auth.key, in: auth.in === 'query' ? 'query' : 'header' } } : null;
+    case 'oauth2': {
+      const o = auth.oauth2;
+      if (!o?.tokenUrl || /\{\{/.test(o.tokenUrl)) return null;
+      const scopes = Object.fromEntries((o.scope ?? '').split(/\s+/).filter(Boolean).map((x) => [x, '']));
+      const flow = o.grant === 'client_credentials' ? { clientCredentials: { tokenUrl: o.tokenUrl, scopes } } : o.grant === 'password' ? { password: { tokenUrl: o.tokenUrl, scopes } } : { authorizationCode: { authorizationUrl: o.authUrl ?? '', tokenUrl: o.tokenUrl, scopes } };
+      return { name: 'oauth2', scheme: { type: 'oauth2', flows: flow }, scopes: Object.keys(scopes) };
+    }
     default:
       return null;
   }
@@ -181,7 +188,7 @@ export function toOpenApi(items: TreeItem[], collectionId: string, vars: Map<str
       ...(parameters.length ? { parameters } : {}),
       ...(body ? { requestBody: body } : {}),
       responses,
-      ...(sec ? { security: [{ [sec.name]: [] }] } : {}),
+      ...(sec ? { security: [{ [sec.name]: sec.scopes ?? [] }] } : {}),
     };
     operations++;
   }
