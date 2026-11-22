@@ -15,6 +15,7 @@
     "licenses": "node scripts/licenses.mjs",
     "start": "electron-vite preview",
     "build:cli": "bun scripts/build-cli.mjs",
+    "publish:cli": "bun scripts/build-cli.mjs && npm publish ./dist-cli --access public",
     "test": "bun --tsconfig-override=tsconfig.node.json test tests",
     "mcatzp-tools": "bun --tsconfig-override=tsconfig.node.json scripts/mcatzp-tools.ts",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json",

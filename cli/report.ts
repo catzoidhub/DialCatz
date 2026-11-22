@@ -80,7 +80,7 @@ export function junit(runs: RunResult[]): string {
   for (const run of runs) {
     const failed = run.requests.filter((r) => r.outcome === 'failed').length;
     const skipped = run.requests.filter((r) => r.outcome === 'skipped').length;
-    out.push(`  <testsuite name="${xml(run.collection)}" tests="${run.requests.length}" failures="${failed}" skipped="${skipped}" time="${(run.ms / 1000).toFixed(3)}">`);
+    out.push(`  <testsuite name="${xml(run.collection + (run.iteration ? ` (row ${run.iteration})` : ''))}" tests="${run.requests.length}" failures="${failed}" skipped="${skipped}" time="${(run.ms / 1000).toFixed(3)}">`);
     for (const r of run.requests) {
       const head = `    <testcase classname="${xml(r.place.join(' / '))}" name="${xml(`${r.method} ${r.name}`)}" time="${((r.timeMs ?? 0) / 1000).toFixed(3)}"`;
       const logs = r.logs.length ? `      <system-out>${xml(r.logs.join('\n'))}</system-out>` : '';

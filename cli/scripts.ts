@@ -19,6 +19,8 @@ export interface ScriptContext {
   response?: { status: number; statusText: string; headers: Record<string, string>; body: string; time: number; size: number };
   vars: Record<string, string>;
   data?: Record<string, string>;
+  /** A WebSocket request: what arrived while it listened. */
+  messages?: { data: string; event?: string; channel?: string }[];
 }
 
 const CODE = /<script id="worker"[^>]*>([\s\S]*?)<\/script>/.exec(sandbox)?.[1] ?? '';

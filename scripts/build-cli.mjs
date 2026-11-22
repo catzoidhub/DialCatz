@@ -36,6 +36,32 @@ if (!r.success) {
   for (const l of r.logs) console.error(l);
   process.exit(1);
 }
+// The npm package: the bundle, its package.json (no dependencies: everything is inside), README and licence.
+const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+writeFileSync(
+  join(out, 'package.json'),
+  `${JSON.stringify(
+    {
+      name: process.env.DIALCATZ_CLI_NAME || 'dialcatz',
+      version,
+      description: "Run DialCatz collections from a terminal or CI: requests, scripts and tests, checked against your OpenAPI contract.",
+      keywords: ['api', 'testing', 'cli', 'ci', 'openapi', 'postman', 'grpc', 'websocket', 'oauth2', 'dialcatz', 'catzoid'],
+      homepage: 'https://catzoid.com/dialcatz',
+      bugs: 'https://github.com/catzoidhub/DialCatz/issues',
+      repository: { type: 'git', url: 'git+https://github.com/catzoidhub/DialCatz.git', directory: 'cli' },
+      license: pkg.license,
+      author: pkg.author,
+      type: 'module',
+      bin: { dialcatz: 'dialcatz.mjs' },
+      files: ['dialcatz.mjs', 'README.md', 'LICENSE'],
+      engines: { node: '>=20' },
+    },
+    null,
+    2,
+  )}\n`,
+);
+writeFileSync(join(out, 'README.md'), readFileSync(join(root, 'cli/README.md')));
+writeFileSync(join(out, 'LICENSE'), readFileSync(join(root, 'LICENSE')));
 const file = join(out, 'dialcatz.mjs');
 writeFileSync(file, `#!/usr/bin/env node\n${await r.outputs[0].text()}`);
 chmodSync(file, 0o755);
