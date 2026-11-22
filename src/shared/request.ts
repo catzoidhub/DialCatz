@@ -119,6 +119,7 @@ export function resolveOAuth(o: OAuthSettings | undefined, vars: Vars): OAuthSet
     clientAuth: o?.clientAuth === 'body' ? 'body' : 'basic',
     ...(grant === 'authorization_code' ? { authUrl: v(o?.authUrl), pkce: o?.pkce !== false, redirectUri: v(o?.redirectUri) || OAUTH_REDIRECT } : {}),
     ...(grant === 'password' ? { username: v(o?.username), password: interpolate(o?.password ?? '', vars) } : {}),
+    ...(grant === 'device_code' ? { deviceUrl: v(o?.deviceUrl) } : {}),
   };
 }
 

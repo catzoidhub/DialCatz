@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { authorizeUrl, loopback, oauthProblem, readTokenResponse, tokenFresh, tokenIdentity, tokenRequest } from '../src/shared/oauth';
+import { authorizeUrl, deviceRequest, discoveryUrls, loopback, OAuthError, oauthProblem, readDeviceResponse, readDiscovery, readTokenResponse, tokenFresh, tokenIdentity, tokenRequest } from '../src/shared/oauth';
 import { buildVars, resolveOAuth, toWire } from '../src/shared/request';
 import { newRequest, OAUTH_REDIRECT, type OAuthSettings } from '../src/shared/types';
 import { openApiAuth } from '../src/main/importers';
@@ -85,4 +85,41 @@ test('OpenAPI: the scheme the document asks for becomes the collection\'s auth, 
   // Swagger 2
   expect(openApiAuth({ swagger: '2.0', securityDefinitions: { o: { type: 'oauth2', flow: 'application', tokenUrl: 'https://id/token', scopes: { api: '' } } } }, '')?.oauth2).toEqual({ grant: 'client_credentials', tokenUrl: 'https://id/token', clientId: '{{clientId}}', clientSecret: '{{clientSecret}}', scope: 'api' });
   expect(openApiAuth(doc({ i: { type: 'oauth2', flows: { implicit: { authorizationUrl: 'https://id/a', scopes: {} } } } }), '')).toBeNull();
+});
+
+test('device code: the request, the code to type in, the polling grant', () => {
+  const dev: OAuthSettings = { grant: 'device_code', deviceUrl: 'https://id.example.com/device', tokenUrl: 'https://id.example.com/token', clientId: 'tv', scope: 'read' };
+  expect(oauthProblem(dev)).toBeNull();
+  expect(oauthProblem({ ...dev, deviceUrl: '' })).toContain('device authorization URL');
+  // A public client: its id in the body, no Authorization header.
+  const r = deviceRequest(dev);
+  expect(Object.fromEntries(new URLSearchParams(r.body))).toEqual({ scope: 'read', client_id: 'tv' });
+  expect(r.headers.some(([k]) => k === 'Authorization')).toBe(false);
+  const d = readDeviceResponse(200, '{"device_code":"D","user_code":"WDJB-MJHT","verification_uri":"https://id.example.com/activate","verification_uri_complete":"https://id.example.com/activate?c=WDJB-MJHT","expires_in":900,"interval":5}', 1000);
+  expect(d).toEqual({ deviceCode: 'D', userCode: 'WDJB-MJHT', verificationUri: 'https://id.example.com/activate', verificationUriComplete: 'https://id.example.com/activate?c=WDJB-MJHT', expiresAt: 901_000, intervalMs: 5000 });
+  // Google's older name, and the defaults when the server names none.
+  expect(readDeviceResponse(200, '{"device_code":"D","user_code":"U","verification_url":"https://g.co/device"}', 0)).toMatchObject({ verificationUri: 'https://g.co/device', intervalMs: 5000, expiresAt: 600_000 });
+  expect(() => readDeviceResponse(400, '{"error":"invalid_client"}', 0)).toThrow('invalid_client');
+  const poll = tokenRequest(dev, { kind: 'device', deviceCode: 'D' });
+  expect(Object.fromEntries(new URLSearchParams(poll.body))).toEqual({ grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: 'D', client_id: 'tv' });
+  // The wait is told from a refusal by the server's own error code.
+  try {
+    readTokenResponse(400, '{"error":"authorization_pending"}', 0);
+    throw new Error('should have thrown');
+  } catch (e) {
+    expect(e).toBeInstanceOf(OAuthError);
+    expect((e as OAuthError).code).toBe('authorization_pending');
+  }
+  expect(resolveOAuth({ grant: 'device_code', deviceUrl: '{{d}}', tokenUrl: 't', clientId: 'c' }, buildVars([{ key: 'd', value: 'https://x/device', enabled: true, secret: false }])).deviceUrl).toBe('https://x/device');
+});
+
+test('discovery: where a provider describes itself, and what is taken from it', () => {
+  expect(discoveryUrls('https://id.example.com/')).toEqual(['https://id.example.com/.well-known/openid-configuration', 'https://id.example.com/.well-known/oauth-authorization-server']);
+  // A tenant in the path (Keycloak realms, Auth0 tenants, Microsoft): OIDC appends, RFC 8414 inserts.
+  expect(discoveryUrls('https://kc.test/realms/shop')).toEqual(['https://kc.test/realms/shop/.well-known/openid-configuration', 'https://kc.test/.well-known/oauth-authorization-server/realms/shop']);
+  expect(discoveryUrls('https://id.example.com/.well-known/openid-configuration')).toEqual(['https://id.example.com/.well-known/openid-configuration']);
+  expect(() => discoveryUrls('id.example.com')).toThrow('http');
+  expect(readDiscovery('{"issuer":"https://id","authorization_endpoint":"https://id/a","token_endpoint":"https://id/t","device_authorization_endpoint":"https://id/d","scopes_supported":["openid",7,"api"]}')).toEqual({ issuer: 'https://id', authUrl: 'https://id/a', tokenUrl: 'https://id/t', deviceUrl: 'https://id/d', scopes: ['openid', 'api'] });
+  expect(() => readDiscovery('{"issuer":"https://id"}')).toThrow('token_endpoint');
+  expect(() => readDiscovery('<html>')).toThrow('discovery document');
 });

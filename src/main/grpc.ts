@@ -3,6 +3,8 @@ import protobuf from 'protobufjs';
 import 'protobufjs/ext/descriptor';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
+import { createSecureContext } from 'node:tls';
+import { identityFor } from './tlsidentity';
 import type { GrpcMethodInfo, GrpcServiceInfo } from '@shared/types';
 
 /**
@@ -42,7 +44,12 @@ export function target(url: string): Target {
 
 function credentials(t: Target, insecure: boolean): grpc.ChannelCredentials {
   if (!t.tls) return grpc.credentials.createInsecure();
-  return grpc.credentials.createSsl(null, null, null, insecure ? { checkServerIdentity: () => undefined, rejectUnauthorized: false } : undefined);
+  const verify = insecure ? { checkServerIdentity: () => undefined, rejectUnauthorized: false } : undefined;
+  // A client certificate set for this host (mutual TLS): PEM pair or a PKCS#12 file.
+  const [host, port] = [t.address.replace(/:\d+$/, ''), /:(\d+)$/.exec(t.address)?.[1] ?? '443'];
+  const id = identityFor(`grpcs://${host}:${port}`);
+  if (id.pfx || id.cert) return grpc.credentials.createFromSecureContext(createSecureContext({ ...(id.pfx ? { pfx: id.pfx } : { cert: id.cert, key: id.key }), ...(id.passphrase ? { passphrase: id.passphrase } : {}) }), verify);
+  return grpc.credentials.createSsl(null, null, null, verify);
 }
 
 /** HTTP/1 headers that are not metadata (Connection and friends break the HTTP/2 connection outright). */

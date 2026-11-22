@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ClientCertsCard from './ClientCertsCard.vue';
 import AboutCard from './AboutCard.vue';
 import AiModelPicker from './AiModelPicker.vue';
 import McatzpSettings from './McatzpSettings.vue';
@@ -208,6 +209,8 @@ const THEMES: { id: Theme; label: string }[] = [
           </div>
         </div>
       </div>
+
+      <ClientCertsCard />
 
       <div v-if="reportPrefs" class="card">
         <div class="card-body">

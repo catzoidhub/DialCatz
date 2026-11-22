@@ -123,6 +123,8 @@
             }
           },
           data,
+          // A WebSocket request run on its own (the CLI): what arrived while it listened, as { data, event?, channel? }.
+          messages: Array.isArray(ctx.messages) ? ctx.messages : [],
           expect,
           log: (...a) => logs.push(a.map((x) => (typeof x === 'string' ? x : show(x))).join(' ')),
         };

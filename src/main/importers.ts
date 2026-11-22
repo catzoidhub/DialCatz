@@ -92,6 +92,12 @@ function pmAuth(a: PmAuth | undefined): RequestAuth {
   }
 }
 
+/** What is kept of a file's path from another computer: a relative path as it is, else only the file's name. */
+function fileHint(src: unknown): string {
+  if (typeof src !== 'string' || !src) return '';
+  return /^([a-z]:)?[\\/]|^~/i.test(src) ? (src.split(/[\\/]/).pop() ?? '') : src;
+}
+
 function pmRequest(r: Record<string, unknown> | string): RequestSpec {
   if (typeof r === 'string') return { ...newRequest(), url: r, params: splitUrl(r).params };
   const urlObj = r.url as string | { raw?: string; query?: unknown } | undefined;
@@ -106,9 +112,12 @@ function pmRequest(r: Record<string, unknown> | string): RequestSpec {
     spec.body = { mode: lang === 'json' || /^\s*[[{]/.test(raw) ? 'json' : lang === 'xml' ? 'xml' : 'text', raw, fields: [] };
   } else if (b?.mode === 'urlencoded') spec.body = { mode: 'form', raw: '', fields: kv(b.urlencoded) };
   else if (b?.mode === 'formdata') {
-    // File fields come without their file (a path on someone else's computer): the user picks it again.
-    const types = Array.isArray(b.formdata) ? (b.formdata as { type?: string }[]).map((f) => f?.type) : [];
-    spec.body = { mode: 'multipart', raw: '', fields: kv(b.formdata).map((f, n) => (types[n] === 'file' ? { ...f, type: 'file' as const, value: '' } : f)) };
+    // File fields come without their file (a path on someone else's computer): the user picks it again. The file's
+    // name stays as the field's text, and a relative path whole: the CLI finds it beside the collection.
+    const src = Array.isArray(b.formdata) ? (b.formdata as { type?: string; src?: unknown }[]).map((f) => (f?.type === 'file' ? fileHint(Array.isArray(f.src) ? f.src[0] : f.src) : null)) : [];
+    spec.body = { mode: 'multipart', raw: '', fields: kv(b.formdata).map((f, n) => (src[n] !== null && src[n] !== undefined ? { ...f, type: 'file' as const, value: src[n]! } : f)) };
+  } else if (b?.mode === 'file') {
+    spec.body = { mode: 'binary', raw: '', fields: [] };
   } else if (b?.mode === 'graphql') {
     const g = (b as { graphql?: { query?: string; variables?: string } }).graphql;
     spec.body = { mode: 'graphql', raw: g?.query ?? '', variables: g?.variables ?? '', fields: [] };

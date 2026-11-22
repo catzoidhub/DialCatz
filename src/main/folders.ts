@@ -72,7 +72,7 @@ function specDoc(spec: RequestSpec): Record<string, unknown> {
   const s = stripLocalFiles(spec);
   const body = compact({ mode: s.body.mode, raw: s.body.raw, variables: s.body.variables, rpcMethod: s.body.rpcMethod, rpcBatch: s.body.rpcBatch || undefined, rpcNotify: s.body.rpcNotify || undefined, fields: s.body.fields.map((f) => compact({ key: f.key, value: f.value, enabled: f.enabled, type: f.type, description: f.description })) });
   const kv = (list: RequestSpec['params']) => list.map((r) => compact({ key: r.key, value: r.value, enabled: r.enabled, description: r.description }));
-  return compact({ method: s.method, url: s.url, params: kv(s.params), headers: kv(s.headers), body: s.body.mode === 'none' ? undefined : body, auth: s.auth, autoOff: s.autoOff, preRequest: s.preRequest, tests: s.tests, socketIo: s.socketIo || undefined, pusher: s.pusher, grpc: s.grpc && (s.grpc.service || s.grpc.method || s.grpc.protoFiles?.length) ? s.grpc : undefined });
+  return compact({ method: s.method, url: s.url, params: kv(s.params), headers: kv(s.headers), body: s.body.mode === 'none' ? undefined : body, auth: s.auth, autoOff: s.autoOff, preRequest: s.preRequest, tests: s.tests, socketIo: s.socketIo || undefined, pusher: s.pusher, wsMessage: s.wsMessage && (s.wsMessage.text || s.wsMessage.event) ? s.wsMessage : undefined, grpc: s.grpc && (s.grpc.service || s.grpc.method || s.grpc.protoFiles?.length) ? s.grpc : undefined });
 }
 
 function itemDoc(i: TreeItem): Record<string, unknown> {
@@ -202,6 +202,10 @@ function specFrom(d: unknown): RequestSpec {
   if (r.pusher && typeof r.pusher === 'object') {
     const p = r.pusher as Record<string, unknown>;
     spec.pusher = { ...(Array.isArray(p.channels) ? { channels: p.channels.map((c) => str(c, 164)).slice(0, 50) } : {}), ...(p.secret ? { secret: str(p.secret, 200) } : {}), ...(p.userId ? { userId: str(p.userId, 200) } : {}) };
+  }
+  if (r.wsMessage && typeof r.wsMessage === 'object') {
+    const m = r.wsMessage as Record<string, unknown>;
+    spec.wsMessage = { text: str(m.text, 1_000_000), ...(m.event ? { event: str(m.event, 500) } : {}), ...(m.channel ? { channel: str(m.channel, 164) } : {}) };
   }
   if (r.grpc && typeof r.grpc === 'object') {
     const g = r.grpc as Record<string, unknown>;

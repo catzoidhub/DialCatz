@@ -1,9 +1,9 @@
 import { safeStorage } from 'electron';
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
-import type { OAuthSettings, OAuthStatus } from '@shared/types';
+import type { OAuthDevicePrompt, OAuthDiscovery, OAuthSettings, OAuthStatus } from '@shared/types';
 import { OAUTH_REDIRECT } from '@shared/types';
-import { authorizeUrl, loopback, oauthProblem, readTokenResponse, tokenFresh, tokenIdentity, tokenRequest, type TokenAsk, type TokenSet } from '@shared/oauth';
+import { authorizeUrl, deviceRequest, discoveryUrls, loopback, OAuthError, oauthProblem, readDeviceResponse, readDiscovery, readTokenResponse, tokenFresh, tokenIdentity, tokenRequest, type TokenAsk, type TokenSet } from '@shared/oauth';
 import { send } from './http';
 import { store } from './store';
 import { oauthPage } from './oauthpage';
@@ -131,7 +131,7 @@ async function get(c: OAuthSettings, o: OAuthOptions): Promise<TokenSet> {
       return t;
     } catch (e) {
       // A refresh token that ended: the grant itself is tried next (a sign-in when that is allowed).
-      if (c.grant === 'authorization_code' && !o.interactive) throw new Error(`OAuth 2.0: the token ended and could not be renewed (${(e as Error).message}). Get a new token in the Auth tab.`);
+      if ((c.grant === 'authorization_code' || c.grant === 'device_code') && !o.interactive) throw new Error(`OAuth 2.0: the token ended and could not be renewed (${(e as Error).message}). Get a new token in the Auth tab.`);
     }
   }
   let t: TokenSet;
@@ -139,7 +139,7 @@ async function get(c: OAuthSettings, o: OAuthOptions): Promise<TokenSet> {
   else if (c.grant === 'password') t = await ask(c, { kind: 'password' }, o);
   else {
     if (!o.interactive) throw new Error('OAuth 2.0: sign in first. Open the Auth tab and choose Get new token.');
-    t = await signIn(c, o);
+    t = c.grant === 'device_code' ? await deviceSignIn(c, o) : await signIn(c, o);
   }
   keep(c, t);
   return t;
@@ -220,4 +220,58 @@ async function signIn(c: OAuthSettings, o: OAuthOptions): Promise<TokenSet> {
       }, 500),
     );
   }
+}
+
+// ------------------------------------------------------------------ device code: a code typed in on any device
+
+let devicePrompt: (p: OAuthDevicePrompt | null) => void = () => undefined;
+/** Where the code to type in is shown while DialCatz waits (null: the wait is over). */
+export const setDevicePrompt = (fn: (p: OAuthDevicePrompt | null) => void) => (devicePrompt = fn);
+
+async function deviceSignIn(c: OAuthSettings, o: OAuthOptions): Promise<TokenSet> {
+  if (signing) throw new Error('OAuth 2.0: another sign-in is waiting. Finish or cancel it first.');
+  let stopNow: (e: Error) => void = () => undefined;
+  const stop = new Promise<never>((_, reject) => (stopNow = reject));
+  stop.catch(() => undefined);
+  signing = { cancel: (why) => stopNow(new Error(`OAuth 2.0: ${why}`)) };
+  try {
+    const { headers, body } = deviceRequest(c);
+    const r = await send({ method: 'POST', url: c.deviceUrl!, headers: [...headers, ['User-Agent', 'DialCatz']], body }, `oauth-${randomBytes(6).toString('hex')}`, { insecure: o.insecure === true, timeoutMs: 30_000 });
+    if (r.error || !r.response) throw new Error(`OAuth 2.0: the device address could not be reached: ${r.error ?? 'no answer'}`);
+    const d = readDeviceResponse(r.response.status, r.response.body, Date.now());
+    devicePrompt({ userCode: d.userCode, verificationUri: d.verificationUri, verificationUriComplete: d.verificationUriComplete, expiresAt: d.expiresAt });
+    void openBrowser(d.verificationUriComplete || d.verificationUri).catch(() => undefined);
+    let every = d.intervalMs;
+    for (;;) {
+      await Promise.race([new Promise((done) => setTimeout(done, every)), stop]);
+      if (Date.now() > d.expiresAt) throw new Error('OAuth 2.0: the code ended before anyone signed in. Choose Get new token for a new one.');
+      try {
+        return await ask(c, { kind: 'device', deviceCode: d.deviceCode }, o);
+      } catch (e) {
+        const code = e instanceof OAuthError ? e.code : '';
+        if (code === 'authorization_pending') continue;
+        if (code === 'slow_down') every += 5000;
+        else if (code === 'access_denied') throw new Error('OAuth 2.0: the sign-in was refused');
+        else if (code === 'expired_token') throw new Error('OAuth 2.0: the code ended before anyone signed in. Choose Get new token for a new one.');
+        else throw e;
+      }
+    }
+  } finally {
+    signing = null;
+    devicePrompt(null);
+  }
+}
+
+// ------------------------------------------------------------------ discovery
+
+/** The provider's addresses from its issuer (OpenID Connect discovery, then RFC 8414's own address). */
+export async function discover(issuer: string, o: { insecure?: boolean } = {}): Promise<OAuthDiscovery> {
+  let last = '';
+  for (const url of discoveryUrls(issuer)) {
+    const r = await send({ method: 'GET', url, headers: [['Accept', 'application/json'], ['User-Agent', 'DialCatz']] }, `oauth-${randomBytes(6).toString('hex')}`, { insecure: o.insecure === true, timeoutMs: 20_000 });
+    if (r.error || !r.response) last = r.error ?? 'no answer';
+    else if (r.response.status !== 200) last = `${new URL(url).pathname} answered ${r.response.status}`;
+    else return readDiscovery(r.response.body);
+  }
+  throw new Error(`No discovery document at that issuer (${last}). Fill in the addresses by hand.`);
 }

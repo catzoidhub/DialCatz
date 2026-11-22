@@ -50,14 +50,15 @@ import { MCATZP_TARGETS } from '@catzoid/mcatzp-host';
 import { randomUUID } from 'node:crypto';
 import { systemVersion } from './system';
 import * as oauth from './oauth';
+import * as clientCerts from './clientcerts';
 import type { OAuthSettings } from '@shared/types';
 
 /** OAuth settings as the window sent them: texts only, nothing else gets through. */
 function oauthSettings(raw: unknown): OAuthSettings {
   const o = (raw ?? {}) as Record<string, unknown>;
   const s = (v: unknown, max = 4000) => (typeof v === 'string' ? v.slice(0, max) : '');
-  const grant = o.grant === 'client_credentials' || o.grant === 'password' ? o.grant : 'authorization_code';
-  return { grant, tokenUrl: s(o.tokenUrl), clientId: s(o.clientId), clientSecret: s(o.clientSecret), scope: s(o.scope), audience: s(o.audience), clientAuth: o.clientAuth === 'body' ? 'body' : 'basic', authUrl: s(o.authUrl), redirectUri: s(o.redirectUri), pkce: o.pkce !== false, username: s(o.username), password: s(o.password) };
+  const grant = o.grant === 'client_credentials' || o.grant === 'password' || o.grant === 'device_code' ? o.grant : 'authorization_code';
+  return { grant, tokenUrl: s(o.tokenUrl), clientId: s(o.clientId), clientSecret: s(o.clientSecret), scope: s(o.scope), audience: s(o.audience), clientAuth: o.clientAuth === 'body' ? 'body' : 'basic', authUrl: s(o.authUrl), deviceUrl: s(o.deviceUrl), redirectUri: s(o.redirectUri), pkce: o.pkce !== false, username: s(o.username), password: s(o.password) };
 }
 
 /**
@@ -1159,6 +1160,15 @@ function api(): DialCatzApi {
     },
     oauthClear: async (c) => oauth.clear(oauthSettings(c)),
     oauthCancel: async () => oauth.cancel(),
+    clientCerts: async () => clientCerts.list(),
+    clientCertSave: async (c) => clientCerts.save({ id: typeof c?.id === 'string' ? c.id : undefined, host: String(c?.host ?? ''), kind: c?.kind === 'pfx' ? 'pfx' : 'pem', certFile: String(c?.certFile ?? ''), keyFile: String(c?.keyFile ?? ''), pfxFile: String(c?.pfxFile ?? ''), ...(typeof c?.passphrase === 'string' ? { passphrase: c.passphrase.slice(0, 2000) } : {}) }),
+    clientCertRemove: async (id) => clientCerts.remove(String(id)),
+    clientCertPick: async (what) => {
+      const f = what === 'pfx' ? { title: 'Choose the PKCS#12 file (.p12 / .pfx)', filters: [{ name: 'PKCS#12', extensions: ['p12', 'pfx'] }, { name: 'All files', extensions: ['*'] }] } : what === 'key' ? { title: 'Choose the private key (PEM)', filters: [{ name: 'Keys', extensions: ['key', 'pem'] }, { name: 'All files', extensions: ['*'] }] } : { title: 'Choose the certificate (PEM)', filters: [{ name: 'Certificates', extensions: ['crt', 'cer', 'pem'] }, { name: 'All files', extensions: ['*'] }] };
+      const r = await openDialog(win, { ...f, properties: ['openFile'] });
+      return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
+    },
+    oauthDiscover: async (issuer, o) => oauth.discover(String(issuer).slice(0, 2000), { insecure: o?.insecure === true || settings().requests.insecure === true }),
     wsClose: async (token) => sockets.close(String(token)),
     saveResponse: async (token, suggestedName) => {
       const body = http.lastBody(token);
@@ -1808,6 +1818,7 @@ if (primary) app.whenReady().then(async () => {
   sockets.onEvent((e) => send('app:ws', e));
   // A sign-in page opens in the browser chosen in Settings (shared with the Catzoid apps).
   oauth.setBrowser((url) => openWeb(url, settings().browser));
+  oauth.setDevicePrompt((p) => send('app:oauthDevice', p));
   // Git accounts connected or removed in another Catzoid app; avatars that arrived.
   onSharedChange(() => repos.changed());
   gitHosts.setAccountsListener(() => repos.changed());

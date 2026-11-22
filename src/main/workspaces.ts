@@ -348,13 +348,53 @@ export function ensureDefault(): void {
   ];
   w.activeEnvironmentId = env;
   w.items.push(...protocolSamples(col, w.items.length));
+  w.items.push(...oauthSamples(col, w.items.length));
   save(w);
   store.setExtra(SAMPLES_KEY, true);
+  store.setExtra(OAUTH_SAMPLES_KEY, true);
 }
 
 const SAMPLES_KEY = 'protocolSamples';
 const GRPC_SAMPLES_KEY = 'protocolSamplesGrpc2';
 const PUSHER_SAMPLES_KEY = 'protocolSamplesPusher';
+const OAUTH_SAMPLES_KEY = 'samplesOAuth';
+
+/**
+ * "OAuth 2.0" in Getting started (#100): two requests against Duende's public demo server (its clients and their
+ * secrets are published for trying OAuth out). One gets its token by itself, one shows a sign-in with a code.
+ */
+function oauthSamples(collectionId: string, sort: number): TreeItem[] {
+  const folder = uid('f_');
+  const issuer = 'https://demo.duendesoftware.com';
+  const req = (n: number, name: string, description: string, oauth2: NonNullable<TreeItem['auth']>['oauth2']): TreeItem => ({
+    id: uid('r_'),
+    kind: 'request',
+    parentId: folder,
+    name,
+    sort: n,
+    description,
+    request: { ...newRequest(), method: 'GET', url: `${issuer}/api/test`, auth: { mode: 'oauth2', oauth2 } },
+  });
+  return [
+    { id: folder, kind: 'folder', parentId: collectionId, name: 'OAuth 2.0', sort, auth: { mode: 'inherit' }, description: "Requests that log in with OAuth 2.0, against Duende's public demo server. Open a request's Auth tab to see how the token is got; your own APIs use the same settings, with secrets in {{variables}}." },
+    req(0, 'Client credentials', 'Send: DialCatz asks the token address for a token with the client id and secret, then calls the API with it. No sign-in. The Auth tab shows the token and how long it lasts.', { grant: 'client_credentials', issuer, tokenUrl: `${issuer}/connect/token`, clientId: 'm2m', clientSecret: 'secret', scope: 'api' }),
+    req(1, 'Sign in with a device code', 'Send (or Auth → Get new token): DialCatz shows a short code and opens the sign-in page. Sign in there as bob with the password bob and agree; DialCatz then gets the token and renews it by itself.', { grant: 'device_code', issuer, deviceUrl: `${issuer}/connect/deviceauthorization`, tokenUrl: `${issuer}/connect/token`, clientId: 'device', scope: 'openid api offline_access' }),
+  ];
+}
+
+/** Older installs: the OAuth samples join their Getting started once. */
+function addOAuthSamples(): void {
+  if (store.extra<boolean>(OAUTH_SAMPLES_KEY)) return;
+  store.setExtra(OAUTH_SAMPLES_KEY, true);
+  for (const s of list().filter((x) => !x.serverId && !x.folder)) {
+    const w = load(s.id);
+    const col = w.items.find((i) => i.kind === 'collection' && i.name === 'Getting started');
+    if (!col || w.items.some((i) => i.parentId === col.id && i.name === 'OAuth 2.0')) continue;
+    w.items.push(...oauthSamples(col.id, w.items.filter((i) => i.parentId === col.id).length));
+    save(w);
+    return;
+  }
+}
 
 /** A Pusher sample joins an older "More protocols" folder once (one made before it existed). */
 function addPusherSample(): void {
@@ -451,6 +491,7 @@ function grpcSamples(folder: string, sort: number): TreeItem[] {
 export function addProtocolSamples(): void {
   replacePostmanGrpcSample();
   addPusherSample();
+  addOAuthSamples();
   if (store.extra<boolean>(SAMPLES_KEY)) return;
   store.setExtra(SAMPLES_KEY, true);
   for (const s of list().filter((x) => !x.serverId && !x.folder)) {

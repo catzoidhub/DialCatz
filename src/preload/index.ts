@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { API_METHODS, type ConnectRequest, type DialCatzApi, type DialCatzSettings, type GitState, type PresenceEntry, type UpdateState, type WsEvent, type SseEvent, type McatzpAsk, type McatzpInstallProgress } from '@shared/types';
+import { API_METHODS, type ConnectRequest, type DialCatzApi, type DialCatzSettings, type GitState, type PresenceEntry, type UpdateState, type WsEvent, type OAuthDevicePrompt, type SseEvent, type McatzpAsk, type McatzpInstallProgress } from '@shared/types';
 
 const api = Object.fromEntries(API_METHODS.map((m) => [m, (...args: unknown[]) => ipcRenderer.invoke(`dialcatz:${m}`, ...args)])) as unknown as DialCatzApi;
 
@@ -33,6 +33,8 @@ const bridge = {
   onSynced: (cb: () => void) => on('app:synced', cb),
   /** WebSocket tab events (connecting, open, messages, errors, close). */
   onWs: (cb: (e: WsEvent) => void) => on('app:ws', cb),
+  /** OAuth 2.0 device code: the code to type in while DialCatz waits; null when the wait is over. */
+  onOauthDevice: (cb: (p: OAuthDevicePrompt | null) => void) => on('app:oauthDevice', cb),
   /** A request tab's live SSE answer: each event, then its end. */
   onSse: (cb: (e: SseEvent) => void) => on('app:sse', cb),
   /** dialcatz://open?site=<id> from DevCatz. */

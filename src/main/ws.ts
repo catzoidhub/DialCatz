@@ -1,9 +1,10 @@
 import type { WsEvent } from '@shared/types';
 import { sioConnect, sioDecode, sioEvent, sioUrl } from '@shared/socketio';
 import { authText, clientEventFrame, isPresence, needsAuth, pongFrame, pusherDecode, pusherUrl, subscribeFrame, unsubscribeFrame } from '@shared/pusher';
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { Agent, WebSocket as TlsWebSocket } from 'undici';
 import { localCa } from './http';
+import { identityFor } from './tlsidentity';
 
 /**
  * wss:// to a DevCatz host (*.localhost, a site's own domain) needs DevCatz's local CA, like HTTP requests get it
@@ -15,10 +16,13 @@ function tlsAgent(url: string, insecure: boolean): Agent | null {
   const u = new URL(url);
   if (u.protocol !== 'wss:') return null;
   const ca = insecure ? undefined : localCa(u.hostname);
-  if (!insecure && !ca) return null;
-  const key = insecure ? 'insecure' : `ca:${ca!.length}:${ca![ca!.length - 1].length}`;
+  // A client certificate set for this host (mutual TLS) goes with the handshake too.
+  const id = identityFor(u);
+  const hasId = !!(id.cert || id.pfx);
+  if (!insecure && !ca && !hasId) return null;
+  const key = `${insecure ? 'insecure' : ca ? `ca:${ca.length}:${ca[ca.length - 1].length}` : 'roots'}|${hasId ? createHash('sha256').update(id.pfx ?? id.cert!).digest('hex').slice(0, 16) : ''}`;
   let a = agents.get(key);
-  if (!a) agents.set(key, (a = new Agent({ connect: insecure ? { rejectUnauthorized: false } : { ca } })));
+  if (!a) agents.set(key, (a = new Agent({ connect: { ...(insecure ? { rejectUnauthorized: false } : ca ? { ca } : {}), ...id } })));
   return a;
 }
 

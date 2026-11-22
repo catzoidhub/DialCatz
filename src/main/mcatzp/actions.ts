@@ -69,7 +69,7 @@ function authOut(a: RequestAuth | undefined): Record<string, unknown> {
   if (a.mode === 'oauth2') {
     const o = a.oauth2;
     // Addresses, client id and scope are not secrets; the client secret and password show only as a variable's name.
-    return { mode: 'oauth2', grant: o?.grant ?? 'authorization_code', auth_url: o?.authUrl || undefined, token_url: o?.tokenUrl || undefined, client_id: o?.clientId || undefined, client_secret: used(o?.clientSecret), scope: o?.scope || undefined, audience: o?.audience || undefined, username: o?.username ? (isVariable(o.username) ? o.username : 'set') : undefined, password: used(o?.password), pkce: o?.grant === 'client_credentials' || o?.grant === 'password' ? undefined : o?.pkce !== false, client_sent_as: o?.clientAuth === 'body' ? 'body' : 'basic', redirect_uri: o?.redirectUri || undefined };
+    return { mode: 'oauth2', grant: o?.grant ?? 'authorization_code', auth_url: o?.authUrl || undefined, device_url: o?.deviceUrl || undefined, token_url: o?.tokenUrl || undefined, client_id: o?.clientId || undefined, client_secret: used(o?.clientSecret), scope: o?.scope || undefined, audience: o?.audience || undefined, username: o?.username ? (isVariable(o.username) ? o.username : 'set') : undefined, password: used(o?.password), pkce: (o?.grant ?? 'authorization_code') === 'authorization_code' ? o?.pkce !== false : undefined, client_sent_as: o?.clientAuth === 'body' ? 'body' : 'basic', redirect_uri: o?.redirectUri || undefined };
   }
   return { mode: a.mode };
 }
@@ -162,8 +162,8 @@ export function readActions(api: DialCatzApi, scopes: Scopes, win: WindowReads):
       return reply({ version: i.version, platform: i.platform, arch: i.arch, os: i.os, update: u.kind, ...('version' in u ? { updateVersion: u.version } : {}) });
     }),
     read('get_settings', 'Settings', 'What Settings shows: theme, the browser links open in, whether AI is on and its provider, and the request defaults. Never API keys.', OBJECT(), async () => {
-      const [s, u, r] = await Promise.all([api.settings(), api.updatePrefs(), api.reportPrefs()]);
-      return reply({ theme: s.theme, browser: s.browser || 'system default', ai: { enabled: s.ai.enabled, provider: s.ai.provider, off: s.ai.off }, requests: { timeoutMs: s.requests.timeoutMs, followRedirects: s.requests.followRedirects, insecure: s.requests.insecure }, updates: { auto: u.auto, channel: u.channel }, crashReports: r.crashReports });
+      const [s, u, r, certs] = await Promise.all([api.settings(), api.updatePrefs(), api.reportPrefs(), api.clientCerts()]);
+      return reply({ theme: s.theme, browser: s.browser || 'system default', ai: { enabled: s.ai.enabled, provider: s.ai.provider, off: s.ai.off }, requests: { timeoutMs: s.requests.timeoutMs, followRedirects: s.requests.followRedirects, insecure: s.requests.insecure }, updates: { auto: u.auto, channel: u.channel }, crashReports: r.crashReports, clientCertificates: certs.map((c) => ({ host: c.host, ready: !c.problem })) });
     }),
     read('list_workspaces', 'List workspaces', 'The workspaces shared with this client: personal, in a folder (Git) or from a team server (DialCatz Den). The other tools take one of these, by id or name.', OBJECT(), async () => {
       const list = await shared();

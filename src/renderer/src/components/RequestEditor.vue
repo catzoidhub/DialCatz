@@ -324,6 +324,30 @@ function draft(v: string) {
   props.tab.ws ??= { state: 'idle', log: [], draft: '' };
   props.tab.ws.draft = v;
 }
+// The first message kept with the request: what a run on its own (the CLI, dialcatz run) sends once connected.
+const keptMessage = computed(() => spec.value.wsMessage ?? null);
+const messageIsKept = computed(() => {
+  const k = keptMessage.value;
+  return !!k && k.text === (props.tab.ws?.draft ?? '') && (k.event ?? '') === (props.tab.ws?.event ?? '') && (k.channel ?? '') === (props.tab.ws?.channel ?? '');
+});
+function keepMessage() {
+  const w = props.tab.ws;
+  spec.value.wsMessage = { text: w?.draft ?? '', ...(w?.event?.trim() ? { event: w.event.trim() } : {}), ...(w?.channel ? { channel: w.channel } : {}) };
+  touch();
+}
+function dropMessage() {
+  delete spec.value.wsMessage;
+  touch();
+}
+// A tab opened on a request with a kept message starts with it in the Message pane.
+watch(
+  () => props.tab.id,
+  () => {
+    const k = spec.value.wsMessage;
+    if (k && !props.tab.ws) props.tab.ws = { state: 'idle', log: [], draft: k.text, ...(k.event ? { event: k.event } : {}), ...(k.channel ? { channel: k.channel } : {}) };
+  },
+  { immediate: true },
+);
 watch(
   () => activeTab.value?.id,
   () => (pane.value = spec.value.body.mode !== 'none' && !['GET', 'HEAD'].includes(spec.value.method) ? 'body' : 'params'),
@@ -457,6 +481,8 @@ defineExpose({ focusUrl: () => urlInput.value?.select() });
         <div class="flex items-center gap-2">
           <span class="text-xs opacity-50">{{ wsState === 'open' ? `Connected. ${keyLabel('mod+enter')} sends.` : spec.pusher ? 'Connect first. The address ends in /app/<key>; private and presence channels are signed with the app secret.' : spec.socketIo ? 'Connect first. The address is the server and namespace (ws://host:3000/chat); DialCatz adds /socket.io/ and answers the pings.' : 'Connect first. The request’s headers and auth go with the handshake; set Sec-WebSocket-Protocol for subprotocols.' }}</span>
           <span class="flex-1" />
+          <button v-if="keptMessage && messageIsKept" class="btn btn-ghost btn-sm" title="Runs of this request on their own (the CLI, dialcatz run) send this message once connected. Click to stop keeping it." @click="dropMessage"><Icon name="check" class="size-4" />Kept with the request</button>
+          <button v-else class="btn btn-ghost btn-sm" :disabled="spec.pusher ? !tab.ws?.event?.trim() || !tab.ws?.channel : spec.socketIo ? !tab.ws?.event?.trim() : !tab.ws?.draft" title="Keeps this message with the request: the CLI (dialcatz run) sends it once connected" @click="keepMessage">Keep with the request</button>
           <button class="btn btn-primary btn-sm gap-1.5" :disabled="wsState !== 'open' || (spec.pusher ? !tab.ws?.event?.trim() || !tab.ws?.channel : spec.socketIo ? !tab.ws?.event?.trim() : !tab.ws?.draft)" @click="sendWs(tab)"><Icon name="send" class="size-4" />{{ spec.pusher ? 'Trigger client event' : spec.socketIo ? 'Emit event' : 'Send message' }}</button>
         </div>
       </div>

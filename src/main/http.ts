@@ -21,6 +21,7 @@ import { parseSse } from '@shared/sse';
 setDefaultAutoSelectFamilyAttemptTimeout(2500);
 import { store } from './store';
 import { appDataDir } from './platform';
+import { identityFor } from './tlsidentity';
 
 /**
  * Sends requests from the main process with node:http(s): no browser CORS rules, a real Host / Cookie header,
@@ -198,7 +199,7 @@ function once(w: WireRequest, body: Buffer | undefined, signal: AbortSignal, opt
     if (body && !lower.has('content-length')) headers['Content-Length'] = String(body.length);
 
     const ca = u.protocol === 'https:' && !opts.insecure ? localCa(u.hostname) : undefined;
-    const req = lib.request(u, { method: w.method, headers, signal, rejectUnauthorized: !opts.insecure, timeout: opts.timeoutMs, ...(ca ? { ca } : {}) }, (res) => {
+    const req = lib.request(u, { method: w.method, headers, signal, rejectUnauthorized: !opts.insecure, timeout: opts.timeoutMs, ...(ca ? { ca } : {}), ...(u.protocol === 'https:' ? identityFor(u) : {}) }, (res) => {
       const ttfb = performance.now() - started;
       const chunks: Buffer[] = [];
       let size = 0;

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { OAUTH_REDIRECT, type AuthMode, type OAuthGrant, type OAuthSettings, type OAuthStatus, type RequestAuth } from '@shared/types';
+import { OAUTH_REDIRECT, type AuthMode, type OAuthDevicePrompt, type OAuthGrant, type OAuthSettings, type OAuthStatus, type RequestAuth } from '@shared/types';
 import { resolveOAuth } from '@shared/request';
 import { oauthProblem } from '@shared/oauth';
 import { insecureFor, notify, plain, varsFor } from '../state';
@@ -30,6 +30,7 @@ const set = (patch: Partial<RequestAuth>) => emit('update:modelValue', { ...prop
 const GRANTS: { id: OAuthGrant; label: string; hint: string }[] = [
   { id: 'authorization_code', label: 'Authorization code', hint: 'You sign in in the browser; the usual choice for an API used on behalf of a person.' },
   { id: 'client_credentials', label: 'Client credentials', hint: 'The app signs in as itself with its client secret; no person, no browser.' },
+  { id: 'device_code', label: 'Device code', hint: 'DialCatz shows a short code; you type it in on the provider\'s page, on this computer or your phone.' },
   { id: 'password', label: 'Password', hint: 'A username and password are sent to the token address. Older; use it only when the server offers nothing else.' },
 ];
 const o = computed<OAuthSettings>(() => props.modelValue.oauth2 ?? { grant: 'authorization_code', tokenUrl: '', clientId: '' });
@@ -43,6 +44,7 @@ const now = ref(Date.now());
 const tick = setInterval(() => (now.value = Date.now()), 15_000);
 let timer: ReturnType<typeof setTimeout> | null = null;
 onBeforeUnmount(() => {
+  offDevice();
   clearInterval(tick);
   if (timer) clearTimeout(timer);
 });
@@ -73,6 +75,32 @@ async function getToken() {
   }
 }
 const cancelSignIn = () => void window.dialcatz.oauthCancel();
+const window_open = (url: string) => void window.dialcatz.openUrl(url);
+// Device code: the code to type in while DialCatz waits for the sign-in.
+const device = ref<OAuthDevicePrompt | null>(null);
+const offDevice = window.dialcatz.onOauthDevice((p) => (device.value = p));
+async function copyCode() {
+  if (!device.value) return;
+  await window.dialcatz.copyText(device.value.userCode);
+  notify('success', 'Code copied');
+}
+// OpenID Connect discovery: the provider's addresses from its issuer.
+const finding = ref(false);
+async function discover() {
+  const issuer = (resolveOAuth({ ...o.value, tokenUrl: o.value.issuer ?? '' }, varsFor(props.itemId)).tokenUrl || '').trim();
+  if (!issuer) return;
+  finding.value = true;
+  failed.value = '';
+  try {
+    const d = await window.dialcatz.oauthDiscover(issuer, insecureFor(props.itemId) ? { insecure: true } : {});
+    setO({ tokenUrl: d.tokenUrl, ...(d.authUrl ? { authUrl: d.authUrl } : {}), ...(d.deviceUrl ? { deviceUrl: d.deviceUrl } : {}) });
+    notify('success', `Addresses filled in from ${d.issuer || issuer}`);
+  } catch (e) {
+    failed.value = clean(e);
+  } finally {
+    finding.value = false;
+  }
+}
 async function clearToken() {
   await window.dialcatz.oauthClear(plain(resolved.value));
   failed.value = '';
@@ -142,9 +170,20 @@ async function copyRedirect() {
       </div>
       <p class="-mt-2 text-xs opacity-50">{{ GRANTS.find((g) => g.id === o.grant)?.hint }}</p>
 
+      <div class="opt-row">
+        <span class="flex flex-col"><span class="label-caps">Issuer</span><span class="text-xs opacity-50">Optional</span></span>
+        <div class="flex flex-1 items-center gap-2">
+          <VarInput class="field-box flex-1" :model-value="o.issuer ?? ''" placeholder="https://id.example.com  (fills in the addresses below)" :readonly="readonly" @update:model-value="(v: string) => setO({ issuer: v })" />
+          <button class="btn btn-ghost btn-sm" :disabled="readonly || finding || !(o.issuer ?? '').trim()" title="Reads the provider's discovery document (.well-known/openid-configuration)" @click="discover"><span v-if="finding" class="loading loading-spinner loading-xs"></span>Find addresses</button>
+        </div>
+      </div>
       <div v-if="o.grant === 'authorization_code'" class="opt-row">
         <span class="label-caps">Auth URL</span>
         <VarInput class="field-box flex-1" :model-value="o.authUrl ?? ''" placeholder="https://example.com/oauth/authorize" :readonly="readonly" @update:model-value="(v: string) => setO({ authUrl: v })" />
+      </div>
+      <div v-if="o.grant === 'device_code'" class="opt-row">
+        <span class="label-caps">Device URL</span>
+        <VarInput class="field-box flex-1" :model-value="o.deviceUrl ?? ''" placeholder="https://example.com/oauth/device/code" :readonly="readonly" @update:model-value="(v: string) => setO({ deviceUrl: v })" />
       </div>
       <div class="opt-row">
         <span class="label-caps">Token URL</span>
@@ -157,7 +196,7 @@ async function copyRedirect() {
       <div class="opt-row">
         <span class="label-caps">Client secret</span>
         <div class="flex flex-1 items-center gap-2">
-          <VarInput class="field-box flex-1" :class="{ 'is-masked': !show }" :model-value="o.clientSecret ?? ''" :placeholder="o.grant === 'authorization_code' ? '{{clientSecret}} (empty for a public client)' : '{{clientSecret}}'" :readonly="readonly" @update:model-value="(v) => setO({ clientSecret: v })" />
+          <VarInput class="field-box flex-1" :class="{ 'is-masked': !show }" :model-value="o.clientSecret ?? ''" :placeholder="o.grant === 'authorization_code' || o.grant === 'device_code' ? '{{clientSecret}} (empty for a public client)' : '{{clientSecret}}'" :readonly="readonly" @update:model-value="(v) => setO({ clientSecret: v })" />
           <button class="btn btn-ghost btn-sm btn-square" :title="show ? 'Hide' : 'Show'" @click="show = !show"><Icon :name="show ? 'eyeOff' : 'eye'" class="size-4" /></button>
         </div>
       </div>
@@ -215,13 +254,21 @@ async function copyRedirect() {
       </details>
 
       <div class="oauth-token">
+        <div v-if="busy && device" class="oauth-device">
+          <div class="text-xs opacity-60">Type this code in on the page that opened ({{ device.verificationUri.replace(/^https?:\/\//, '') }}), on this computer or another device:</div>
+          <div class="mt-2 flex items-center gap-2">
+            <code class="oauth-code">{{ device.userCode }}</code>
+            <button class="btn btn-ghost btn-sm btn-square" title="Copy the code" @click="copyCode"><Icon name="copy" class="size-4" /></button>
+            <button class="btn btn-ghost btn-sm" @click="window_open(device.verificationUriComplete || device.verificationUri)">Open the page again</button>
+          </div>
+        </div>
         <div class="flex items-center gap-3">
           <span class="oauth-dot" :class="`is-${tokenLine.tone}`"></span>
           <div class="min-w-0 flex-1">
-            <div class="text-sm font-medium">{{ busy && o.grant === 'authorization_code' ? 'Waiting for the sign-in in your browser…' : busy ? 'Asking for a token…' : tokenLine.text }}</div>
+            <div class="text-sm font-medium">{{ busy && o.grant === 'authorization_code' ? 'Waiting for the sign-in in your browser…' : busy && o.grant === 'device_code' ? (device ? 'Waiting for the code to be typed in…' : 'Asking for a code…') : busy ? 'Asking for a token…' : tokenLine.text }}</div>
             <div v-if="status?.has && status.scope && !busy" class="truncate text-xs opacity-60">Scope: {{ status.scope }}</div>
           </div>
-          <button v-if="busy && o.grant === 'authorization_code'" class="btn btn-ghost btn-sm" @click="cancelSignIn">Cancel</button>
+          <button v-if="busy && (o.grant === 'authorization_code' || o.grant === 'device_code')" class="btn btn-ghost btn-sm" @click="cancelSignIn">Cancel</button>
           <template v-else>
             <button v-if="status?.has" class="btn btn-ghost btn-sm" :disabled="busy" @click="clearToken">Forget token</button>
             <button class="btn btn-primary btn-sm" :disabled="busy || !!problem" :title="problem ?? ''" @click="getToken"><span v-if="busy" class="loading loading-spinner loading-xs"></span>Get new token</button>
@@ -263,6 +310,21 @@ async function copyRedirect() {
   border-radius: 12px;
   background: oklch(from var(--color-base-content) l c h / 0.04);
   border: 1px solid oklch(from var(--color-base-content) l c h / 0.07);
+}
+.oauth-device {
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid oklch(from var(--color-base-content) l c h / 0.08);
+}
+.oauth-code {
+  padding: 0.3rem 0.8rem;
+  border-radius: 10px;
+  font-size: 1.35rem;
+  font-weight: 650;
+  letter-spacing: 0.14em;
+  color: var(--primary-ink);
+  background: oklch(from var(--color-primary) l c h / 0.12);
+  user-select: all;
 }
 .oauth-more > summary {
   cursor: pointer;
