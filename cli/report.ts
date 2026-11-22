@@ -23,22 +23,29 @@ export function totals(runs: RunResult[]): Totals {
 }
 
 export interface Paint {
+  /** The marks: ✓ ✗ ›, or √ × > on a Windows console whose font has no ✓ (the classic console host). */
+  ok: string;
+  bad: string;
+  log: string;
   green: (s: string) => string;
   red: (s: string) => string;
   yellow: (s: string) => string;
   dim: (s: string) => string;
   bold: (s: string) => string;
 }
-export function paint(on: boolean): Paint {
+/** A terminal on Windows that is not Windows Terminal, VS Code or a Unix-like shell: Consolas / raster fonts, no ✓. */
+export const plainMarks = (env: NodeJS.ProcessEnv = process.env, platform: string = process.platform, tty = process.stdout.isTTY === true): boolean =>
+  platform === 'win32' && tty && !env.WT_SESSION && !env.TERM_PROGRAM && !env.TERM && !env.CI;
+export function paint(on: boolean, plain = false): Paint {
   const c = (code: number) => (s: string) => (on ? `\x1b[${code}m${s}\x1b[0m` : s);
-  return { green: c(32), red: c(31), yellow: c(33), dim: c(2), bold: c(1) };
+  return { ok: plain ? '√' : '✓', bad: plain ? '×' : '✗', log: plain ? '>' : '›', green: c(32), red: c(31), yellow: c(33), dim: c(2), bold: c(1) };
 }
 
 const span = (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`);
 
 /** One request, as it finishes. */
 export function requestLines(r: RequestResult, p: Paint, verbose: boolean): string[] {
-  const mark = r.outcome === 'passed' ? p.green('✓') : r.outcome === 'skipped' ? p.yellow('-') : p.red('✗');
+  const mark = r.outcome === 'passed' ? p.green(p.ok) : r.outcome === 'skipped' ? p.yellow('-') : p.red(p.bad);
   const where = r.place.length > 1 ? p.dim(`${r.place.slice(1).join(' / ')} / `) : '';
   const status = r.status === null ? '' : `  ${r.status >= 400 ? p.yellow(String(r.status)) : r.status}`;
   const time = r.timeMs === null ? '' : p.dim(`  ${span(r.timeMs)}`);
@@ -47,9 +54,9 @@ export function requestLines(r: RequestResult, p: Paint, verbose: boolean): stri
   else if (r.error) out.push(`      ${p.red(r.error)}`);
   for (const t of r.tests) {
     if (t.pass && !verbose) continue;
-    out.push(`      ${t.pass ? p.green('✓') : p.red('✗')} ${t.name}${t.error ? p.dim(`: ${t.error}`) : ''}`);
+    out.push(`      ${t.pass ? p.green(p.ok) : p.red(p.bad)} ${t.name}${t.error ? p.dim(`: ${t.error}`) : ''}`);
   }
-  if (verbose) for (const l of r.logs) out.push(p.dim(`      › ${l}`));
+  if (verbose) for (const l of r.logs) out.push(p.dim(`      ${p.log} ${l}`));
   return out;
 }
 

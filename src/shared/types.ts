@@ -82,6 +82,8 @@ export interface OAuthStatus {
   /** A refresh token is kept: DialCatz renews by itself. */
   refreshable: boolean;
   obtainedAt: number | null;
+  /** Kept across restarts (encrypted on this computer); false: only while DialCatz runs, this system has no secret store. */
+  lasting: boolean;
 }
 export interface RequestAuth {
   mode: AuthMode;

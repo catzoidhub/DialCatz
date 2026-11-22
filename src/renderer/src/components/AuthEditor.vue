@@ -230,7 +230,7 @@ async function copyRedirect() {
         <p v-if="failed" class="mt-2 text-xs text-error">{{ failed }}</p>
         <p v-else-if="problem" class="mt-2 text-xs opacity-60">{{ problem }}.</p>
       </div>
-      <p class="text-xs opacity-50">Sent as <code>Authorization: {{ o.headerPrefix?.trim() || 'Bearer' }} …</code>. DialCatz gets the token when you send and renews it by itself. Tokens stay on this computer, encrypted; they are never saved with the collection or shared with your team.</p>
+      <p class="text-xs opacity-50">Sent as <code>Authorization: {{ o.headerPrefix?.trim() || 'Bearer' }} …</code>. DialCatz gets the token when you send and renews it by itself. {{ status && !status.lasting ? 'This system has no secret store, so the token is kept only until DialCatz quits' : 'Tokens stay on this computer, encrypted' }}; they are never saved with the collection or shared with your team.</p>
     </template>
 
     <template v-else-if="modelValue.mode === 'apikey'">

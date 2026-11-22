@@ -12,7 +12,8 @@ import { oauthPage } from './oauthpage';
  * OAuth 2.0 tokens (#100). The settings (addresses, client, scope) live with the request or collection and may hold
  * {{variables}}; the window hands them over with the variables filled. The tokens stay on this computer only:
  * config.json → oauthTokens, each encrypted for this user (safeStorage: Keychain / DPAPI / the keyring), keyed by who
- * asks, where and for what, so a collection shared with the team never carries one.
+ * asks, where and for what, so a collection shared with the team never carries one. Where nothing can encrypt them
+ * they are not written at all: they last until DialCatz quits.
  *   token(c)      the kept token while it lasts; else a refresh; else a new one (client credentials / password by
  *                 itself; authorization code only when `interactive`, through the browser)
  *   Authorization code: the browser opens the auth address; it comes back to a loopback address DialCatz listens on
@@ -22,8 +23,14 @@ import { oauthPage } from './oauthpage';
 const KEY = 'oauthTokens';
 type Kept = { access: string; refresh: string; expiresAt: number | null; scope: string; tokenType: string; obtainedAt: number };
 
-const plainStore = () => !!process.env.DIALCATZ_NO_KEYCHAIN || !safeStorage.isEncryptionAvailable();
-const seal = (s: string) => (!s ? '' : plainStore() ? `raw:${s}` : `enc:${safeStorage.encryptString(s).toString('base64')}`);
+// Tests keep them readable in config.json (DIALCATZ_NO_KEYCHAIN). Otherwise a token is written only when it can be
+// encrypted; on a system without a secret store (a Linux session with no keyring) it lives in memory until DialCatz
+// quits, and the user signs in again next time.
+const testStore = !!process.env.DIALCATZ_NO_KEYCHAIN;
+const canEncrypt = () => !testStore && safeStorage.isEncryptionAvailable();
+const onDisk = () => testStore || canEncrypt();
+const memory = new Map<string, Kept>();
+const seal = (s: string) => (!s ? '' : canEncrypt() ? `enc:${safeStorage.encryptString(s).toString('base64')}` : `raw:${s}`);
 function open(s: string): string {
   if (!s) return '';
   if (s.startsWith('raw:')) return s.slice(4);
@@ -34,7 +41,27 @@ function open(s: string): string {
   }
 }
 const idOf = (c: OAuthSettings) => createHash('sha256').update(tokenIdentity(c)).digest('hex').slice(0, 32);
-const all = () => ({ ...(store.extra<Record<string, Kept>>(KEY) ?? {}) });
+let swept = false;
+/** Tokens a build before this rule left readable in config.json: removed, once. */
+function sweep(): void {
+  if (swept || testStore) return;
+  swept = true;
+  const a = store.extra<Record<string, Kept>>(KEY) ?? {};
+  const good = Object.fromEntries(Object.entries(a).filter(([, k]) => !k.access.startsWith('raw:') && !k.refresh.startsWith('raw:')));
+  if (Object.keys(good).length !== Object.keys(a).length) store.setExtra(KEY, good);
+}
+function all(): Record<string, Kept> {
+  sweep();
+  if (!onDisk()) return Object.fromEntries(memory);
+  return { ...(store.extra<Record<string, Kept>>(KEY) ?? {}) };
+}
+function save(a: Record<string, Kept>): void {
+  if (onDisk()) return store.setExtra(KEY, a);
+  memory.clear();
+  for (const [id, k] of Object.entries(a)) memory.set(id, k);
+}
+/** Kept across restarts (encrypted), or only while DialCatz runs (no secret store on this system). */
+export const lasting = (): boolean => onDisk();
 
 function kept(c: OAuthSettings): TokenSet | null {
   const k = all()[idOf(c)];
@@ -48,19 +75,19 @@ function keep(c: OAuthSettings, t: TokenSet): void {
   a[idOf(c)] = { access: seal(t.accessToken), refresh: seal(t.refreshToken), expiresAt: t.expiresAt, scope: t.scope, tokenType: t.tokenType, obtainedAt: t.obtainedAt };
   // Tokens nobody asked about for 60 days go (settings that changed leave their old token behind).
   for (const [id, k] of Object.entries(a)) if (Date.now() - k.obtainedAt > 60 * 86_400_000) delete a[id];
-  store.setExtra(KEY, a);
+  save(a);
 }
 
 export function clear(c: OAuthSettings): void {
   const a = all();
   delete a[idOf(c)];
-  store.setExtra(KEY, a);
+  save(a);
 }
 
 export function status(c: OAuthSettings): OAuthStatus {
   const t = kept(c);
-  if (!t) return { has: false, expiresAt: null, expired: false, scope: '', tokenType: '', refreshable: false, obtainedAt: null };
-  return { has: true, expiresAt: t.expiresAt, expired: !tokenFresh(t, Date.now()), scope: t.scope, tokenType: t.tokenType, refreshable: !!t.refreshToken, obtainedAt: t.obtainedAt };
+  if (!t) return { has: false, expiresAt: null, expired: false, scope: '', tokenType: '', refreshable: false, obtainedAt: null, lasting: lasting() };
+  return { has: true, expiresAt: t.expiresAt, expired: !tokenFresh(t, Date.now()), scope: t.scope, tokenType: t.tokenType, refreshable: !!t.refreshToken, obtainedAt: t.obtainedAt, lasting: lasting() };
 }
 
 export interface OAuthOptions {

@@ -3,7 +3,7 @@ import { basename, join, resolve } from 'node:path';
 import type { SpecResponse, TreeItem } from '@shared/types';
 import { importSpec, importText } from '../src/main/importers';
 import { isWorkspaceFolder, readFolder } from '../src/main/folders';
-import { json, junit, paint, requestLines, summaryLine, totals } from './report';
+import { json, junit, paint, plainMarks, requestLines, summaryLine, totals } from './report';
 import { runCollection, type RunResult } from './run';
 import { readEnvFile, specKey } from './plan';
 
@@ -171,7 +171,8 @@ async function main(argv: string[]): Promise<number> {
   // json / junit on the terminal: the progress lines go to stderr so the output stays clean.
   const machineOnStdout = !o.output && o.reporters.some((r) => r !== 'cli');
   const say = (s: string) => (machineOnStdout ? process.stderr : process.stdout).write(`${s}\n`);
-  const p = paint(o.color && !process.env.NO_COLOR && (machineOnStdout ? process.stderr.isTTY : process.stdout.isTTY) === true);
+  const tty = (machineOnStdout ? process.stderr.isTTY : process.stdout.isTTY) === true;
+  const p = paint(o.color && !process.env.NO_COLOR && tty, plainMarks(process.env, process.platform, tty));
 
   const runs: RunResult[] = [];
   for (const c of collections) {

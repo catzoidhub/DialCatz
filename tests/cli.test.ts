@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { readEnvFile, requestsOf, specFor, specKey } from '../cli/plan';
-import { junit, json, paint, requestLines, summaryLine, totals } from '../cli/report';
+import { junit, json, paint, plainMarks, requestLines, summaryLine, totals } from '../cli/report';
 import type { RequestResult } from '../cli/run';
 import { newRequest, type SpecResponse, type TreeItem } from '../src/shared/types';
 
@@ -77,4 +77,12 @@ test('JUnit: a case per request, failures and skips marked, text escaped', () =>
   expect(x).toContain('<failure message="connect ECONNREFUSED">GET https://x.test/items/1\nNo response');
   expect(x).toContain('<skipped message="WebSocket requests are not run by the CLI"/>');
   expect(JSON.parse(json(runs, '9.9.9'))).toMatchObject({ dialcatz: '9.9.9', requests: 4, failed: 2, passed: false });
+});
+
+test('a classic Windows console gets marks its font has', () => {
+  expect(plainMarks({}, 'win32', true)).toBe(true);
+  expect(plainMarks({ WT_SESSION: '1' }, 'win32', true)).toBe(false);
+  expect(plainMarks({}, 'win32', false)).toBe(false); // piped: a log file or a CI, UTF-8
+  expect(plainMarks({}, 'darwin', true)).toBe(false);
+  expect(requestLines(runs[0].requests[1], paint(false, true), false)[0]).toBe('  × GET    Items / Broken  500  12 ms');
 });
