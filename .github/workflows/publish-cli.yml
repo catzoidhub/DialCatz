@@ -1,0 +1,75 @@
+# The CLI on npm (TODO #101): `dialcatz` is published when a release is published, or by hand:
+#   gh workflow run publish-cli.yml -f tag=v1.2.40
+# It builds dist-cli/ from the release's tag (bun run build:cli) and publishes it, unless that version is on npm
+# already (a release rebuilt for new installers publishes nothing twice).
+#
+# Signing in to npm, one of:
+#   - Trusted publishing (no secret to keep): on npmjs.com → the dialcatz package → Settings → Trusted publisher →
+#     GitHub Actions, repository catzoidhub/DialCatz, workflow publish-cli.yml. npm then takes this run's identity
+#     (id-token below) and adds a provenance statement by itself.
+#   - A repository secret NPM_TOKEN (a granular token allowed to publish dialcatz): used when it is set.
+name: Publish CLI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish the CLI of (e.g. v1.2.40)
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-cli
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
+
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # Trusted publishing needs npm 11.5.1 or later.
+      - run: npm install -g npm@latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Tests
+        run: bun run test
+
+      - name: Build the package
+        run: bun run build:cli
+
+      - name: The tag and the package agree
+        run: |
+          v=$(node -p "require('./dist-cli/package.json').version")
+          tag="${{ inputs.tag || github.event.release.tag_name }}"
+          if [ "v$v" != "$tag" ]; then echo "::error::The tag is $tag but package.json says $v"; exit 1; fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+
+      - name: It runs
+        run: |
+          node dist-cli/dialcatz.mjs --version
+          node dist-cli/dialcatz.mjs --help > /dev/null
+
+      - name: Publish (unless this version is on npm already)
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if npm view "dialcatz@$VERSION" version >/dev/null 2>&1; then
+            echo "dialcatz@$VERSION is on npm already: nothing to publish."
+            exit 0
+          fi
+          if [ -n "$NPM_TOKEN" ]; then echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > "$HOME/.npmrc"; fi
+          npm publish ./dist-cli --access public
