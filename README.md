@@ -17,9 +17,11 @@ account, no Pro tier, nothing locked behind a payment.
 ## What it does
 
 - **Requests** — every HTTP method, with params, headers, auth and bodies (JSON, form, multipart, binary, GraphQL, JSON-RPC); paste a cURL command and it becomes a request. A Server-Sent Events answer streams in as it comes.
+- **Auth** — Bearer, Basic, API key and **OAuth 2.0**: authorization code with PKCE (you sign in in your browser), client credentials and password. DialCatz gets the token when you send and renews it by itself; tokens stay on your computer, encrypted, never in the collection.
 - **Other protocols** — pick one from the request-kind menu: WebSocket; Socket.IO; Pusher for Reverb, Sockudo, Soketi or Pusher Channels, with private and presence channels signed from a `{{variable}}`; gRPC through server reflection or your `.proto` files.
 - **OpenAPI** — a collection follows its spec (a file, a URL, a DevCatz site or a DoCatz service) and a review dialog shows new, changed and gone requests before anything updates, keeping what you edited. Responses are checked against the spec in the Spec pane and in the runner. A mock server made from the spec runs on 127.0.0.1 (ports 4010–4099), and Send requests here points the collection at it. Import → OpenAPI finds the spec files in a project folder; any collection exports as OpenAPI 3.0.
 - **Collections and environments** — folders, variables, pre-request and test scripts, a runner with iterations; results export as JSON or JUnit XML.
+- **CLI** — run a collection's requests and tests from a terminal or a CI job, without the app: `dialcatz run <workspace folder | collection | OpenAPI file>`, with `--spec` to fail the build when the API drifts from its contract, and JUnit or JSON reports. See [Command line](#command-line).
 - **Import** — Postman collections and data exports, Postman workspaces with an API key, OpenAPI / Swagger, cURL.
 - **Teams, two ways** — through Git, with no server: a workspace kept as small YAML files in your repository, reviewed in pull requests and shared with pull and push. Or live through a self-hosted [DialCatz Den](https://github.com/catzoidhub/DialCatz-Den): invite links instead of accounts, a teammate’s change within a second. Either way, environment values stay on each computer. [Git or DialCatz Den?](https://catzoid.com/docs/dialcatz/git#git-or-dialcatz-den)
 - **AI, optional** — explain a response, write tests, generate a body; names and URLs only, never your secrets.
@@ -55,6 +57,23 @@ bun run dev          # run it in development
 bun run typecheck
 bun run package      # a signed DMG in dist/ (notarized when a notarytool profile is set up)
 ```
+
+## Command line
+
+The CLI runs collections without the app: for a terminal, a pre-push hook or a CI job. It is one file for Node 20 or later, built from this repository:
+
+```bash
+bun run build:cli                      # → dist-cli/dialcatz.mjs
+node dist-cli/dialcatz.mjs run ./api-workspace --var baseUrl=https://staging.example.com --env-file .env.ci
+node dist-cli/dialcatz.mjs run shop.postman_collection.json -r cli -r junit -o results.xml
+node dist-cli/dialcatz.mjs run openapi.yaml --spec openapi.yaml --var baseUrl=http://localhost:3000
+```
+
+- `<path>` is a workspace folder (the one with `dialcatz.yml`), a collection exported from DialCatz or Postman, or an OpenAPI / Swagger file.
+- Requests run in the app runner's order with their pre-request and test scripts (`dc.*` and the Postman-compatible `pm.*`), inherited auth included. OAuth 2.0 client credentials and password grants get their token by themselves.
+- A `{{name}}` takes its value from `--var name=value`, then `--env-file`, then an environment variable of the same name. Workspace folders never hold values, so secrets come from your CI's secret store.
+- `--spec <file>` checks every response against an OpenAPI file (status, content type, body schema); `--folder`, `--collection`, `--bail`, `--timeout`, `--insecure` narrow and tune the run; `--reporter cli|json|junit` with `--output`.
+- It exits 0 when everything passed, 1 when a request or a test failed, 2 when it could not start. WebSocket and gRPC requests are skipped.
 
 Found a bug? Use **Help → Report a Bug…** in the app, or [open an issue](https://github.com/catzoidhub/DialCatz/issues).
 

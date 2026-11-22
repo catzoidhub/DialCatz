@@ -14,6 +14,7 @@
     "build": "node scripts/licenses.mjs && electron-vite build",
     "licenses": "node scripts/licenses.mjs",
     "start": "electron-vite preview",
+    "build:cli": "bun scripts/build-cli.mjs",
     "test": "bun --tsconfig-override=tsconfig.node.json test tests",
     "mcatzp-tools": "bun --tsconfig-override=tsconfig.node.json scripts/mcatzp-tools.ts",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json",
