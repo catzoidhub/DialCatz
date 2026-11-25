@@ -68,7 +68,9 @@ tests {
     expect([1, 2]).to.include.members([1]);
     expect({ a: 1, b: 2 }).to.include.keys('a');
     expect('x').not.to.equal('y');
-    expect(() => bru.sendRequest({})).to.throw('not available');
+    expect(() => bru.sendRequest({})).to.throw('bru.sendRequest is not available');
+    expect(() => bru.cookies.jar().getCookies('x')).to.throw('bru.cookies.jar is not available');
+    expect(() => bru.runner.skipRequest()).to.throw('bru.runner.skipRequest is not available');
   });
 }
 

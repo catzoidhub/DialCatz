@@ -270,8 +270,12 @@
 
       /** Bruno's script objects over DialCatz's own, so its scripts run as they are. What a script here cannot do says so. */
       function bruno({ dc, vars, locals, data, now, edit, res, ctx, test }) {
-        const no = (what) => () => {
-          throw new Error(`${what} is not available in DialCatz scripts`);
+        // What is missing says so however it is used: called, or one of its own names called (bru.cookies.jar()).
+        const no = (what) => {
+          const stop = () => {
+            throw new Error(`${what} is not available in DialCatz scripts`);
+          };
+          return new Proxy(stop, { get: (_, k) => (typeof k === 'symbol' || k === 'then' || k === 'toJSON' ? undefined : no(`${what}.${String(k)}`)), construct: stop });
         };
         const open = (name, known) => new Proxy(known, { get: (t, k) => (k in t ? t[k] : typeof k === 'symbol' || k === 'then' || k === 'toJSON' ? undefined : no(`${name}.${String(k)}`)) });
         const text = (v) => (typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v));
