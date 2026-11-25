@@ -41,7 +41,7 @@ export function paint(on: boolean, plain = false): Paint {
   return { ok: plain ? '√' : '✓', bad: plain ? '×' : '✗', log: plain ? '>' : '›', green: c(32), red: c(31), yellow: c(33), dim: c(2), bold: c(1) };
 }
 
-const span = (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`);
+export const span = (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`);
 
 /** One request, as it finishes. */
 export function requestLines(r: RequestResult, p: Paint, verbose: boolean): string[] {
@@ -49,7 +49,8 @@ export function requestLines(r: RequestResult, p: Paint, verbose: boolean): stri
   const where = r.place.length > 1 ? p.dim(`${r.place.slice(1).join(' / ')} / `) : '';
   const status = r.status === null ? '' : `  ${r.status >= 400 ? p.yellow(String(r.status)) : r.status}`;
   const time = r.timeMs === null ? '' : p.dim(`  ${span(r.timeMs)}`);
-  const out = [`  ${mark} ${r.method.padEnd(6)} ${where}${r.name}${status}${time}`];
+  const tries = r.attempts && r.attempts > 1 ? p.yellow(`  ${r.attempts} tries`) : '';
+  const out = [`  ${mark} ${r.method.padEnd(6)} ${where}${r.name}${status}${time}${tries}`];
   if (r.outcome === 'skipped') out.push(p.dim(`      ${r.error}`));
   else if (r.error) out.push(`      ${p.red(r.error)}`);
   for (const t of r.tests) {
@@ -97,4 +98,6 @@ export function junit(runs: RunResult[]): string {
   return out.join('\n');
 }
 
-export const json = (runs: RunResult[], version: string): string => `${JSON.stringify({ dialcatz: version, ...totals(runs), passed: totals(runs).failed === 0, collections: runs }, null, 2)}\n`;
+/** Request and response contents are for the HTML report only (--details). */
+const bare = (runs: RunResult[]) => runs.map((run) => ({ ...run, requests: run.requests.map(({ detail: _, ...r }) => r) }));
+export const json = (runs: RunResult[], version: string): string => `${JSON.stringify({ dialcatz: version, ...totals(runs), passed: totals(runs).failed === 0, collections: bare(runs) }, null, 2)}\n`;

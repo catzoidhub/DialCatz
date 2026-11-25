@@ -9,6 +9,7 @@ import { allowFile, send } from '../src/main/http';
 import * as grpcClient from '../src/main/grpc';
 import * as sockets from '../src/main/ws';
 import { runScript, type ScriptContext, type ScriptResult } from './scripts';
+import { secretFields } from './redact';
 import { requestsOf, specFor, specKey } from './plan';
 
 /**
@@ -38,6 +39,11 @@ export interface RunOptions {
   protoFiles: string[];
   /** How long a WebSocket request listens after it connected (and sent its message). */
   wsWaitMs: number;
+  /** A request that failed is tried again this many times, waiting retryDelayMs in between. */
+  retries: number;
+  retryDelayMs: number;
+  /** Keep what was sent and answered (the HTML report's --details). */
+  details: boolean;
   /** A person is at the terminal: an OAuth device sign-in may be asked for. */
   interactive: boolean;
   /** What a device sign-in asks of the person. */
@@ -65,7 +71,15 @@ export interface RequestResult {
   error: string | null;
   tests: TestResult[];
   logs: string[];
+  /** Tried more than once (--retries). */
+  attempts?: number;
+  detail?: { requestHeaders: [string, string][]; requestBody: string; responseHeaders: [string, string][]; responseBody: string };
 }
+/** Failures another try cannot change: a variable without a value, a missing file, a sign-in that needs a person. */
+const settled = new WeakSet<RequestResult>();
+const final = (r: RequestResult): RequestResult => (settled.add(r), r);
+const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}\n… (${s.length - n} more characters)` : s);
+
 export interface RunResult {
   collection: string;
   /** With a data file: which row this run was (1-based). */
@@ -91,6 +105,10 @@ function chainOf(items: TreeItem[], item: TreeItem): TreeItem[] {
 // ------------------------------------------------------------------ OAuth 2.0
 
 const tokens = new Map<string, TokenSet>();
+/** What OAuth handed out in this run, for the reports to hide. */
+export const tokenValues = (): string[] => [...[...tokens.values()].flatMap((t) => [t.accessToken, t.refreshToken]), ...seen].filter(Boolean);
+/** Credentials a request carried as plain text, and ones a server handed out in a JSON answer (a login's token). */
+const seen = new Set<string>();
 async function tokenAsk(c: OAuthSettings, what: TokenAsk, o: { insecure: boolean; timeoutMs: number }): Promise<TokenSet> {
   const { headers, body } = tokenRequest(c, what);
   const r = await send({ method: 'POST', url: c.tokenUrl, headers: [...headers, ['User-Agent', 'DialCatz-CLI']], body }, `oauth-${randomBytes(6).toString('hex')}`, { insecure: o.insecure, timeoutMs: o.timeoutMs });
@@ -302,11 +320,15 @@ async function one(items: TreeItem[], item: TreeItem, collection: TreeItem, o: R
   const a0 = auth();
   const texts = [spec.url, ...spec.params.filter((p) => p.enabled).map((p) => p.value), ...spec.headers.filter((h) => h.enabled).map((h) => h.value), spec.body.raw, ...spec.body.fields.filter((f) => f.enabled && f.type !== 'file').map((f) => f.value), a0.token ?? '', a0.username ?? '', a0.password ?? '', a0.value ?? '', spec.wsMessage?.text ?? ''];
   const missing = [...new Set(texts.flatMap((t) => missingVars(t ?? '', vars())))];
-  if (missing.length) return { ...base, error: `No value for ${missing.map((m) => `{{${m}}}`).join(', ')}: pass --var name=value, --env-file, a data file column, or set an environment variable of that name` };
+  if (missing.length) return final({ ...base, error: `No value for ${missing.map((m) => `{{${m}}}`).join(', ')}: pass --var name=value, --env-file, a data file column, or set an environment variable of that name` });
 
   let wire: WireRequest;
   try {
-    spec = withFiles(spec, o);
+    try {
+      spec = withFiles(spec, o);
+    } catch (e) {
+      return final({ ...base, error: (e as Error).message });
+    }
     let a = a0;
     if (a.mode === 'oauth2') a = { ...a, token: await oauthToken(resolveOAuth(a.oauth2, vars()), { ...o, insecureNow: insecure }) };
     wire = wireNow(a);
@@ -314,6 +336,7 @@ async function one(items: TreeItem[], item: TreeItem, collection: TreeItem, o: R
     return { ...base, error: (e as Error).message };
   }
   base.url = wire.url;
+  for (const v of [a0.token, a0.password, a0.value]) if (v) seen.add(interpolate(v, vars()));
 
   let res: HttpResponse;
   let messages: WsMessage[] | undefined;
@@ -336,6 +359,9 @@ async function one(items: TreeItem[], item: TreeItem, collection: TreeItem, o: R
     base.size = res.size;
     if (isGrpc && !res.ok) base.error = `gRPC ${res.statusText}`;
   }
+
+  if (!res.binary) for (const v of secretFields(res.body)) seen.add(v);
+  if (o.details) base.detail = { requestHeaders: wire.headers, requestBody: typeof wire.body === 'string' ? clip(wire.body, 20_000) : isGrpc ? clip(interpolate(spec.body.raw, o.vars), 20_000) : '', responseHeaders: res.headers, responseBody: res.binary ? `(binary, ${res.size} bytes)` : clip(res.body, 50_000) };
 
   const tests = await runChain(scripts('tests'), () => ({ request: requestContext(wire), response: { status: res.status, statusText: res.statusText, headers: headerObject(res.headers), body: res.body, time: res.timings.total, size: res.size }, vars: Object.fromEntries(vars()), data, ...(messages ? { messages } : {}) }), o.vars);
   base.tests.push(...tests.tests);
@@ -363,7 +389,12 @@ export async function runCollection(items: TreeItem[], collection: TreeItem, o: 
   }
   const requests: RequestResult[] = [];
   for (const item of list) {
-    const r = await one(items, item, collection, o, data);
+    let r = await one(items, item, collection, o, data);
+    for (let n = 1; n <= o.retries && r.outcome === 'failed' && !settled.has(r); n++) {
+      await new Promise((done) => setTimeout(done, o.retryDelayMs));
+      r = await one(items, item, collection, o, data);
+      r.attempts = n + 1;
+    }
     requests.push(r);
     o.onResult?.(r);
     if (o.bail && r.outcome === 'failed') break;

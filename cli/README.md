@@ -4,7 +4,7 @@ Run [DialCatz](https://github.com/catzoidhub/DialCatz) collections from a termin
 
 ```bash
 npx dialcatz run ./api-workspace --var baseUrl=https://staging.example.com --env-file .env.ci
-npx dialcatz run shop.postman_collection.json -r cli -r junit -o results.xml
+npx dialcatz run shop.postman_collection.json -r cli -r junit=results.xml -r html=report.html
 npx dialcatz run openapi.yaml --spec openapi.yaml --var baseUrl=http://localhost:3000
 ```
 
@@ -36,23 +36,34 @@ Node 20 or later. It exits 0 when everything passed, 1 when a request or a test 
 | `--bail` | stop at the first failure |
 | `--insecure` | skip TLS certificate checks |
 | `--timeout <seconds>` | per request (default 30) |
-| `-r, --reporter <kind>` | `cli` (default), `json` or `junit`; repeat for more than one |
-| `-o, --output <file>` | where json / junit is written |
+| `--retries <n>`, `--retry-delay <s>` | try a failed request again, up to n times (default 0), waiting s seconds (default 1) |
+| `-r, --reporter <kind>` | `cli` (default), `github`, `html`, `json` or `junit`; repeat for more than one; `html=report.html` says where it goes |
+| `-o, --output <file>` | where the report is written |
+| `--details` | the HTML report also holds headers and bodies, credentials hidden |
+| `--no-github` | no GitHub summary by itself on GitHub Actions |
 | `--verbose` | passed tests and script logs too |
 
 ## Variables and secrets
 
 A `{{name}}` takes its value from `--var`, then `--env-file`, then an environment variable of the same name, then what the file itself defines (an OpenAPI server as `baseUrl`, a Postman collection's variables). Workspace folders never hold values, so secrets come from your CI's secret store. A variable without a value fails its request before anything is sent.
 
-## In GitHub Actions
+Reports hide the values of variables named like a secret (token, key, password …), generated-looking values, OAuth tokens, a login answer's tokens, and credential headers and query parameters. What a script logs on the terminal is yours to keep clean.
+
+A request fails when it gets no answer, one of its tests fails, or its response does not match `--spec`. Without tests, an error 500 is an answer too.
+
+## In CI
+
+The app writes the workflow for you: a collection's menu → **Run in CI…** By hand, on GitHub Actions (the run's page gets a summary and an error per failed request):
 
 ```yaml
 - uses: actions/setup-node@v4
   with: { node-version: 22 }
-- run: npx dialcatz run ./api-workspace --spec openapi.yaml -r cli -r junit -o results.xml
+- run: npx --yes dialcatz@1 run ./api-workspace --spec openapi.yaml --retries 1 -r cli -r github -r html=report.html
   env:
     baseUrl: https://staging.example.com
     clientSecret: ${{ secrets.API_CLIENT_SECRET }}
 ```
+
+or with the [DialCatz action](https://github.com/catzoidhub/DialCatz-Action). On GitLab CI, `-r junit=results.xml` as `artifacts: reports: junit`.
 
 GPL-3.0-only. Part of [Catzoid](https://catzoid.com).

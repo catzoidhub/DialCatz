@@ -1,10 +1,13 @@
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import type { SpecResponse, TreeItem } from '@shared/types';
 import { importSpec, importText } from '../src/main/importers';
 import { isWorkspaceFolder, readFolder } from '../src/main/folders';
 import { json, junit, paint, plainMarks, requestLines, summaryLine, totals } from './report';
-import { closeAll, runCollection, type RequestResult, type RunResult } from './run';
+import { annotations, inert, summary } from './report-github';
+import { html } from './report-html';
+import { redactBody, redactHeaders, redactor, secretValues, type Redact } from './redact';
+import { closeAll, runCollection, tokenValues, type RequestResult, type RunResult } from './run';
 import { read as readData } from '../src/main/datafile';
 import { hostMatches, setIdentityFinder } from '../src/main/tlsidentity';
 import { createSecureContext } from 'node:tls';
@@ -46,12 +49,21 @@ Options
       --bail                stop at the first failure
       --insecure            skip TLS certificate checks
       --timeout <seconds>   per request (default 30)
-  -r, --reporter <kind>     cli (default), json or junit; repeat for more than one
-  -o, --output <file>       where json / junit is written (default: the terminal)
+      --retries <n>         try a failed request again, up to n times (default 0);
+      --retry-delay <s>     seconds between the tries (default 1)
+  -r, --reporter <kind>     cli (default), github, html, json or junit; repeat for more than one.
+                            kind=<file> says where it goes: -r html=report.html -r junit=results.xml
+  -o, --output <file>       where the report is written (default: the terminal)
+      --details             the HTML report also holds headers and bodies (credentials hidden)
       --verbose             passed tests and script logs too
       --no-color            plain text
   -h, --help                this page
       --version
+
+Reports
+  github writes a summary on the page of a GitHub Actions run and marks the failed requests; it is
+  on by itself there (--no-github turns it off). Reports hide the values of variables named like a
+  secret, generated-looking values, OAuth tokens and credential headers.
 
 Variables
   A {{name}} takes its value from --var, then --env-file, then an environment variable of the
@@ -67,7 +79,7 @@ Kinds of request
 
 Examples
   dialcatz run ./api-workspace --var baseUrl=https://staging.example.com --env-file .env.ci
-  dialcatz run shop.postman_collection.json -r cli -r junit -o results.xml
+  dialcatz run shop.postman_collection.json -r cli -r junit=results.xml -r html=report.html
   dialcatz run openapi.yaml --spec openapi.yaml --var baseUrl=http://localhost:3000
   dialcatz run ./api-workspace -c Orders --data orders.csv --file avatar=./fixtures/cat.png
 `;
@@ -75,7 +87,7 @@ Examples
 class Usage extends Error {}
 
 function parse(argv: string[]) {
-  const o = { command: '', path: '', collection: '', folder: '', vars: [] as string[], envFile: '', spec: '', data: '', files: [] as string[], protos: [] as string[], wsWait: 2, cert: '', key: '', pfx: '', passphrase: '', certHost: '', bail: false, insecure: false, timeout: 30, reporters: [] as string[], output: '', verbose: false, color: true, help: false, version: false };
+  const o = { command: '', path: '', collection: '', folder: '', vars: [] as string[], envFile: '', spec: '', data: '', files: [] as string[], protos: [] as string[], wsWait: 2, cert: '', key: '', pfx: '', passphrase: '', certHost: '', bail: false, insecure: false, timeout: 30, retries: 0, retryDelay: 1, details: false, github: true, reporters: [] as { kind: string; file: string }[], output: '', verbose: false, color: true, help: false, version: false };
   const short: Record<string, string> = { '-c': '--collection', '-f': '--folder', '-d': '--data', '-v': '--var', '-r': '--reporter', '-o': '--output', '-h': '--help' };
   const rest = [...argv];
   const positional: string[] = [];
@@ -109,7 +121,19 @@ function parse(argv: string[]) {
     else if (a === '--timeout') {
       o.timeout = Number(value());
       if (!(o.timeout > 0)) throw new Usage('--timeout takes seconds, more than 0');
-    } else if (a === '--reporter') o.reporters.push(value());
+    } else if (a === '--retries') {
+      o.retries = Number(value());
+      if (!Number.isInteger(o.retries) || o.retries < 0 || o.retries > 20) throw new Usage('--retries takes a number from 0 to 20');
+    } else if (a === '--retry-delay') {
+      o.retryDelay = Number(value());
+      if (!(o.retryDelay >= 0 && o.retryDelay <= 300)) throw new Usage('--retry-delay takes seconds, up to 300');
+    } else if (a === '--details') o.details = true;
+    else if (a === '--no-github') o.github = false;
+    else if (a === '--reporter') {
+      const v = value();
+      const i = v.indexOf('=');
+      o.reporters.push({ kind: i < 0 ? v : v.slice(0, i), file: i < 0 ? '' : v.slice(i + 1) });
+    }
     else if (a === '--output') o.output = value();
     else if (a === '--bail') o.bail = true;
     else if (a === '--insecure') o.insecure = true;
@@ -122,8 +146,10 @@ function parse(argv: string[]) {
   }
   [o.command = '', o.path = ''] = positional;
   if (positional.length > 2) throw new Usage(`One path at a time: ${positional.slice(1).join(', ')}`);
-  for (const r of o.reporters) if (!['cli', 'json', 'junit'].includes(r)) throw new Usage(`Unknown reporter ${r}: cli, json or junit`);
-  if (!o.reporters.length) o.reporters.push('cli');
+  for (const r of o.reporters) if (!['cli', 'github', 'html', 'json', 'junit'].includes(r.kind)) throw new Usage(`Unknown reporter ${r.kind}: cli, github, html, json or junit`);
+  if (!o.reporters.length) o.reporters.push({ kind: 'cli', file: '' });
+  if (o.github && process.env.GITHUB_ACTIONS === 'true' && !o.reporters.some((r) => r.kind === 'github')) o.reporters.push({ kind: 'github', file: '' });
+  if (o.details && !o.reporters.some((r) => r.kind === 'html')) throw new Usage('--details goes with -r html');
   return o;
 }
 
@@ -169,6 +195,15 @@ function loadSpec(path: string): Map<string, SpecResponse[]> {
   if (!out.size) throw new Usage(`--spec ${path}: no operations found in it`);
   return out;
 }
+
+const redactResult = (r: RequestResult, hide: Redact): RequestResult => ({
+  ...r,
+  url: hide(r.url),
+  error: r.error === null ? null : hide(r.error),
+  tests: r.tests.map((t) => ({ ...t, name: hide(t.name), ...(t.error ? { error: hide(t.error) } : {}) })),
+  logs: r.logs.map(hide),
+  ...(r.detail ? { detail: { requestHeaders: redactHeaders(r.detail.requestHeaders, hide), requestBody: redactBody(r.detail.requestBody, hide), responseHeaders: redactHeaders(r.detail.responseHeaders, hide), responseBody: redactBody(r.detail.responseBody, hide) } } : {}),
+});
 
 async function main(argv: string[]): Promise<number> {
   const o = parse(argv);
@@ -233,15 +268,22 @@ async function main(argv: string[]): Promise<number> {
     }
     setIdentityFinder((host, port) => (!o.certHost || hostMatches(o.certHost, host, port) ? id : undefined));
   } else if (o.certHost || o.passphrase) throw new Usage('--cert-host and --passphrase go with --cert / --key or --pfx');
-  const toTerminal = o.reporters.includes('cli');
-  // json / junit on the terminal: the progress lines go to stderr so the output stays clean.
-  const machineOnStdout = !o.output && o.reporters.some((r) => r !== 'cli');
-  const say = (s: string) => (machineOnStdout ? process.stderr : process.stdout).write(`${s}\n`);
+  const toTerminal = o.reporters.some((r) => r.kind === 'cli');
+  const inGithub = process.env.GITHUB_ACTIONS === 'true';
+  // Where each report goes: its own file, else --output (several share its name, each with its ending), else the terminal.
+  const ENDING: Record<string, string> = { junit: '.xml', json: '.json', html: '.html', github: '.md' };
+  const toSummary = (r: { kind: string; file: string }) => r.kind === 'github' && !r.file && !!process.env.GITHUB_STEP_SUMMARY;
+  const machine = o.reporters.filter((r) => r.kind !== 'cli');
+  const sharing = machine.filter((r) => !r.file && !toSummary(r));
+  const fileOf = (r: { kind: string; file: string }) => r.file || (o.output && !toSummary(r) ? (sharing.length > 1 ? o.output.replace(/(\.[^./\\]+)?$/, ENDING[r.kind]) : o.output) : '');
+  // A report on the terminal: the progress lines go to stderr so the output stays clean.
+  const machineOnStdout = machine.some((r) => !fileOf(r) && !toSummary(r));
+  const say = (s: string) => void (machineOnStdout ? process.stderr : process.stdout).write(`${inGithub ? inert(s) : s}\n`);
   const tty = (machineOnStdout ? process.stderr.isTTY : process.stdout.isTTY) === true;
   const p = paint(o.color && !process.env.NO_COLOR && tty, plainMarks(process.env, process.platform, tty));
 
   const runs: RunResult[] = [];
-  const options = { version: VERSION, vars, insecure: o.insecure, timeoutMs: o.timeout * 1000, bail: o.bail, spec, folder: o.folder || null, files, baseDir: loaded.dir, protoFiles: o.protos.map((f) => resolve(f)), wsWaitMs: o.wsWait * 1000, interactive: process.stdin.isTTY === true && process.stderr.isTTY === true && !process.env.CI, say: (text: string) => void process.stderr.write(`${text}\n`), onResult: (r: RequestResult) => void (toTerminal && requestLines(r, p, o.verbose).forEach(say)) };
+  const options = { version: VERSION, vars, insecure: o.insecure, timeoutMs: o.timeout * 1000, bail: o.bail, spec, folder: o.folder || null, files, baseDir: loaded.dir, protoFiles: o.protos.map((f) => resolve(f)), wsWaitMs: o.wsWait * 1000, retries: o.retries, retryDelayMs: o.retryDelay * 1000, details: o.details, interactive: process.stdin.isTTY === true && process.stderr.isTTY === true && !process.env.CI, say: (text: string) => void process.stderr.write(`${text}\n`), onResult: (r: RequestResult) => void (toTerminal && requestLines(r, p, o.verbose).forEach(say)) };
   run: for (const c of collections) {
     for (const [n, row] of (rows ?? [undefined]).entries()) {
       if (toTerminal) say(`\n${p.bold(c.name)}${row ? p.dim(`  row ${n + 1} of ${rows!.length}`) : ''}`);
@@ -256,15 +298,20 @@ async function main(argv: string[]): Promise<number> {
   if (toTerminal) say(`\n${summaryLine(t, p)}\n`);
   if (!t.requests) throw new Usage(o.folder ? `No requests under ${o.folder}` : 'No requests to run');
 
-  const machine = o.reporters.filter((r) => r !== 'cli');
-  for (const r of machine) {
-    const text = r === 'junit' ? junit(runs) : json(runs, VERSION);
-    // Two machine reporters and one --output: the second takes its own ending.
-    const file = o.output ? (machine.length > 1 ? o.output.replace(/(\.[^./\\]+)?$/, r === 'junit' ? '.xml' : '.json') : o.output) : '';
-    if (file) {
-      writeFileSync(file, text);
-      if (toTerminal) say(p.dim(`${r} report: ${join(file)}`));
-    } else process.stdout.write(text);
+  if (machine.length) {
+    const hide = redactor(secretValues([...vars, ...(rows ?? []).flatMap((r) => Object.entries(r))], tokenValues()));
+    const clean = runs.map((run) => ({ ...run, requests: run.requests.map((r) => redactResult(r, hide)) }));
+    for (const r of machine) {
+      const text = r.kind === 'junit' ? junit(clean) : r.kind === 'html' ? html(clean, VERSION) : r.kind === 'github' ? summary(clean) : json(clean, VERSION);
+      const file = fileOf(r);
+      if (file) {
+        mkdirSync(dirname(resolve(file)), { recursive: true });
+        writeFileSync(file, text);
+        if (toTerminal) say(p.dim(`${r.kind} report: ${join(file)}`));
+      } else if (toSummary(r)) appendFileSync(process.env.GITHUB_STEP_SUMMARY!, text);
+      else process.stdout.write(text);
+    }
+    if (inGithub && machine.some((r) => r.kind === 'github')) for (const l of annotations(clean)) (machineOnStdout ? process.stderr : process.stdout).write(`${l}\n`);
   }
   return t.failed ? 1 : 0;
 }

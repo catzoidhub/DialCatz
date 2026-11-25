@@ -21,7 +21,7 @@ account, no Pro tier, nothing locked behind a payment.
 - **Other protocols** — pick one from the request-kind menu: WebSocket; Socket.IO; Pusher for Reverb, Sockudo, Soketi or Pusher Channels, with private and presence channels signed from a `{{variable}}`; gRPC through server reflection or your `.proto` files.
 - **OpenAPI** — a collection follows its spec (a file, a URL, a DevCatz site or a DoCatz service) and a review dialog shows new, changed and gone requests before anything updates, keeping what you edited. Responses are checked against the spec in the Spec pane and in the runner. A mock server made from the spec runs on 127.0.0.1 (ports 4010–4099), and Send requests here points the collection at it. Import → OpenAPI finds the spec files in a project folder; any collection exports as OpenAPI 3.0.
 - **Collections and environments** — folders, variables, pre-request and test scripts, a runner with iterations; results export as JSON or JUnit XML.
-- **CLI** — run a collection's requests and tests from a terminal or a CI job, without the app: `npx dialcatz run <workspace folder | collection | OpenAPI file>`, with `--spec` to fail the build when the API drifts from its contract, data files, and JUnit or JSON reports. See [Command line](#command-line).
+- **CLI** — run a collection's requests and tests from a terminal or a CI job, without the app: `npx dialcatz run <workspace folder | collection | OpenAPI file>`, with `--spec` to fail the build when the API drifts from its contract, data files, retries, and GitHub, HTML, JUnit or JSON reports. **Run in CI…** on a collection writes the GitHub Actions workflow or GitLab CI job. See [Command line](#command-line).
 - **Import** — Postman collections and data exports, Postman workspaces with an API key, OpenAPI / Swagger, cURL.
 - **Teams, two ways** — through Git, with no server: a workspace kept as small YAML files in your repository, reviewed in pull requests and shared with pull and push. Or live through a self-hosted [DialCatz Den](https://github.com/catzoidhub/DialCatz-Den): invite links instead of accounts, a teammate’s change within a second. Either way, environment values stay on each computer. [Git or DialCatz Den?](https://catzoid.com/docs/dialcatz/git#git-or-dialcatz-den)
 - **AI, optional** — explain a response, write tests, generate a body; names and URLs only, never your secrets.
@@ -64,7 +64,7 @@ The CLI runs collections without the app: for a terminal, a pre-push hook or a C
 
 ```bash
 npx dialcatz run ./api-workspace --var baseUrl=https://staging.example.com --env-file .env.ci
-npx dialcatz run shop.postman_collection.json -r cli -r junit -o results.xml
+npx dialcatz run shop.postman_collection.json -r cli -r junit=results.xml -r html=report.html
 npx dialcatz run openapi.yaml --spec openapi.yaml --var baseUrl=http://localhost:3000
 npx dialcatz run ./api-workspace -c Orders --data orders.csv --file avatar=./fixtures/cat.png
 ```
@@ -73,7 +73,8 @@ npx dialcatz run ./api-workspace -c Orders --data orders.csv --file avatar=./fix
 - Requests run in the app runner's order with their pre-request and test scripts (`dc.*` and the Postman-compatible `pm.*`), inherited auth included: HTTP in every body, Server-Sent Events, GraphQL, JSON-RPC and gRPC. WebSocket, Socket.IO and Pusher requests connect, send the first message kept with the request (Message pane → Keep with the request), listen for `--ws-wait` and give what arrived to the tests as `dc.messages`.
 - OAuth 2.0 client credentials and password grants get their token by themselves; a device code sign-in is asked for when a person is at the terminal. `--cert` / `--key` or `--pfx` give a client certificate.
 - A `{{name}}` takes its value from `--var name=value`, then `--env-file`, then an environment variable of the same name. Workspace folders never hold values, so secrets come from your CI's secret store.
-- `--spec <file>` checks every response against an OpenAPI file (status, content type, body schema); `--data` runs once per row of a CSV or JSON file; `--file field=path` gives a multipart field (or `body=path` a binary body) its file; `--folder`, `--collection`, `--bail`, `--timeout`, `--insecure` narrow and tune the run; `--reporter cli|json|junit` with `--output`.
+- `--spec <file>` checks every response against an OpenAPI file (status, content type, body schema); `--data` runs once per row of a CSV or JSON file; `--file field=path` gives a multipart field (or `body=path` a binary body) its file; `--folder`, `--collection`, `--bail`, `--timeout`, `--insecure` narrow and tune the run; `--retries <n>` tries a failed request again; `--reporter cli|github|html|json|junit` (`html=report.html` says where it goes). On GitHub Actions the run's page gets a summary and an error per failed request by itself. Reports hide secret values and credential headers.
+- **In CI:** a collection's menu → **Run in CI…** writes the workflow, with secrets as references to GitHub's or GitLab's own store. On GitHub there is also [DialCatz-Action](https://github.com/catzoidhub/DialCatz-Action).
 - It exits 0 when everything passed, 1 when a request or a test failed, 2 when it could not start.
 
 It is built from this repository: `bun run build:cli` writes the package to `dist-cli/` ([its README](cli/README.md)).
