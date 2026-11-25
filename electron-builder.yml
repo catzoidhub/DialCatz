@@ -72,7 +72,8 @@ nsis:
   uninstallDisplayName: ${productName}
 # Linux (#86 / #87, Catzoid #93), as DevCatz and DoCatz.
 linux:
-  icon: resources/icon.png
+  # A folder of sizes: one 1024 px icon lands in hicolor/1024x1024, which the theme does not know (a gear in the dock).
+  icon: resources/linux/icons
   category: Development
   maintainer: Mahryan Rakhmatullah <109191921+ryankucingg@users.noreply.github.com>
   executableName: dialcatz
