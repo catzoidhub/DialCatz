@@ -1,6 +1,6 @@
 {
  "app": "DialCatz",
- "version": "1.2.43",
+ "version": "1.2.44",
  "packages": [
   {
    "name": "@anthropic-ai/sdk",
