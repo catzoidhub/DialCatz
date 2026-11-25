@@ -2,7 +2,7 @@
   "name": "dialcatz",
   "productName": "DialCatz",
   "desktopName": "dialcatz.desktop",
-  "version": "1.2.42",
+  "version": "1.2.43",
   "license": "GPL-3.0-only",
   "repository": "github:catzoidhub/DialCatz",
   "private": true,
