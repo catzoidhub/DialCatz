@@ -38,6 +38,8 @@ import { specApply, specDiff, withBase, type Fresh, type SpecPick } from './spec
 import { fetchSpecText, freshFor, hashText, readSpecFile } from './specsource';
 import * as mock from './mock';
 import * as ci from './ci';
+import * as bruno from './bruno';
+import * as brunosync from './brunosync';
 import { ciLiterals } from '@shared/ci';
 import * as grpcClient from './grpc';
 import { toOpenApi } from './openapi-export';
@@ -940,6 +942,87 @@ function api(): DialCatzApi {
       if (!found.collections.length && !found.environments.length && !found.globals.length) throw new Error(`No Postman collections or environments in there${found.skipped.length ? ` (${found.skipped.length} file(s) skipped)` : ''}`);
       return keepExport(found);
     },
+    brunoRead: async () => {
+      const r = await openDialog(win, { title: 'Choose a Bruno collection, or a folder that holds some', properties: ['openDirectory'] });
+      if (r.canceled || !r.filePaths[0]) return null;
+      const found = bruno.findCollections(r.filePaths[0]).map((f) => ({ ...f, col: bruno.readCollection(f.path) }));
+      if (!found.length) throw new Error('No Bruno collection in that folder (a folder with bruno.json or opencollection.yml)');
+      brunoFound = { token: uid('bx_'), list: found.map((f) => f.col) };
+      return { token: brunoFound.token, folder: r.filePaths[0], collections: found.map((f, i) => ({ id: String(i), name: f.col.root.name, path: relativePath(r.filePaths[0], f.path) || '.', format: f.format, requests: f.col.items.filter((x) => x.kind === 'request').length, environments: f.col.environments.map((e) => e.name), notes: f.col.notes })) };
+    },
+    brunoImport: async (id, token, pick) => {
+      if (!brunoFound || brunoFound.token !== token) throw new Error('Choose the Bruno folder again');
+      const ids = new Set((Array.isArray(pick) ? pick : []).map(String));
+      const cols = brunoFound.list.filter((_, i) => ids.has(String(i)));
+      if (!cols.length) throw new Error('Choose at least one collection');
+      let w = ws.load(id);
+      const environments: string[] = [];
+      const taken = new Set(w.environments.map((e) => e.name.toLowerCase()));
+      for (const c of cols) {
+        // A name that is in use belongs to something else: the collection's name goes in front.
+        const mine = c.environments.map((e) => {
+          let name = taken.has(e.name.toLowerCase()) ? `${c.root.name} · ${e.name}` : e.name;
+          for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${c.root.name} · ${e.name} ${n}`;
+          taken.add(name.toLowerCase());
+          return { ...e, name };
+        });
+        for (const e of mine) w = ws.saveEnvironment(id, e);
+        environments.push(...mine.map((e) => e.name));
+        const sort = w.items.filter((i) => i.kind === 'collection').length;
+        const root = { ...c.root, sort, ...(mine.length ? { environmentId: mine[0].id } : {}), bruno: { ...c.root.bruno!, environments: Object.fromEntries(c.environments.map((e, n) => [e.name, mine[n].id])) } };
+        w = ws.saveItems(id, [root, ...c.items]);
+      }
+      brunoFound = null;
+      if (w.serverId) void srv.sync(id).then(() => send('app:workspaces', null));
+      return { workspace: w, summary: { collections: cols.map((c) => ({ id: c.root.id, name: c.root.name, requests: c.items.filter((i) => i.kind === 'request').length, notes: c.notes })), environments } };
+    },
+    brunoCheck: async (id, collectionId, pickAgain) => {
+      let w = ws.load(id);
+      let col = brunoCollection(w, String(collectionId));
+      if (pickAgain === true) {
+        const r = await openDialog(win, { title: `Choose the Bruno folder of ${col.name}`, properties: ['openDirectory'] });
+        if (r.canceled || !r.filePaths[0]) return null;
+        bruno.readCollection(r.filePaths[0]);
+        col = { ...col, bruno: { ...col.bruno!, folder: r.filePaths[0] } };
+        w = ws.saveItems(id, [col]);
+      }
+      const folder = col.bruno!.folder ?? '';
+      if (!folder || !existsSync(folder)) throw new Error(`The Bruno folder is not there any more: ${folder}. Choose it again.`);
+      const fresh = bruno.readCollection(folder);
+      brunoFresh = { workspaceId: id, collectionId: col.id, fresh };
+      return { collectionId: col.id, folder, ...brunosync.brunoDiff(w.items, col, fresh), environments: brunosync.newVariables(brunoEnvironments(w, col, fresh), fresh.environments).says, notes: fresh.notes };
+    },
+    brunoApply: async (id, collectionId, pick) => {
+      if (!brunoFresh || brunoFresh.workspaceId !== id || brunoFresh.collectionId !== collectionId) throw new Error('Check the Bruno folder again first');
+      const { fresh } = brunoFresh;
+      let w = ws.load(id);
+      const col = brunoCollection(w, String(collectionId));
+      const list = (x: unknown) => (Array.isArray(x) ? x.map(String) : []);
+      const out = brunosync.brunoApply(w.items, col, fresh, { add: list(pick?.add), update: list(pick?.update), remove: list(pick?.remove) });
+      const links: Record<string, string> = { ...(col.bruno!.environments ?? {}) };
+      if (pick?.environments === true) {
+        const mine = brunoEnvironments(w, col, fresh);
+        for (const e of brunosync.newVariables(mine, fresh.environments).save) {
+          const real = w.environments.find((x) => x.id === e.id);
+          let name = real?.name ?? e.name;
+          if (!real && w.environments.some((x) => x.name.toLowerCase() === name.toLowerCase())) name = `${col.name} · ${name}`;
+          w = ws.saveEnvironment(id, { ...e, name });
+          if (!real) links[e.name] = e.id;
+        }
+      }
+      if (out.remove.length) ws.deleteItems(id, out.remove);
+      const head = out.save.find((i) => i.id === col.id) ?? col;
+      w = ws.saveItems(id, [{ ...head, bruno: { ...head.bruno!, environments: links } }, ...out.save.filter((i) => i.id !== col.id)]);
+      brunoFresh = null;
+      if (w.serverId) void srv.sync(id).then(() => send('app:workspaces', null));
+      return { workspace: w, added: out.added, updated: out.updated, removed: out.removed };
+    },
+    brunoUnlink: async (id, collectionId) => {
+      const w = ws.load(id);
+      const col = brunoCollection(w, String(collectionId));
+      const ids = under(w.items, col.id);
+      return ws.saveItems(id, w.items.filter((i) => ids.has(i.id) && i.bruno).map(({ bruno: _b, ...i }) => i as TreeItem));
+    },
     migratePostman: async (id, token, pick) => {
       if (!postmanExport || postmanExport.token !== token) throw new Error('Choose the Postman export again');
       const { found } = postmanExport;
@@ -1355,6 +1438,21 @@ const repos = new GitRepos({
 });
 
 /** The Postman export read last, until the user has picked what to bring over. */
+/** Bruno collections read last, to import; and the one compared last, to update. */
+let brunoFound: { token: string; list: bruno.BrunoCollection[] } | null = null;
+let brunoFresh: { workspaceId: string; collectionId: string; fresh: bruno.BrunoCollection } | null = null;
+function brunoCollection(w: Workspace, id: string): TreeItem {
+  const c = w.items.find((i) => i.id === id && i.kind === 'collection');
+  if (!c) throw new Error('That collection is gone');
+  if (!c.bruno) throw new Error(`${c.name} was not imported from Bruno on this computer`);
+  return c;
+}
+/** The workspace's environments under the names Bruno has for them (one may have been renamed here). */
+const brunoEnvironments = (w: Workspace, col: TreeItem, fresh: bruno.BrunoCollection) =>
+  fresh.environments.flatMap((f) => {
+    const e = w.environments.find((x) => x.id === col.bruno!.environments?.[f.name]);
+    return e ? [{ ...e, name: f.name }] : [];
+  });
 let postmanExport: { token: string; found: postman.PostmanFound } | null = null;
 /** A folder workspace's folder (Git works on it), or a plain error for other workspaces. */
 function folderOf(id: string): string {

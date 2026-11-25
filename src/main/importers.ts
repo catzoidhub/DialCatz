@@ -28,8 +28,8 @@ export function exportCollection(items: TreeItem[], collectionId: string): DialC
 }
 
 function strip(i: TreeItem): TreeItem {
-  // database / dbTable: "Check in DBCatz" settings of this computer, not part of a shared file
-  const { rev: _r, dirty: _d, updatedBy: _u, updatedAt: _a, database: _db, dbTable: _t, ...rest } = i;
+  // database / dbTable / bruno: settings and paths of this computer, not part of a shared file
+  const { rev: _r, dirty: _d, updatedBy: _u, updatedAt: _a, database: _db, dbTable: _t, bruno: _br, ...rest } = i;
   return { ...rest, request: stripLocalFiles(rest.request) };
 }
 

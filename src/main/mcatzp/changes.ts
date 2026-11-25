@@ -801,6 +801,38 @@ export function changeActions(api: DialCatzApi, scopes: Scopes, command: WindowC
       if (!r) return done({ cancelled: true });
       return done(r.kind === 'collection' ? { collection: r.collectionId, requests: r.count } : choiceOut(r.choice));
     }),
+    asked('read_bruno_folder', 'Read a Bruno folder', 'The user picks a Bruno collection (or a folder that holds some) in a dialog. Answers with the collections in it and what will need a look after the import: import_from_bruno brings the ones picked. Bruno\'s files are only read.', {}, [], async () => q('Pick a Bruno folder to read?', [{ label: 'Folder', value: 'You pick it next' }], null), async () => {
+      await windowUp();
+      const r = await api.brunoRead();
+      return done(r ? { token: r.token, collections: r.collections.map((c) => ({ id: c.id, name: c.name, format: c.format, requests: c.requests, environments: c.environments, notes: c.notes })) } : { cancelled: true });
+    }),
+    asked('import_from_bruno', 'Import from Bruno', 'Brings the picked collections of the Bruno folder read last into a workspace, with their environments, scripts, assertions and variables. Scripts come as they are and run when the user sends a request.', { workspace: WORKSPACE, token: S('The token from read_bruno_folder.'), collections: { type: 'array', minItems: 1, maxItems: 100, items: S('A collection id from its answer.') } }, ['workspace', 'token', 'collections'], async (a) => {
+      const w = await writeOf(a.workspace);
+      return q(`Import from Bruno into ${w.name}?`, [{ label: 'Collections', value: String((a.collections as string[]).length) }, { label: 'Bruno', value: 'Its files stay as they are' }], { workspaceId: w.id, section: 'requests' });
+    }, async (a) => {
+      const r = await api.brunoImport((await writeOf(a.workspace)).id, String(a.token), (a.collections as string[]).map(String));
+      return done(r.summary);
+    }),
+    asked('apply_bruno_changes', 'Apply Bruno changes', "Takes the picked changes of the last check_bruno_changes on this collection (its keys). What the user edited here stays. Changes not picked are marked as seen; removed items not picked become the user's own. environments: true adds new environments and variable names (values already here are never touched).", { workspace: WORKSPACE, collection: COLLECTION, add: { type: 'array', maxItems: 5000, items: S('A key from check_bruno_changes.') }, update: { type: 'array', maxItems: 5000, items: S('A key.') }, remove: { type: 'array', maxItems: 5000, items: S('A key.') }, environments: { type: 'boolean' } }, ['workspace', 'collection'], async (a) => {
+      const w = await writeOf(a.workspace);
+      const c = collectionOf(w, a.collection);
+      const n = (x: unknown) => (Array.isArray(x) ? x.length : 0);
+      return q(`Update ${c.name} from its Bruno folder?`, [...fact('Adds', n(a.add) || null), ...fact('Updates', n(a.update) || null), ...fact('Deletes', n(a.remove) ? `${n(a.remove)} item(s) gone from Bruno` : null), ...fact('Environments', a.environments ? 'Adds new variables' : null)], { workspaceId: w.id, section: 'requests' });
+    }, async (a) => {
+      const w = await writeOf(a.workspace);
+      const list = (x: unknown) => (Array.isArray(x) ? x.map(String) : []);
+      const r = await api.brunoApply(w.id, collectionOf(w, a.collection).id, { add: list(a.add), update: list(a.update), remove: list(a.remove), environments: a.environments === true });
+      return done({ added: r.added, updated: r.updated, removed: r.removed });
+    }),
+    asked('unlink_bruno', 'Unlink from Bruno', 'The collection no longer belongs to its Bruno folder; its requests stay as they are.', { workspace: WORKSPACE, collection: COLLECTION }, ['workspace', 'collection'], async (a) => {
+      const w = await writeOf(a.workspace);
+      const c = collectionOf(w, a.collection);
+      return q(`Unlink ${c.name} from Bruno?`, [{ label: 'Requests', value: 'Stay as they are' }], { workspaceId: w.id, section: 'requests' });
+    }, async (a) => {
+      const w = await writeOf(a.workspace);
+      await api.brunoUnlink(w.id, collectionOf(w, a.collection).id);
+      return done({ unlinked: true });
+    }),
     asked('read_postman_export', 'Read a Postman export', 'The user picks its zip, JSON files or a folder in a dialog. Answers with what is in it: import_choice brings what you pick.', { how: { type: 'string', enum: ['files', 'folder'] } }, ['how'], async (a) => q('Pick a Postman export to read?', [{ label: 'Picks', value: a.how === 'folder' ? 'A folder, next' : 'Files, next' }], null), async (a) => {
       await windowUp();
       const r = await api.postmanReadExport(a.how as 'files' | 'folder');

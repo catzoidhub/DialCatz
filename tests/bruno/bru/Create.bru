@@ -1,0 +1,34 @@
+meta {
+  name: Create
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/echo
+  body: json
+  auth: basic
+}
+
+auth:basic {
+  username: john
+  password: {{process.env.SHOP_PASS}}
+}
+
+body:json {
+  {
+    "name": "{{userName}}",
+    "nested": { "a": 1 }
+  }
+}
+
+script:pre-request {
+  const b = req.getBody();
+  b.added = true;
+  req.setBody(b);
+}
+
+assert {
+  res.body.added: isTruthy
+  res.body.name: eq Ann
+}

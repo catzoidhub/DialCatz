@@ -272,6 +272,7 @@ function applyRemote(w: Workspace, r: RemoteItem): void {
     // "Check in DBCatz" settings belong to this computer: keep them.
     ...(i >= 0 && w.items[i].database ? { database: w.items[i].database } : {}),
     ...(i >= 0 && w.items[i].dbTable ? { dbTable: w.items[i].dbTable } : {}),
+    ...(i >= 0 && w.items[i].bruno ? { bruno: w.items[i].bruno } : {}),
     rev: r.revision,
     dirty: false,
     updatedBy: r.updatedBy?.name,

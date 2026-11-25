@@ -1,0 +1,10 @@
+vars {
+  host: http://127.0.0.1:47412
+  baseUrl: {{host}}/api
+  fromEnv: {{process.env.SHOP_KEY}}
+  ~off: x
+}
+vars:secret [
+  token,
+  ~old
+]

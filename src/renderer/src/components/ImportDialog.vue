@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import type { DevCatzSite, DoCatzProject, PostmanChoice, PostmanPick, PostmanSummary, Workspace } from '@shared/types';
+import type { BrunoChoice, BrunoSummary, DevCatzSite, DoCatzProject, PostmanChoice, PostmanPick, PostmanSummary, Workspace } from '@shared/types';
 import { loadWorkspaces, notify, selectWorkspace, syncTabsWithWorkspace, workspace } from '../state';
 import CatMood from './CatMood.vue';
 import Icon from './Icon.vue';
 import devcatzLogo from '../assets/logos/devcatz.svg';
 import docatzLogo from '../assets/logos/docatz.png';
 import { openDownload } from '../download';
+import { BRUNO_MARK } from '../marks';
 
 /**
  * Bringing requests in: a file or pasted text (Postman collection, OpenAPI / Swagger in JSON or YAML, DialCatz
@@ -15,7 +16,7 @@ import { openDownload } from '../download';
  * and Postman last) and shows the form once one is picked; a link from DevCatz / DoCatz or the Postman shortcut opens
  * its form straight away.
  */
-type Mode = 'choose' | 'file' | 'project' | 'postman' | 'devcatz' | 'docatz';
+type Mode = 'choose' | 'file' | 'project' | 'postman' | 'bruno' | 'devcatz' | 'docatz';
 const props = withDefaults(defineProps<{ tab?: Mode; siteId?: string; project?: string; service?: string }>(), { tab: 'choose', siteId: '', project: '', service: '' });
 const emit = defineEmits<{ done: [collectionId: string | null]; cancel: [] }>();
 const api = window.dialcatz;
@@ -107,7 +108,7 @@ async function migrate(how: 'files' | 'folder') {
   const r = await guard(() => api.postmanReadExport(how));
   if (r) choose(r);
 }
-const TITLES = { choose: 'Import', file: 'Import a file or text', project: 'OpenAPI in a project', postman: 'Move from Postman', devcatz: 'Import from DevCatz', docatz: 'Import from DoCatz' } as const;
+const TITLES = { choose: 'Import', file: 'Import a file or text', project: 'OpenAPI in a project', postman: 'Move from Postman', bruno: 'Move from Bruno', devcatz: 'Import from DevCatz', docatz: 'Import from DoCatz' } as const;
 /** Files picked under "File or paste" that hold more than one collection: the same pick-what-comes-in list. */
 const bundle = ref(false);
 const title = computed(() => (bundle.value && mode.value === 'postman' ? 'Import — choose what comes in' : TITLES[mode.value]));
@@ -226,6 +227,29 @@ async function pmImport() {
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 const totalRequests = computed(() => summary.value?.collections.reduce((n, c) => n + c.requests, 0) ?? 0);
 
+// ---------------------------------------------------------------- Bruno (#104)
+
+const brChoice = ref<BrunoChoice | null>(null);
+const brPicked = ref<string[]>([]);
+const brSummary = ref<BrunoSummary | null>(null);
+async function brPick() {
+  const r = await guard(() => api.brunoRead());
+  if (!r) return;
+  brChoice.value = r;
+  brPicked.value = r.collections.map((c) => c.id);
+}
+const brNotes = computed(() => brChoice.value?.collections.filter((c) => brPicked.value.includes(c.id)).reduce((n, c) => n + c.notes.length, 0) ?? 0);
+async function brImport() {
+  const r = await guard(() => api.brunoImport(workspace.value!.id, brChoice.value!.token, [...brPicked.value]));
+  if (!r) return;
+  use(r.workspace);
+  brSummary.value = r.summary;
+}
+async function brCopy() {
+  await navigator.clipboard.writeText(brSummary.value!.collections.flatMap((c) => [`${c.name}:`, ...c.notes.map((n) => `- ${n}`)]).join('\n'));
+  notify('success', 'List copied');
+}
+
 // ---------------------------------------------------------------- DevCatz
 
 const devcatz = ref<{ installed: boolean; sites: DevCatzSite[] } | null>(null);
@@ -340,7 +364,7 @@ async function importProject() {
   <dialog open class="modal modal-open" @keydown.esc="!busy && emit('cancel')">
     <div class="modal-box max-w-[95vw] space-y-4" :class="mode === 'choose' ? 'w-[34rem]' : 'w-[46rem]'">
       <div class="flex items-center gap-2">
-        <button v-if="mode !== 'choose' && !summary" class="btn btn-ghost btn-sm btn-square -ml-2" title="Other ways to import" aria-label="Other ways to import" :disabled="busy" @click="pickMode('choose')"><Icon name="chevron" class="size-4 rotate-180" /></button>
+        <button v-if="mode !== 'choose' && !summary && !brSummary" class="btn btn-ghost btn-sm btn-square -ml-2" title="Other ways to import" aria-label="Other ways to import" :disabled="busy" @click="pickMode('choose')"><Icon name="chevron" class="size-4 rotate-180" /></button>
         <h3 class="flex-1 text-lg font-semibold tracking-tight">{{ title }}<span class="font-normal opacity-50"> · {{ workspace?.name }}</span></h3>
       </div>
 
@@ -376,6 +400,14 @@ async function importProject() {
             <span class="min-w-0 flex-1">
               <span class="opt-card-title">From DoCatz<span v-if="dcNotInstalled" class="badge badge-ghost badge-xs font-normal">not installed</span></span>
               <span class="opt-card-text">A compose project's services as an environment, and their routes, ready to send</span>
+            </span>
+            <Icon name="chevron" class="size-4 shrink-0 opacity-40" />
+          </button>
+          <button class="opt-card" @click="pickMode('bruno')">
+            <span class="opt-card-icon" style="--tile: #f4aa41"><svg viewBox="0 0 24 24" class="size-6" fill="currentColor" aria-hidden="true"><path :d="BRUNO_MARK" /></svg></span>
+            <span class="min-w-0 flex-1">
+              <span class="opt-card-title">Move from Bruno</span>
+              <span class="opt-card-text">A Bruno folder (.bru or OpenCollection YAML) with its environments, scripts and assertions</span>
             </span>
             <Icon name="chevron" class="size-4 shrink-0 opacity-40" />
           </button>
@@ -419,6 +451,35 @@ async function importProject() {
       </template>
 
       <!-- Postman -->
+      <template v-else-if="mode === 'bruno'">
+        <template v-if="brSummary">
+          <div class="flex items-center gap-3"><CatMood :mood="brSummary.collections.some((c) => c.notes.length) ? 'info' : 'success'" class="size-10" /><p class="text-sm">Imported {{ plural(brSummary.collections.reduce((n, c) => n + c.requests, 0), 'request') }} in {{ plural(brSummary.collections.length, 'collection') }}<template v-if="brSummary.environments.length"> and {{ plural(brSummary.environments.length, 'environment') }}</template>. Your Bruno files are as they were.</p></div>
+          <div v-for="c in brSummary.collections.filter((x) => x.notes.length)" :key="c.id" class="rounded-box border border-base-300/60 p-3">
+            <p class="text-sm font-semibold">{{ c.name }} <span class="font-normal opacity-50">· {{ plural(c.notes.length, 'thing') }} to look at</span></p>
+            <ul class="selectable mt-1 max-h-56 list-disc space-y-1 overflow-y-auto pl-5 text-sm opacity-80"><li v-for="n in c.notes" :key="n">{{ n }}</li></ul>
+          </div>
+          <p class="text-xs opacity-60">When the team still works in Bruno: the collection's menu → Bruno → Check for changes brings in what changed there. Nothing goes back to Bruno.</p>
+        </template>
+        <template v-else>
+          <p class="text-sm opacity-70">Pick a Bruno collection, or a folder that holds several. Requests, folders, auth, environments, scripts, assertions and notes come in; your Bruno files are only read. Bruno's scripts (<code>bru</code>, <code>req</code>, <code>res</code>, <code>test</code>) run here as they are.</p>
+          <button class="btn btn-sm gap-2" :disabled="busy" @click="brPick"><span v-if="busy && !brChoice" class="loading loading-spinner loading-xs" /><Icon v-else name="folder" class="size-4" />{{ brChoice ? 'Choose another folder…' : 'Choose a Bruno folder…' }}</button>
+          <template v-if="brChoice">
+            <p class="truncate font-mono text-xs opacity-60" :title="brChoice.folder">{{ brChoice.folder }}</p>
+            <div class="max-h-72 space-y-1.5 overflow-y-auto">
+              <label v-for="c in brChoice.collections" :key="c.id" class="flex cursor-pointer items-start gap-3 rounded-box border border-base-300/60 px-3 py-2.5">
+                <input v-model="brPicked" type="checkbox" :value="c.id" class="checkbox checkbox-sm checkbox-primary mt-0.5" />
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-sm font-medium">{{ c.name }} <span class="font-normal opacity-50">· {{ plural(c.requests, 'request') }}<template v-if="c.environments.length"> · {{ plural(c.environments.length, 'environment') }}</template></span></span>
+                  <span class="block truncate font-mono text-xs opacity-50">{{ c.path }} · {{ c.format === 'bru' ? '.bru' : 'OpenCollection YAML' }}</span>
+                  <details v-if="c.notes.length" class="mt-1 text-xs" @click.stop><summary class="cursor-pointer opacity-70">{{ plural(c.notes.length, 'thing') }} to look at afterwards</summary><ul class="mt-1 list-disc space-y-0.5 pl-4 opacity-70"><li v-for="n in c.notes" :key="n">{{ n }}</li></ul></details>
+                </span>
+              </label>
+            </div>
+            <p v-if="brNotes" class="text-xs opacity-60">Everything else comes in as it is. The list stays on screen after the import.</p>
+          </template>
+        </template>
+      </template>
+
       <template v-else-if="mode === 'postman'">
         <template v-if="!summary && pmChoice">
           <div class="flex flex-wrap items-center gap-2 text-sm">
@@ -640,9 +701,11 @@ async function importProject() {
       <div v-if="error" class="alert alert-error alert-soft text-sm"><CatMood mood="error" class="size-7 shrink-0 -my-0.5" /><span>{{ error }}</span></div>
       <div class="modal-action">
         <button v-if="mode === 'postman' && pmChoice && !summary" class="btn btn-ghost btn-sm mr-auto" :disabled="busy" @click="pmBack">Back</button>
-        <button class="btn btn-ghost btn-sm" :disabled="busy" @click="emit('cancel')">{{ summary ? 'Close' : 'Cancel' }}</button>
+        <button class="btn btn-ghost btn-sm" :disabled="busy" @click="brSummary ? emit('done', brSummary.collections[0]?.id ?? null) : emit('cancel')">{{ summary || brSummary ? 'Close' : 'Cancel' }}</button>
         <button v-if="mode === 'file'" class="btn btn-primary btn-sm" :disabled="busy || !text.trim()" @click="fromText"><span v-if="busy" class="loading loading-spinner loading-xs" />Import</button>
         <button v-if="mode === 'project' && scan?.found.length" class="btn btn-primary btn-sm" :disabled="busy || !picked.size" @click="importPicked"><span v-if="busy" class="loading loading-spinner loading-xs" />Import {{ picked.size || '' }}</button>
+        <button v-else-if="mode === 'bruno' && brSummary" class="btn btn-sm" :disabled="!brSummary.collections.some((c) => c.notes.length)" @click="brCopy"><Icon name="copy" class="size-4" />Copy the list</button>
+        <button v-else-if="mode === 'bruno' && brChoice" class="btn btn-primary btn-sm" :disabled="busy || !brPicked.length" @click="brImport"><span v-if="busy" class="loading loading-spinner loading-xs" />Import {{ plural(brPicked.length, 'collection') }}</button>
         <button v-else-if="mode === 'postman' && summary" class="btn btn-primary btn-sm" @click="emit('done', null)">Done</button>
         <button v-else-if="mode === 'postman' && pmChoice" class="btn btn-primary btn-sm" :disabled="busy || pmNothing" @click="pmImport">
           <span v-if="busy" class="loading loading-spinner loading-xs" />{{ pmChoice.token ? 'Import' : 'Move' }} {{ plural(pmPick.collections.length, 'collection') }}<template v-if="pmPick.environments.length"> and {{ plural(pmPick.environments.length, 'environment') }}</template>

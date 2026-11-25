@@ -9,6 +9,7 @@ import { allowFile, send } from '../src/main/http';
 import * as grpcClient from '../src/main/grpc';
 import * as sockets from '../src/main/ws';
 import { runScript, type ScriptContext, type ScriptResult } from './scripts';
+import { applyPatch, type RequestPatch } from '@shared/scriptpatch';
 import { secretFields } from './redact';
 import { requestsOf, specFor, specKey } from './plan';
 
@@ -44,6 +45,8 @@ export interface RunOptions {
   retryDelayMs: number;
   /** Keep what was sent and answered (the HTML report's --details). */
   details: boolean;
+  /** The environment the run uses (--env). */
+  envName?: string;
   /** A person is at the terminal: an OAuth device sign-in may be asked for. */
   interactive: boolean;
   /** What a device sign-in asks of the person. */
@@ -89,7 +92,7 @@ export interface RunResult {
 }
 
 const headerObject = (h: [string, string][]) => Object.fromEntries(h.map(([k, v]) => [k.toLowerCase(), v]));
-const requestContext = (w: WireRequest) => ({ method: w.method, url: w.url, headers: headerObject(w.headers) });
+const requestContext = (w: WireRequest) => ({ method: w.method, url: w.url, headers: headerObject(w.headers), ...(typeof w.body === 'string' ? { body: w.body } : {}) });
 
 function chainOf(items: TreeItem[], item: TreeItem): TreeItem[] {
   const byId = new Map(items.map((i) => [i.id, i]));
@@ -159,11 +162,12 @@ async function oauthToken(c: OAuthSettings, o: RunOptions & { insecureNow: boole
 
 // ------------------------------------------------------------------ scripts
 
-async function runChain(chain: { from: string | null; code: string }[], ctx: () => ScriptContext, vars: Vars): Promise<ScriptResult> {
+async function runChain(chain: { from: string | null; code: string }[], ctx: () => ScriptContext, vars: Vars, after?: (r: ScriptResult) => void): Promise<ScriptResult> {
   const merged: ScriptResult = { tests: [], logs: [], changes: {}, error: null };
   for (const s of chain) {
     const r = await runScript(s.code, ctx());
     for (const [k, v] of Object.entries(r.changes)) v === null ? vars.delete(k) : vars.set(k, v);
+    after?.(r);
     const tag = s.from ? `${s.from} · ` : '';
     merged.tests.push(...r.tests.map((t) => ({ ...t, name: tag + t.name })));
     merged.logs.push(...r.logs.map((l) => tag + l));
@@ -195,7 +199,7 @@ async function grpcCall(spec: RequestSpec, wire: WireRequest, item: TreeItem, o:
   const started = performance.now();
   const files = o.protoFiles.length ? o.protoFiles : (spec.grpc?.protoFiles ?? []).filter((f) => existsSync(f));
   try {
-    const r = await grpcClient.call({ url: wire.url.split('?')[0], service: spec.grpc?.service ?? '', method: spec.grpc?.method ?? '', message: interpolate(spec.body.raw, o.vars), metadata: wire.headers.filter(([k]) => !AUTO.test(k)), ...(files.length ? { protoFiles: files } : {}), insecure, timeoutMs: o.timeoutMs, token: `cli-${item.id}` });
+    const r = await grpcClient.call({ url: wire.url.split('?')[0], service: spec.grpc?.service ?? '', method: spec.grpc?.method ?? '', message: wire.body ?? interpolate(spec.body.raw, o.vars), metadata: wire.headers.filter(([k]) => !AUTO.test(k)), ...(files.length ? { protoFiles: files } : {}), insecure, timeoutMs: o.timeoutMs, token: `cli-${item.id}` });
     const body = r.messages.length === 1 ? JSON.stringify(r.messages[0], null, 2) : r.messages.length ? JSON.stringify(r.messages, null, 2) : '';
     const name = grpcClient.CODES[r.code] ?? `CODE_${r.code}`;
     return { response: { ok: r.code === 0, status: grpcClient.HTTP_OF[r.code] ?? 500, statusText: r.code === 0 ? 'OK' : `${name}${r.details ? `: ${r.details}` : ''}`, headers: r.headers, body, binary: false, contentType: 'application/json', size: Buffer.byteLength(body), timings: { total: Math.round(performance.now() - started), ttfb: Math.round(r.ttfb) }, url: wire.url } as unknown as HttpResponse };
@@ -297,7 +301,11 @@ async function one(items: TreeItem[], item: TreeItem, collection: TreeItem, o: R
   const above = chainOf(items, item);
   const place = [...above].reverse().map((i) => i.name);
   // A data row wins over the other variables; what a script sets goes into the run's own.
-  const vars = (): Vars => (data ? new Map([...o.vars, ...Object.entries(data)]) : o.vars);
+  const locals: Vars = new Map();
+  const patches: RequestPatch[] = [];
+  const keep = (r: ScriptResult) => Object.entries(r.locals ?? {}).forEach(([k, v]) => locals.set(k, v));
+  const names = { requestName: item.name, collectionName: collection.name, envName: o.envName ?? '' };
+  const vars = (): Vars => (data || locals.size ? new Map([...o.vars, ...locals, ...Object.entries(data ?? {})]) : o.vars);
   const url0 = interpolate(spec.url.trim(), vars());
   const isWs = /^wss?:\/\//i.test(url0);
   const isGrpc = /^grpcs?:\/\//i.test(url0);
@@ -308,10 +316,13 @@ async function one(items: TreeItem[], item: TreeItem, collection: TreeItem, o: R
     ...(spec[kind]?.trim() ? [{ from: null, code: spec[kind]! }] : []),
   ];
   const auth = (): RequestAuth => effectiveAuth(spec.auth, above.flatMap((i) => (i.auth ? [i.auth] : [])));
-  const wireNow = (a: RequestAuth) => toWire(spec, vars(), a, { version: o.version });
+  const wireNow = (a: RequestAuth) => applyPatch(toWire(spec, vars(), a, { version: o.version }), patches, vars());
   const insecure = o.insecure || collection.insecure === true;
 
-  const pre = await runChain(scripts('preRequest'), () => ({ request: requestContext(wireNow(auth())), vars: Object.fromEntries(vars()), data }), o.vars);
+  const pre = await runChain(scripts('preRequest'), () => ({ request: requestContext(wireNow(auth())), vars: Object.fromEntries(vars()), data, ...names }), o.vars, (r) => {
+    keep(r);
+    if (r.patch) patches.push(r.patch);
+  });
   base.tests.push(...pre.tests);
   base.logs.push(...pre.logs);
   if (pre.error) return { ...base, error: `Pre-request script: ${pre.error}` };
@@ -363,7 +374,7 @@ async function one(items: TreeItem[], item: TreeItem, collection: TreeItem, o: R
   if (!res.binary) for (const v of secretFields(res.body)) seen.add(v);
   if (o.details) base.detail = { requestHeaders: wire.headers, requestBody: typeof wire.body === 'string' ? clip(wire.body, 20_000) : isGrpc ? clip(interpolate(spec.body.raw, o.vars), 20_000) : '', responseHeaders: res.headers, responseBody: res.binary ? `(binary, ${res.size} bytes)` : clip(res.body, 50_000) };
 
-  const tests = await runChain(scripts('tests'), () => ({ request: requestContext(wire), response: { status: res.status, statusText: res.statusText, headers: headerObject(res.headers), body: res.body, time: res.timings.total, size: res.size }, vars: Object.fromEntries(vars()), data, ...(messages ? { messages } : {}) }), o.vars);
+  const tests = await runChain(scripts('tests'), () => ({ request: requestContext(wire), response: { status: res.status, statusText: res.statusText, headers: headerObject(res.headers), body: res.body, time: res.timings.total, size: res.size }, vars: Object.fromEntries(vars()), data, ...names, ...(messages ? { messages } : {}) }), o.vars, keep);
   base.tests.push(...tests.tests);
   base.logs.push(...tests.logs);
   if (tests.error) base.error = `Test script: ${tests.error}`;

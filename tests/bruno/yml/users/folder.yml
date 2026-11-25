@@ -1,0 +1,9 @@
+info:
+  name: Users
+  type: folder
+  seq: 2
+request:
+  auth: inherit
+  variables:
+    - name: who
+      value: ann

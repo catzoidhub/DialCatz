@@ -1,0 +1,42 @@
+info:
+  name: Get user
+  type: http
+  seq: 1
+http:
+  method: GET
+  url: "{{baseUrl}}/users/:id?full=1"
+  params:
+    - name: full
+      value: "1"
+      type: query
+    - name: id
+      value: "42"
+      type: path
+  headers:
+    - name: X-Echo
+      value: "{{who}}"
+    - name: X-Off
+      value: "1"
+      disabled: true
+  auth: inherit
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("name", () => { expect(res.getBody().name).to.equal("Ann"); });
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "200"
+    - expression: res.body.name
+      operator: isString
+  actions:
+    - type: set-variable
+      phase: after-response
+      selector:
+        expression: res.body.name
+        method: jsonq
+      variable:
+        name: userName
+        scope: runtime
+docs: Get one

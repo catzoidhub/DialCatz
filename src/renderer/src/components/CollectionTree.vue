@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import CodeEditor from './CodeEditor.vue';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import { emptyLayout, uid, type ExportFormat, type RequestAuth, type SidebarLayout, type SpecReview, type TreeItem, type Workspace } from '@shared/types';
+import { emptyLayout, uid, type BrunoReview, type ExportFormat, type RequestAuth, type SidebarLayout, type SpecReview, type TreeItem, type Workspace } from '@shared/types';
 import { attempt, closeTab, collectionAsk, defaultEnvironment, freshRequest, importRequest, newTab, notify, openItem, plain, presenceByItem, readOnly, refreshMocks, refreshSpecStale, devcatzInstalled, devcatzLinks, docatzInstalled, docatzLinks, refreshDevcatzLinks, section, specAsk, specStale, syncTabsWithWorkspace, tabs, workspace } from '../state';
 import TreeNode, { type DropTarget } from './TreeNode.vue';
 import PromptDialog from './PromptDialog.vue';
@@ -13,6 +13,7 @@ import CopyCollectionDialog from './CopyCollectionDialog.vue';
 import SpecReviewDialog from './SpecReviewDialog.vue';
 import MockDialog from './MockDialog.vue';
 import CiDialog from './CiDialog.vue';
+import BrunoReviewDialog from './BrunoReviewDialog.vue';
 import DevcatzLinkDialog from './DevcatzLinkDialog.vue';
 import DocatzLinkDialog from './DocatzLinkDialog.vue';
 import Icon from './Icon.vue';
@@ -235,7 +236,7 @@ async function duplicate(item: TreeItem) {
   const copy = (i: TreeItem, parentId: string | null, rename: boolean) => {
     const id = uid(i.kind === 'collection' ? 'c_' : i.kind === 'folder' ? 'f_' : 'r_');
     map.set(i.id, id);
-    const { rev: _r, dirty: _d, ...rest } = i;
+    const { rev: _r, dirty: _d, bruno: _b, ...rest } = i;
     copies.push(plain({ ...rest, id, parentId, name: rename ? `${i.name} copy` : i.name, sort: rename ? i.sort + 0.5 : i.sort }));
     for (const c of w.items.filter((x) => x.parentId === i.id)) copy(c, id, false);
   };
@@ -287,6 +288,23 @@ const reviewing = ref<{ review: SpecReview; name: string } | null>(null);
 /** #94: the collection whose Mock server dialog is open. */
 const mocking = ref<TreeItem | null>(null);
 const inCi = ref<TreeItem | null>(null);
+
+// Bruno (#104): what changed in the folder a collection came from.
+const brunoReview = ref<{ review: BrunoReview; name: string } | null>(null);
+async function checkBruno(c: TreeItem, again = false) {
+  const r = await attempt(() => api.brunoCheck(workspace.value!.id, c.id, again));
+  if (r) brunoReview.value = { review: r, name: c.name };
+}
+async function unlinkBruno(c: TreeItem) {
+  await apply(() => api.brunoUnlink(workspace.value!.id, c.id));
+  notify('success', `“${c.name}” no longer belongs to a Bruno folder`);
+}
+function brunoDone(w: Workspace, text: string) {
+  brunoReview.value = null;
+  workspace.value = w;
+  syncTabsWithWorkspace(w);
+  notify('success', text);
+}
 /** The collection whose "Link to DevCatz" dialog is open. */
 const linking = ref<TreeItem | null>(null);
 const linkingDocatz = ref<TreeItem | null>(null);
@@ -642,6 +660,16 @@ const SORTS: { id: SidebarLayout['sortBy']; label: string }[] = [
             </ul>
           </details>
         </li>
+        <li v-if="menu.item.bruno">
+          <details>
+            <summary>Bruno</summary>
+            <ul>
+              <li><button :disabled="readOnly" @click="run((i) => checkBruno(i))">Check for changes…</button></li>
+              <li><button :disabled="readOnly" @click="run((i) => checkBruno(i, true))">Choose its folder again…</button></li>
+              <li><button :disabled="readOnly" @click="run(unlinkBruno)">Unlink</button></li>
+            </ul>
+          </details>
+        </li>
         <li v-if="devcatzInstalled">
           <details>
             <summary>DevCatz</summary>
@@ -746,6 +774,7 @@ const SORTS: { id: SidebarLayout['sortBy']; label: string }[] = [
     <CopyCollectionDialog v-if="copying" :collection="copying" @close="copying = null" />
     <DocatzLinkDialog v-if="linkingDocatz" :collection="linkingDocatz" @close="linkingDocatz = null" />
     <DevcatzLinkDialog v-if="linking" :collection="linking" @close="linking = null" />
+    <BrunoReviewDialog v-if="brunoReview" :review="brunoReview.review" :name="brunoReview.name" :workspace-id="workspace!.id" @close="brunoReview = null" @done="brunoDone" />
     <CiDialog v-if="inCi" :collection="inCi" @close="inCi = null" />
     <MockDialog v-if="mocking" :collection="mocking" @close="mocking = null" />
     <SpecReviewDialog v-if="reviewing" :review="reviewing.review" :name="reviewing.name" :workspace-id="workspace!.id" @close="reviewing = null" @done="specDone" />

@@ -1,0 +1,79 @@
+meta {
+  name: Get user
+  type: http
+  seq: 1
+  tags: [
+    smoke
+  ]
+}
+
+get {
+  url: {{baseUrl}}/users/:id?full=1&skip=no
+  body: none
+  auth: inherit
+}
+
+params:query {
+  full: 1
+  ~skip: no
+}
+
+params:path {
+  id: 42
+}
+
+headers {
+  ~X-Off: 1
+  "X-Quoted": v
+}
+
+vars:pre-request {
+  local1: {{who}}-x
+}
+
+vars:post-response {
+  userName: res.body.name
+  @once: $res.body.tags[0]
+  ~never: res.body.zzz
+}
+
+assert {
+  res.status: eq 200
+  res.body.name: isString
+  res.body.tags: length 2
+  res("items[?].n", x => x.n > 1): isArray
+  res.headers['x-echo']: contains ann
+  ~res.body.name: eq wrong
+}
+
+script:pre-request {
+  const note = bru.getVar('local1');
+  req.setHeader('X-Echo', note);
+}
+
+script:post-response {
+  const note = res.getBody().name;
+  bru.setVar('fromPost', { deep: note });
+}
+
+tests {
+  const note = res('items.n');
+  test("query", function () {
+    expect(note).to.deep.equal([1, 2]);
+    expect(bru.getVar('fromPost').deep).to.equal('Ann');
+    expect(bru.getVar('once')).to.equal('a');
+    expect(res.getBody()).to.have.property('name').that.is.a('string').and.equal('Ann');
+    expect(res.body).to.be.jsonSchema({ type: 'object', required: ['name'], properties: { name: { type: 'string' } } });
+    expect(5).to.be.within(1, 9);
+    expect([1, 2]).to.include.members([1]);
+    expect({ a: 1, b: 2 }).to.include.keys('a');
+    expect('x').not.to.equal('y');
+    expect(() => bru.sendRequest({})).to.throw('not available');
+  });
+}
+
+docs {
+  # Get one
+  {
+    braces }
+}

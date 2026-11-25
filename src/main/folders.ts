@@ -305,7 +305,7 @@ export function mergeFolder(w: Workspace, d: FolderData): Workspace {
   const old = new Map(w.items.map((i) => [i.id, i]));
   const items = d.items.map((i) => {
     const o = old.get(i.id);
-    return { ...i, ...(o?.database ? { database: o.database } : {}), ...(o?.dbTable ? { dbTable: o.dbTable } : {}) };
+    return { ...i, ...(o?.database ? { database: o.database } : {}), ...(o?.dbTable ? { dbTable: o.dbTable } : {}), ...(o?.bruno ? { bruno: o.bruno } : {}) };
   });
   const environments: Environment[] = d.environments.map((e) => {
     const o = w.environments.find((x) => x.id === e.id) ?? w.environments.find((x) => x.name === e.name);

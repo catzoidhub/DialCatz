@@ -66,23 +66,310 @@
         };
         const api = make(false);
         api.not = make(true);
-        // chai-ish, for scripts written for Postman: pm.expect(x).to.equal(y) …
-        const to = (neg) => {
-          const m = make(neg);
-          const t = {
-            equal: m.toBe, eql: m.toEqual, include: m.toContain, match: m.toMatch, above: m.toBeGreaterThan, below: m.toBeLessThan,
-            property: m.toHaveProperty, lengthOf: m.toHaveLength,
-            get ok() { m.toBeTruthy(); return t; },
-            get true() { m.toBe(true); return t; },
-            get false() { m.toBe(false); return t; },
-            get null() { m.toBeNull(); return t; },
-          };
-          t.be = t;
-          t.have = t;
-          return t;
-        };
-        Object.defineProperty(api, 'to', { get: () => Object.assign(to(false), { not: to(true) }) });
+        Object.defineProperty(api.not, 'to', { get: () => chain(actual, { not: true }) });
+        for (const w of ['be', 'have']) Object.defineProperty(api.not, w, { get: () => chain(actual, { not: true }) });
+        // chai-ish, for scripts written for Postman or Bruno: expect(x).to.equal(y), .to.have.property('a').that.is.a('string') …
+        Object.defineProperty(api, 'to', { get: () => chain(actual, {}) });
+        for (const w of ['be', 'have', 'is', 'that', 'and', 'deep', 'has']) if (!(w in api)) Object.defineProperty(api, w, { get: () => chain(actual, {})[w] });
         return api;
+      }
+
+      const typeOf = (v) => (v === null ? 'null' : Array.isArray(v) ? 'array' : v instanceof Date ? 'date' : v instanceof RegExp ? 'regexp' : typeof v);
+      /** a.b[0]["c.d"] as its keys. */
+      const keysOf = (path) => [...String(path).matchAll(/\[\s*"((?:[^"\\]|\\.)*)"\s*\]|\[\s*'((?:[^'\\]|\\.)*)'\s*\]|\[([^\]]*)\]|([^.[\]]+)/g)].map((m) => m[1] ?? m[2] ?? m[3] ?? m[4]);
+      const dig = (obj, path) => {
+        let o = obj;
+        for (const k of keysOf(path)) {
+          if (o == null || !Object.prototype.hasOwnProperty.call(Object(o), k)) return { found: false };
+          o = o[k];
+        }
+        return { found: true, value: o };
+      };
+
+      /** The chai words scripts use. `f` holds the flags before a word: not, deep, any, nested, contains. */
+      function chain(actual, f) {
+        const check = (ok, msg) => {
+          if (f.not ? ok : !ok) throw new Error((f.not ? 'Expected not: ' : 'Expected: ') + `${show(actual)} ${msg}`);
+          return chain(actual, { deep: f.deep });
+        };
+        const same = (a, b) => (f.deep ? deepEqual(a, b) : a === b);
+        const size = (v) => (v == null ? 0 : typeof v === 'object' && !('length' in v) ? (v instanceof Map || v instanceof Set ? v.size : Object.keys(v).length) : v.length);
+        const includes = (x) => {
+          if (actual == null) return false;
+          if (typeof actual === 'string') return actual.includes(x);
+          if (Array.isArray(actual)) return actual.some((y) => same(y, x));
+          if (actual instanceof Set || actual instanceof Map) return actual.has(x);
+          return typeof x === 'object' && x !== null && Object.keys(x).every((k) => (f.deep ? deepEqual(actual[k], x[k]) : actual[k] === x[k]));
+        };
+        const isA = (t) => check(typeOf(actual) === String(t).toLowerCase(), `to be a ${t}`);
+        const call = (fn, words) => new Proxy(fn, { get: (_, k) => (k === 'then' ? undefined : words()[k]) });
+        const cmp = (op, label) => (x) => {
+          const v = f.length ? size(actual) : actual;
+          return check(op(v, x), `${f.length ? 'length ' : ''}${label} ${show(x)}`);
+        };
+        const gt = cmp((a, b) => a > b, '>');
+        const gte = cmp((a, b) => a >= b, '>=');
+        const lt = cmp((a, b) => a < b, '<');
+        const lte = cmp((a, b) => a <= b, '<=');
+        const len = (n) => check(actual != null && size(actual) === n, `to have length ${n}`);
+        const eql = (x) => check(deepEqual(actual, x), `to equal ${show(x)}`);
+        const equal = (x) => (f.deep ? eql(x) : check(actual === x, `to be ${show(x)}`));
+        const include = (x) => check(includes(x), `to contain ${show(x)}`);
+        const property = (name, ...value) => {
+          const r = f.nested ? dig(actual, name) : actual != null && name in Object(actual) ? { found: true, value: actual[name] } : hasPath(actual, name) ? { found: true, value: getPath(actual, name) } : { found: false };
+          check(r.found && (!value.length || (f.deep ? deepEqual(r.value, value[0]) : r.value === value[0] || deepEqual(r.value, value[0]))), `to have property ${name}${value.length ? ` = ${show(value[0])}` : ''}`);
+          return chain(r.value, {});
+        };
+        const keys = (...list) => {
+          const want = list.flat().map((k) => (typeof k === 'object' ? Object.keys(k) : [k])).flat().map(String);
+          const have = Object.keys(Object(actual));
+          return check(f.any ? want.some((k) => have.includes(k)) : want.every((k) => have.includes(k)) && (f.contains || have.length === want.length), `to have keys ${want.join(', ')}`);
+        };
+        const members = (list) => check(Array.isArray(actual) && list.every((x) => actual.some((y) => same(y, x))) && (f.contains || actual.length === list.length), `to have members ${show(list)}`);
+        const oneOf = (list) => check(f.contains ? list.some((x) => includes(x)) : list.some((x) => same(actual, x)), `to be one of ${show(list)}`);
+        const throws = (what) => {
+          let err = null;
+          try {
+            actual();
+          } catch (e) {
+            err = e;
+          }
+          const text = err && String(err.message ?? err);
+          return check(!!err && (what === undefined || typeof what === 'function' || (what instanceof RegExp ? what.test(text) : text.includes(what))), 'to throw');
+        };
+        const words = {
+          equal, equals: equal, eq: equal, eql, eqls: eql,
+          match: (re) => check(new RegExp(re).test(String(actual)), `to match ${re}`),
+          above: gt, gt, greaterThan: gt, least: gte, gte, greaterThanOrEqual: gte, below: lt, lt, lessThan: lt, most: lte, lte, lessThanOrEqual: lte,
+          within: (a, b) => check((f.length ? size(actual) : actual) >= a && (f.length ? size(actual) : actual) <= b, `to be within ${a}..${b}`),
+          closeTo: (x, d) => check(Math.abs(actual - x) <= d, `to be close to ${x}`),
+          property, ownProperty: property, keys, key: keys, members, oneOf, throw: throws, throws,
+          string: (x) => check(typeof actual === 'string' && actual.includes(x), `to contain ${show(x)}`),
+          startWith: (x) => check(typeof actual === 'string' && actual.startsWith(x), `to start with ${show(x)}`),
+          endWith: (x) => check(typeof actual === 'string' && actual.endsWith(x), `to end with ${show(x)}`),
+          instanceof: (c) => check(actual instanceof c, `to be an instance of ${c && c.name}`),
+          satisfy: (fn) => check(!!fn(actual), 'to satisfy the function'),
+          jsonBody: (...args) => {
+            if (!args.length) return check(typeof actual === 'object' && actual !== null, 'to be a JSON body');
+            if (args.length === 1 && typeof args[0] === 'object' && args[0] !== null) return eql(args[0]);
+            const r = dig(actual, args[0]);
+            return check(r.found && (args.length < 2 || deepEqual(r.value, args[1])), `to have ${args[0]}${args.length > 1 ? ` = ${show(args[1])}` : ''}`);
+          },
+          jsonSchema: (schema) => {
+            const problem = schemaProblem(schema, actual, schema, '');
+            return check(!problem, `to match the JSON schema${problem ? `: ${problem}` : ''}`);
+          },
+          get ok() { return check(!!actual, 'to be truthy'); },
+          get true() { return check(actual === true, 'to be true'); },
+          get false() { return check(actual === false, 'to be false'); },
+          get null() { return check(actual === null, 'to be null'); },
+          get undefined() { return check(actual === undefined, 'to be undefined'); },
+          get NaN() { return check(Number.isNaN(actual), 'to be NaN'); },
+          get exist() { return check(actual != null, 'to exist'); },
+          get empty() { return check(actual != null && size(actual) === 0, 'to be empty'); },
+          get json() { return check(typeOf(actual) === 'object' || typeOf(actual) === 'array', 'to be JSON'); },
+          get not() { return chain(actual, { ...f, not: !f.not }); },
+          get deep() { return chain(actual, { ...f, deep: true }); },
+          get nested() { return chain(actual, { ...f, nested: true }); },
+          get any() { return chain(actual, { ...f, any: true }); },
+          get all() { return chain(actual, { ...f, any: false }); },
+        };
+        for (const w of ['to', 'be', 'been', 'is', 'that', 'which', 'and', 'has', 'have', 'with', 'at', 'of', 'same', 'but', 'does', 'still', 'also', 'own']) Object.defineProperty(words, w, { get: () => chain(actual, f) });
+        const contains = () => chain(actual, { ...f, contains: true });
+        words.include = words.includes = words.contain = words.contains = call(include, contains);
+        words.a = words.an = call(isA, () => chain(actual, f));
+        words.length = words.lengthOf = call(len, () => chain(actual, { ...f, length: true }));
+        return words;
+      }
+
+      /** The first thing a value breaks of a JSON Schema (draft-07's common words), or ''. */
+      function schemaProblem(s, v, root, at, depth = 0) {
+        if (s === true || s === undefined) return '';
+        if (s === false) return `${at || 'value'} is not allowed`;
+        if (depth > 40) return '';
+        const where = at || 'value';
+        if (s.$ref) {
+          const t = /^#/.test(s.$ref) ? String(s.$ref).slice(1).split('/').filter(Boolean).reduce((o, k) => (o == null ? undefined : o[decodeURIComponent(k).replace(/~1/g, '/').replace(/~0/g, '~')]), root) : undefined;
+          return t === undefined ? `${s.$ref} cannot be followed` : schemaProblem(t, v, root, at, depth + 1);
+        }
+        if (s.type !== undefined) {
+          const t = typeOf(v);
+          const ok = [].concat(s.type).some((x) => x === t || (x === 'integer' && Number.isInteger(v)));
+          if (!ok) return `${where} is ${t}, not ${[].concat(s.type).join(' or ')}`;
+        }
+        if (s.enum && !s.enum.some((x) => deepEqual(x, v))) return `${where} is not one of ${show(s.enum)}`;
+        if ('const' in s && !deepEqual(s.const, v)) return `${where} is not ${show(s.const)}`;
+        if (typeof v === 'number') {
+          if (s.minimum !== undefined && v < s.minimum) return `${where} is below ${s.minimum}`;
+          if (s.maximum !== undefined && v > s.maximum) return `${where} is above ${s.maximum}`;
+          if (typeof s.exclusiveMinimum === 'number' && v <= s.exclusiveMinimum) return `${where} is not above ${s.exclusiveMinimum}`;
+          if (typeof s.exclusiveMaximum === 'number' && v >= s.exclusiveMaximum) return `${where} is not below ${s.exclusiveMaximum}`;
+        }
+        if (typeof v === 'string') {
+          if (s.minLength !== undefined && v.length < s.minLength) return `${where} is shorter than ${s.minLength}`;
+          if (s.maxLength !== undefined && v.length > s.maxLength) return `${where} is longer than ${s.maxLength}`;
+          if (s.pattern && !new RegExp(s.pattern).test(v)) return `${where} does not match ${s.pattern}`;
+        }
+        if (Array.isArray(v)) {
+          if (s.minItems !== undefined && v.length < s.minItems) return `${where} has fewer than ${s.minItems} items`;
+          if (s.maxItems !== undefined && v.length > s.maxItems) return `${where} has more than ${s.maxItems} items`;
+          for (let i = 0; i < v.length; i++) {
+            const p = schemaProblem(Array.isArray(s.items) ? s.items[i] : s.items, v[i], root, `${at}[${i}]`, depth + 1);
+            if (p) return p;
+          }
+        } else if (v && typeof v === 'object') {
+          for (const k of s.required ?? []) if (!(k in v)) return `${at ? `${at}.` : ''}${k} is missing`;
+          for (const [k, x] of Object.entries(v)) {
+            const sub = s.properties?.[k];
+            const pat = Object.entries(s.patternProperties ?? {}).filter(([re]) => new RegExp(re).test(k));
+            if (!sub && !pat.length && s.additionalProperties === false) return `${at ? `${at}.` : ''}${k} is not expected`;
+            for (const one of [...(sub ? [sub] : []), ...pat.map((e) => e[1]), ...(!sub && !pat.length && typeof s.additionalProperties === 'object' ? [s.additionalProperties] : [])]) {
+              const p = schemaProblem(one, x, root, `${at ? `${at}.` : ''}${k}`, depth + 1);
+              if (p) return p;
+            }
+          }
+        }
+        for (const x of s.allOf ?? []) {
+          const p = schemaProblem(x, v, root, at, depth + 1);
+          if (p) return p;
+        }
+        if (s.anyOf && !s.anyOf.some((x) => !schemaProblem(x, v, root, at, depth + 1))) return `${where} matches none of anyOf`;
+        if (s.oneOf && s.oneOf.filter((x) => !schemaProblem(x, v, root, at, depth + 1)).length !== 1) return `${where} does not match exactly one of oneOf`;
+        if (s.not && !schemaProblem(s.not, v, root, at, depth + 1)) return `${where} matches what it must not`;
+        return '';
+      }
+
+      /** Bruno's res('a.b[0].c', fn): keys (an array gives each element's), ..key anywhere below, [n], [?] with a function or an object. */
+      function query(data, expr, ...fns) {
+        const steps = [...String(expr).matchAll(/(\.\.)?([^.[\]]+)|\[(\?|-?\d+|"[^"]*"|'[^']*')\]/g)];
+        const deepFind = (v, k, out) => {
+          if (Array.isArray(v)) v.forEach((x) => deepFind(x, k, out));
+          else if (v && typeof v === 'object')
+            for (const [n, x] of Object.entries(v)) {
+              if (n === k) out.push(x);
+              deepFind(x, k, out);
+            }
+          return out;
+        };
+        const key = (v, k) => (Array.isArray(v) ? v.map((x) => key(x, k)).filter((x) => x !== undefined).flat() : v == null ? undefined : Object(v)[k]);
+        let cur = data;
+        for (const [, deep, name, inside] of steps) {
+          if (cur == null) return undefined;
+          if (name !== undefined) cur = deep ? deepFind(cur, name, []).flat() : key(cur, name);
+          else if (inside === '?') {
+            const fn = fns.shift();
+            const list = [].concat(cur);
+            if (typeof fn === 'function') {
+              const got = list.map((x) => fn(x));
+              cur = got.every((x) => typeof x === 'boolean') ? list.filter((_, i) => got[i]) : got;
+            } else cur = list.filter((x) => Object.entries(fn ?? {}).every(([k, v]) => deepEqual(x?.[k], v)));
+          } else cur = /^-?\d+$/.test(inside) ? [].concat(cur).at(Number(inside)) : key(cur, inside.slice(1, -1));
+        }
+        return cur;
+      }
+
+      /** Bruno's script objects over DialCatz's own, so its scripts run as they are. What a script here cannot do says so. */
+      function bruno({ dc, vars, locals, data, now, edit, res, ctx, test }) {
+        const no = (what) => () => {
+          throw new Error(`${what} is not available in DialCatz scripts`);
+        };
+        const open = (name, known) => new Proxy(known, { get: (t, k) => (k in t ? t[k] : typeof k === 'symbol' || k === 'then' || k === 'toJSON' ? undefined : no(`${name}.${String(k)}`)) });
+        const text = (v) => (typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v));
+        const back = (v) => {
+          if (typeof v !== 'string' || !/^\s*[[{]/.test(v)) return v;
+          try {
+            return JSON.parse(v);
+          } catch {
+            return v;
+          }
+        };
+        const has = (k) => Object.prototype.hasOwnProperty.call(vars, k);
+        const set = (k, v) => dc.env.set(k, text(v));
+        const fill = (s) => (typeof s === 'string' ? s.replace(/\{\{\s*(?:process\.env\.)?([\w.$-]+)\s*\}\}/g, (w, n) => (has(n) ? vars[n] : w)) : s);
+        const drop = (k) => dc.env.unset(k);
+        const all = () => ({ ...vars });
+        const operand = (s) => {
+          const t = fill(String(s ?? '')).trim();
+          if (t === 'true') return true;
+          if (t === 'false') return false;
+          if (t === 'null') return null;
+          if (t === 'undefined') return undefined;
+          if (/^(".*"|'.*')$/s.test(t)) return t.slice(1, -1);
+          return t !== '' && !isNaN(t) && Number(t) <= Number.MAX_SAFE_INTEGER ? Number(t) : t;
+        };
+        const list = (s) => String(s ?? '').trim().replace(/^\[(.*)\]$/s, '$1').split(',').map(operand);
+        const OPS = {
+          eq: (a, v) => chain(a, {}).equal(operand(v)), neq: (a, v) => chain(a, { not: true }).equal(operand(v)),
+          gt: (a, v) => chain(a, {}).above(operand(v)), gte: (a, v) => chain(a, {}).least(operand(v)), lt: (a, v) => chain(a, {}).below(operand(v)), lte: (a, v) => chain(a, {}).most(operand(v)),
+          in: (a, v) => chain(a, {}).oneOf(list(v)), notIn: (a, v) => chain(a, { not: true }).oneOf(list(v)),
+          contains: (a, v) => chain(a, {}).include(operand(v)), notContains: (a, v) => chain(a, { not: true }).include(operand(v)),
+          length: (a, v) => chain(a, {}).lengthOf(operand(v)),
+          matches: (a, v) => chain(a, {}).match(new RegExp(fill(String(v)).replace(/^\/(.*)\/$/s, '$1'))), notMatches: (a, v) => chain(a, { not: true }).match(new RegExp(fill(String(v)).replace(/^\/(.*)\/$/s, '$1'))),
+          startsWith: (a, v) => chain(a, {}).startWith(String(operand(v))), endsWith: (a, v) => chain(a, {}).endWith(String(operand(v))),
+          between: (a, v) => chain(a, {}).within(...list(v)),
+          isEmpty: (a) => chain(a, {}).empty, isNotEmpty: (a) => chain(a, { not: true }).empty, isNull: (a) => chain(a, {}).null, isUndefined: (a) => chain(a, {}).undefined, isDefined: (a) => chain(a, { not: true }).undefined,
+          isTruthy: (a) => chain(a, {}).true, isFalsy: (a) => chain(a, {}).false, isJson: (a) => chain(a, {}).json,
+          isNumber: (a) => chain(a, {}).a('number'), isString: (a) => chain(a, {}).a('string'), isBoolean: (a) => chain(a, {}).a('boolean'), isArray: (a) => chain(a, {}).a('array'),
+        };
+        const runner = open('bru.runner', { iterationData: { get: (k) => data[k], has: (k) => k in data, stringify: () => JSON.stringify(data), unset: (k) => void delete data[k] } });
+        const bru = open('bru', {
+          runner,
+          getVar: (k) => back(vars[k]), setVar: set, hasVar: has, deleteVar: drop, getAllVars: all,
+          getEnvVar: (k) => vars[k], setEnvVar: set, hasEnvVar: has, deleteEnvVar: drop, getAllEnvVars: all,
+          getGlobalEnvVar: (k) => vars[k], setGlobalEnvVar: set, hasGlobalEnvVar: has, deleteGlobalEnvVar: drop, getAllGlobalEnvVars: all,
+          getCollectionVar: (k) => vars[k], setCollectionVar: set, hasCollectionVar: has, deleteCollectionVar: drop,
+          getFolderVar: (k) => vars[k], getRequestVar: (k) => vars[k], getProcessEnv: (k) => vars[k], getSecretVar: (k) => vars[k],
+          getEnvName: () => ctx.envName ?? '', getCollectionName: () => ctx.collectionName ?? '',
+          interpolate: fill, sleep: (ms) => new Promise((r) => setTimeout(r, ms)), isSafeMode: () => true, getTestResults: async () => [], getAssertionResults: async () => [],
+          // Made by the import: a request's own variables, values taken from a response, the assert table.
+          local: (k, v) => dc.local.set(k, fill(String(v))),
+          capture: (k, fn, own) => {
+            try {
+              const v = fn();
+              if (v === undefined) dc.log(`${k}: no value in the response`);
+              else if (own) dc.local.set(k, text(v));
+              else set(k, v);
+            } catch (e) {
+              dc.log(`${k}: ${e && e.message ? e.message : e}`);
+            }
+          },
+          assert: (label, fn, op, v) => test(label, () => void (OPS[op] ?? OPS.eq)(fn(), v)),
+        });
+        const head = (k) => now.headers[String(k).toLowerCase()];
+        const u = () => {
+          try {
+            return new URL(now.url);
+          } catch {
+            return null;
+          }
+        };
+        const nothing = () => undefined;
+        const req = open('req', {
+          get url() { return now.url; }, get method() { return now.method; }, get headers() { return { ...now.headers }; }, get body() { return back(now.body); }, get name() { return ctx.requestName ?? ''; },
+          getUrl: () => now.url, setUrl: edit.setUrl, getMethod: () => now.method, setMethod: edit.setMethod, getName: () => ctx.requestName ?? '', getTags: () => [],
+          getHost: () => u()?.host ?? '', getPath: () => u()?.pathname ?? '', getQueryString: () => u()?.search.slice(1) ?? '', getPathParams: () => [],
+          getHeader: head, getHeaders: () => ({ ...now.headers }), setHeader: edit.setHeader, setHeaders: (h) => Object.entries(h ?? {}).forEach(([k, v]) => edit.setHeader(k, v)), deleteHeader: edit.removeHeader, deleteHeaders: (l) => [].concat(l).forEach(edit.removeHeader),
+          getBody: (o) => (o && o.raw ? now.body : back(now.body)), setBody: edit.setBody, getExecutionMode: () => 'standalone',
+          // Set on the request in DialCatz itself (Settings).
+          setTimeout: nothing, getTimeout: () => 0, setMaxRedirects: nothing, disableParsingResponseJson: nothing,
+        });
+        let body = res ? back(res.body) : undefined;
+        const r = res
+          ? Object.assign((expr, ...fns) => query(body, expr, ...fns), {
+              status: res.status, statusText: res.statusText, headers: res.headers, responseTime: res.time, url: ctx.request?.url,
+              getStatus: () => res.status, getStatusText: () => res.statusText, getHeader: (k) => res.headers[String(k).toLowerCase()], getHeaders: () => ({ ...res.headers }), getBody: (o) => (o && o.raw ? res.body : body), getResponseTime: () => res.time, getUrl: () => ctx.request?.url,
+              setBody: (b) => void (body = b), getSize: () => ({ body: res.size, headers: 0, total: res.size }),
+            })
+          : undefined;
+        if (r) Object.defineProperty(r, 'body', { get: () => body });
+        const uuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => ((v) => (c === 'x' ? v : (v & 3) | 8).toString(16))((Math.random() * 16) | 0));
+        const nanoid = (n = 21) => Array.from({ length: n }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-'[(Math.random() * 64) | 0]).join('');
+        const MODULES = { chai: { expect }, uuid: { v4: uuid }, nanoid: { nanoid }, atob: (s) => atob(s), btoa: (s) => btoa(s) };
+        const require = (name) => {
+          if (Object.prototype.hasOwnProperty.call(MODULES, name)) return MODULES[name];
+          throw new Error(`require('${name}') is not available in DialCatz scripts`);
+        };
+        return { bru, req, res: r, require };
       }
 
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
@@ -95,8 +382,27 @@
         const vars = { ...(ctx.vars || {}) };
         const changes = {};
         const res = ctx.response;
+        // What a pre-request script changes of the request, on top of how it was built.
+        const locals = {};
+        const patch = {};
+        const now = { method: ctx.request?.method, url: ctx.request?.url, body: ctx.request?.body, headers: { ...(ctx.request?.headers ?? {}) } };
+        const edit = {
+          setMethod: (m) => ((now.method = patch.method = String(m).toUpperCase()), undefined),
+          setUrl: (u) => ((now.url = patch.url = String(u)), undefined),
+          setBody: (b) => ((now.body = patch.body = b === undefined || b === null ? '' : typeof b === 'string' ? b : JSON.stringify(b)), undefined),
+          setHeader: (k, v) => {
+            (patch.headers ??= {})[String(k)] = String(v);
+            now.headers[String(k).toLowerCase()] = String(v);
+          },
+          removeHeader: (k) => {
+            (patch.headers ??= {})[String(k)] = null;
+            delete now.headers[String(k).toLowerCase()];
+          },
+        };
         const dc = {
-          request: ctx.request,
+          request: { ...ctx.request, ...edit },
+          /** A value for this send only: {{name}} in the request and the scripts after it, saved nowhere. */
+          local: { get: (k) => vars[k], set: (k, v) => void (vars[k] = locals[k] = String(v)) },
           response: res && {
             ...res,
             json() {
@@ -138,7 +444,7 @@
           // imported collection whose test script called pm.collectionVariables.set, 2026-11-10).
           collectionVariables: dc.env,
           variables: dc.env,
-          request: ctx.request,
+          request: { ...ctx.request, ...edit },
           iterationData: { get: (k) => data[k], has: (k) => Object.prototype.hasOwnProperty.call(data, k), toObject: () => ({ ...data }) },
           response: res && {
             code: res.status,
@@ -151,14 +457,16 @@
           },
         };
         const console = { log: dc.log, info: dc.log, warn: dc.log, error: dc.log };
+        const b = bruno({ dc, vars, locals, data, now, edit, res, ctx, test: dc.test, expect });
         let error = null;
         try {
-          await new AsyncFunction('dc', 'pm', 'console', '"use strict";\n' + code)(dc, pm, console);
+          // An inner function: a script may declare its own `res`, `test` … without clashing with these.
+          await new AsyncFunction('dc', 'pm', 'console', 'bru', 'req', 'res', 'test', 'expect', 'require', 'return (async () => {"use strict";\n' + code + '\n})()')(dc, pm, console, b.bru, b.req, b.res, dc.test, expect, b.require);
         } catch (e) {
           error = String(e && e.message ? e.message : e);
         }
         await Promise.all(pending);
-        self.postMessage({ id, tests, logs, changes, error });
+        self.postMessage({ id, tests, logs, changes, error, locals, patch });
       };
     </script>
     <script>

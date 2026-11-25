@@ -1,0 +1,9 @@
+info:
+  name: Sock
+  type: websocket
+  seq: 4
+websocket:
+  url: wss://ws.test/x
+  message:
+    type: json
+    data: '{"hi":1}'

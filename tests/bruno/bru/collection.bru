@@ -1,0 +1,34 @@
+meta {
+  type: collection
+}
+
+headers {
+  X-Team: cats
+  X-Both: collection
+}
+
+auth {
+  mode: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+vars:pre-request {
+  region: eu
+  host: from-collection
+}
+
+script:pre-request {
+  const note = 'collection';
+  req.setHeader('X-Script', `${note} {{region}}`);
+}
+
+tests {
+  test("collection test ran", () => expect(res.status).to.be.a('number'));
+}
+
+docs {
+  Shop docs
+}

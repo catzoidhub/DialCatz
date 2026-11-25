@@ -1,4 +1,5 @@
 import type { HttpResponse, WireRequest } from '@shared/types';
+import { readPatch, textRecord, type RequestPatch } from '@shared/scriptpatch';
 
 /**
  * Request scripts (pre-request and tests) run in public/sandbox.html inside an <iframe sandbox="allow-scripts">:
@@ -18,9 +19,16 @@ export interface ScriptResult {
   /** Variable name → new value (null: removed). */
   changes: Record<string, string | null>;
   error: string | null;
+  /** Values for this send only. */
+  locals?: Record<string, string>;
+  /** What a pre-request script changed of the request. */
+  patch?: RequestPatch;
 }
 export interface ScriptContext {
-  request: { method: string; url: string; headers: Record<string, string> };
+  request: { method: string; url: string; headers: Record<string, string>; body?: string };
+  requestName?: string;
+  collectionName?: string;
+  envName?: string;
   response?: { status: number; statusText: string; headers: Record<string, string>; body: string; time: number; size: number };
   vars: Record<string, string>;
   /** The runner's data row for this iteration (CSV / JSON data file). */
@@ -68,7 +76,7 @@ window.addEventListener('message', (e) => {
   if (!done) return;
   waiting.delete(e.data.id);
   const d = e.data as ScriptResult & { id: string };
-  done({ tests: Array.isArray(d.tests) ? d.tests : [], logs: Array.isArray(d.logs) ? d.logs.map(String) : [], changes: d.changes && typeof d.changes === 'object' ? d.changes : {}, error: d.error ? String(d.error) : null });
+  done({ tests: Array.isArray(d.tests) ? d.tests : [], logs: Array.isArray(d.logs) ? d.logs.map(String) : [], changes: d.changes && typeof d.changes === 'object' ? d.changes : {}, error: d.error ? String(d.error) : null, locals: textRecord(d.locals), patch: readPatch(d.patch) });
 });
 
 export async function runScript(code: string, ctx: ScriptContext): Promise<ScriptResult> {
@@ -94,7 +102,7 @@ export async function runScript(code: string, ctx: ScriptContext): Promise<Scrip
 export const headerObject = (headers: [string, string][]) => Object.fromEntries(headers.map(([k, v]) => [k.toLowerCase(), v]));
 
 export function requestContext(w: WireRequest) {
-  return { method: w.method, url: w.url, headers: headerObject(w.headers) };
+  return { method: w.method, url: w.url, headers: headerObject(w.headers), ...(typeof w.body === 'string' ? { body: w.body } : {}) };
 }
 export function responseContext(r: HttpResponse) {
   return { status: r.status, statusText: r.statusText, headers: headerObject(r.headers), body: r.body, time: r.timings.total, size: r.size };

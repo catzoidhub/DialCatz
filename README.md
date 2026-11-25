@@ -21,6 +21,7 @@ account, no Pro tier, nothing locked behind a payment.
 - **Other protocols** — pick one from the request-kind menu: WebSocket; Socket.IO; Pusher for Reverb, Sockudo, Soketi or Pusher Channels, with private and presence channels signed from a `{{variable}}`; gRPC through server reflection or your `.proto` files.
 - **OpenAPI** — a collection follows its spec (a file, a URL, a DevCatz site or a DoCatz service) and a review dialog shows new, changed and gone requests before anything updates, keeping what you edited. Responses are checked against the spec in the Spec pane and in the runner. A mock server made from the spec runs on 127.0.0.1 (ports 4010–4099), and Send requests here points the collection at it. Import → OpenAPI finds the spec files in a project folder; any collection exports as OpenAPI 3.0.
 - **Collections and environments** — folders, variables, pre-request and test scripts, a runner with iterations; results export as JSON or JUnit XML.
+- **Move from Bruno** — Import → Move from Bruno reads a Bruno folder (`.bru` or OpenCollection YAML): requests, folders, auth, environments, scripts, assertions and notes. Bruno's `bru`, `req`, `res`, `test` and `expect` run as they are, what cannot come along is listed, and Bruno → Check for changes brings in what the team changes there later. Bruno's files are only read.
 - **CLI** — run a collection's requests and tests from a terminal or a CI job, without the app: `npx dialcatz run <workspace folder | collection | OpenAPI file>`, with `--spec` to fail the build when the API drifts from its contract, data files, retries, and GitHub, HTML, JUnit or JSON reports. **Run in CI…** on a collection writes the GitHub Actions workflow or GitLab CI job. See [Command line](#command-line).
 - **Import** — Postman collections and data exports, Postman workspaces with an API key, OpenAPI / Swagger, cURL.
 - **Teams, two ways** — through Git, with no server: a workspace kept as small YAML files in your repository, reviewed in pull requests and shared with pull and push. Or live through a self-hosted [DialCatz Den](https://github.com/catzoidhub/DialCatz-Den): invite links instead of accounts, a teammate’s change within a second. Either way, environment values stay on each computer. [Git or DialCatz Den?](https://catzoid.com/docs/dialcatz/git#git-or-dialcatz-den)
@@ -65,6 +66,7 @@ The CLI runs collections without the app: for a terminal, a pre-push hook or a C
 ```bash
 npx dialcatz run ./api-workspace --var baseUrl=https://staging.example.com --env-file .env.ci
 npx dialcatz run shop.postman_collection.json -r cli -r junit=results.xml -r html=report.html
+npx dialcatz run ./bruno-collection --env Local
 npx dialcatz run openapi.yaml --spec openapi.yaml --var baseUrl=http://localhost:3000
 npx dialcatz run ./api-workspace -c Orders --data orders.csv --file avatar=./fixtures/cat.png
 ```

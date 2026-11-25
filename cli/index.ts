@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFil
 import { basename, dirname, join, resolve } from 'node:path';
 import type { SpecResponse, TreeItem } from '@shared/types';
 import { importSpec, importText } from '../src/main/importers';
+import { findCollections, readCollection } from '../src/main/bruno';
 import { isWorkspaceFolder, readFolder } from '../src/main/folders';
 import { json, junit, paint, plainMarks, requestLines, summaryLine, totals } from './report';
 import { annotations, inert, summary } from './report-github';
@@ -30,12 +31,13 @@ Usage
   dialcatz run <path> [options]
 
   <path>   a workspace folder (the one with dialcatz.yml), a collection exported from DialCatz or
-           Postman, or an OpenAPI / Swagger file
+           Postman, a Bruno collection folder, or an OpenAPI / Swagger file
 
 Options
   -c, --collection <name>   only this collection (a workspace folder may hold several)
   -f, --folder <name>       only the requests under this folder (or one request of this name)
   -v, --var <name=value>    a variable's value; repeat for more
+      --env <name>          a Bruno collection's environment
       --env-file <file>     variables from a file of NAME=value lines (a .env file)
   -d, --data <file>         run once per row of a CSV (with a header row) or a JSON array of objects;
                             a row's values win over the other variables
@@ -87,7 +89,7 @@ Examples
 class Usage extends Error {}
 
 function parse(argv: string[]) {
-  const o = { command: '', path: '', collection: '', folder: '', vars: [] as string[], envFile: '', spec: '', data: '', files: [] as string[], protos: [] as string[], wsWait: 2, cert: '', key: '', pfx: '', passphrase: '', certHost: '', bail: false, insecure: false, timeout: 30, retries: 0, retryDelay: 1, details: false, github: true, reporters: [] as { kind: string; file: string }[], output: '', verbose: false, color: true, help: false, version: false };
+  const o = { command: '', path: '', collection: '', folder: '', vars: [] as string[], env: '', envFile: '', spec: '', data: '', files: [] as string[], protos: [] as string[], wsWait: 2, cert: '', key: '', pfx: '', passphrase: '', certHost: '', bail: false, insecure: false, timeout: 30, retries: 0, retryDelay: 1, details: false, github: true, reporters: [] as { kind: string; file: string }[], output: '', verbose: false, color: true, help: false, version: false };
   const short: Record<string, string> = { '-c': '--collection', '-f': '--folder', '-d': '--data', '-v': '--var', '-r': '--reporter', '-o': '--output', '-h': '--help' };
   const rest = [...argv];
   const positional: string[] = [];
@@ -104,6 +106,7 @@ function parse(argv: string[]) {
     if (a === '--collection') o.collection = value();
     else if (a === '--folder') o.folder = value();
     else if (a === '--var') o.vars.push(value());
+    else if (a === '--env') o.env = value();
     else if (a === '--env-file') o.envFile = value();
     else if (a === '--spec') o.spec = value();
     else if (a === '--data') o.data = value();
@@ -161,13 +164,27 @@ interface Loaded {
   collections: TreeItem[];
   /** Values the file itself brings (an OpenAPI server, a Postman collection's variables). */
   defaults: [string, string][];
+  /** Bruno: what its files use that DialCatz does not do. */
+  notes?: string[];
+  envName?: string;
 }
 
-function load(path: string): Loaded {
+function load(path: string, env: string): Loaded {
   const abs = resolve(path);
   if (!existsSync(abs)) throw new Usage(`${path} does not exist`);
   if (statSync(abs).isDirectory()) {
-    if (!isWorkspaceFolder(abs)) throw new Usage(`${path} is not a DialCatz workspace folder (no dialcatz.yml). In the app: workspace menu → Keep in a folder.`);
+    // A Bruno collection folder (#104): read as it is, with --env for its environment.
+    const bruno = isWorkspaceFolder(abs) ? [] : findCollections(abs).map((f) => readCollection(f.path));
+    if (bruno.length) {
+      const all = bruno.flatMap((b) => b.environments);
+      const names = [...new Set(all.map((e) => e.name))];
+      if (env && !names.some((n) => n.toLowerCase() === env.toLowerCase())) throw new Usage(`No environment called ${env}. There is: ${names.join(', ') || 'none'}`);
+      // Without --env: the collection's own variables, when they are all there is.
+      const chosen = env ? all.filter((e) => e.name.toLowerCase() === env.toLowerCase()) : bruno.flatMap((b) => (b.environments.length === 1 && b.environments[0].name === b.root.name ? b.environments : []));
+      return { dir: abs, name: bruno[0].root.name, items: bruno.flatMap((b) => [b.root, ...b.items]), collections: bruno.map((b) => b.root), defaults: chosen.flatMap((e) => e.variables.filter((v) => v.enabled && !(v.secret && !v.value)).map((v) => [v.key, v.value] as [string, string])), notes: [...new Set(bruno.flatMap((b) => b.notes))], envName: env };
+    }
+    if (env) throw new Usage('--env goes with a Bruno collection folder; workspace folders hold no values (use --env-file or --var)');
+    if (!isWorkspaceFolder(abs)) throw new Usage(`${path} is not a DialCatz workspace folder (no dialcatz.yml) or a Bruno collection. In the app: workspace menu → Keep in a folder.`);
     const d = readFolder(abs);
     if (d.errors.length) throw new Usage(`Some files could not be read:\n  ${d.errors.join('\n  ')}`);
     return { dir: abs, name: d.name || basename(abs), items: d.items, collections: d.items.filter((i) => i.kind === 'collection'), defaults: [] };
@@ -212,7 +229,7 @@ async function main(argv: string[]): Promise<number> {
   if (o.command !== 'run') throw new Usage(`Unknown command ${o.command}: the CLI has one, run`);
   if (!o.path) throw new Usage('Which collection? dialcatz run <path>');
 
-  const loaded = load(o.path);
+  const loaded = load(o.path, o.env);
   let collections = loaded.collections;
   if (o.collection) {
     collections = collections.filter((c) => c.name.toLowerCase() === o.collection.toLowerCase());
@@ -282,8 +299,10 @@ async function main(argv: string[]): Promise<number> {
   const tty = (machineOnStdout ? process.stderr.isTTY : process.stdout.isTTY) === true;
   const p = paint(o.color && !process.env.NO_COLOR && tty, plainMarks(process.env, process.platform, tty));
 
+  if (toTerminal && loaded.notes?.length) for (const n of loaded.notes) say(p.dim(`note: ${n}`));
+
   const runs: RunResult[] = [];
-  const options = { version: VERSION, vars, insecure: o.insecure, timeoutMs: o.timeout * 1000, bail: o.bail, spec, folder: o.folder || null, files, baseDir: loaded.dir, protoFiles: o.protos.map((f) => resolve(f)), wsWaitMs: o.wsWait * 1000, retries: o.retries, retryDelayMs: o.retryDelay * 1000, details: o.details, interactive: process.stdin.isTTY === true && process.stderr.isTTY === true && !process.env.CI, say: (text: string) => void process.stderr.write(`${text}\n`), onResult: (r: RequestResult) => void (toTerminal && requestLines(r, p, o.verbose).forEach(say)) };
+  const options = { version: VERSION, vars, envName: loaded.envName ?? '', insecure: o.insecure, timeoutMs: o.timeout * 1000, bail: o.bail, spec, folder: o.folder || null, files, baseDir: loaded.dir, protoFiles: o.protos.map((f) => resolve(f)), wsWaitMs: o.wsWait * 1000, retries: o.retries, retryDelayMs: o.retryDelay * 1000, details: o.details, interactive: process.stdin.isTTY === true && process.stderr.isTTY === true && !process.env.CI, say: (text: string) => void process.stderr.write(`${text}\n`), onResult: (r: RequestResult) => void (toTerminal && requestLines(r, p, o.verbose).forEach(say)) };
   run: for (const c of collections) {
     for (const [n, row] of (rows ?? [undefined]).entries()) {
       if (toTerminal) say(`\n${p.bold(c.name)}${row ? p.dim(`  row ${n + 1} of ${rows!.length}`) : ''}`);

@@ -1,0 +1,12 @@
+info:
+  name: Call
+  type: grpc
+  seq: 3
+grpc:
+  url: https://grpc.test:443
+  method: /pkg.Greeter/Hello
+  methodType: unary
+  message: '{"name":"x"}'
+  metadata:
+    - name: k
+      value: v

@@ -275,6 +275,11 @@ export function readActions(api: DialCatzApi, scopes: Scopes, win: WindowReads):
       const c = collectionOf(w, a.collection);
       return reply(await api.specCheck(w.id, c.id));
     }),
+    read('check_bruno_changes', 'Check a collection against its Bruno folder', 'What changed in the Bruno folder a collection was imported from since the import or the last update: items added, changed (which parts, and which of them the user edited here and keeps) and gone, and new environment variables. Nothing changes; apply_bruno_changes takes what the user picks.', OBJECT({ workspace: WORKSPACE, collection: NAME("The collection's id or name (see list_collections).") }, ['workspace', 'collection']), async (a) => {
+      const w = await workspaceOf(a.workspace);
+      const r = await api.brunoCheck(w.id, collectionOf(w, a.collection).id);
+      return reply(r ? { changes: r.changes, unchanged: r.unchanged, environments: r.environments, notes: r.notes } : {});
+    }),
     read('list_browsers', 'Browsers', 'The browsers installed here and the system default, for set_settings browser (shared with the Catzoid apps; get_settings shows the one chosen).', OBJECT(), async () => {
       const b = await api.browsers();
       return reply({ systemDefault: b.systemDefault?.name ?? null, browsers: b.list.map((x) => ({ name: x.name, path: x.path })) });

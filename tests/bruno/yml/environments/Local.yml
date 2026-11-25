@@ -1,0 +1,8 @@
+name: Local
+variables:
+  - name: host
+    value: http://127.0.0.1:47412
+  - name: baseUrl
+    value: "{{host}}/api"
+  - name: token
+    secret: true

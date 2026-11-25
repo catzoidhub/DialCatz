@@ -1,0 +1,20 @@
+meta {
+  name: Upload
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{baseUrl}}/echo
+  body: multipartForm
+  auth: none
+}
+
+body:multipart-form {
+  title: hi @contentType(text/plain)
+  pic: @file(pics/cat.png)
+}
+
+script:pre-request {
+  const fs = require('fs');
+}

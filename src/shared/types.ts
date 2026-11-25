@@ -240,6 +240,8 @@ export interface TreeItem {
   specBase?: SpecBase;
   /** Requests made from a spec (#93): the responses the spec describes, to check a response against. */
   specResponses?: SpecResponse[];
+  /** Imported from Bruno (#104): where it came from. This computer only: never synced, never in a file. */
+  bruno?: BrunoOrigin;
   /** Collections: where "Check in DBCatz" looks. This computer only (connections differ per computer): never synced. */
   database?: { conn: string; db: string };
   /** Requests: the table "Check in DBCatz" opens when the guess from the URL is wrong. This computer only. */
@@ -270,6 +272,47 @@ export interface DevcatzLink {
   specFile?: string;
   /** The site's Git remote ("github.com/owner/repo"), to find the site on a teammate's computer. */
   repo?: string;
+}
+
+/**
+ * An item imported from Bruno (main/bruno.ts): its file in the Bruno folder, and a hash of each part as it was imported,
+ * so a later check tells what Bruno changed from what the user edited here. The collection also holds the folder.
+ */
+export interface BrunoOrigin {
+  file: string;
+  base: Record<string, string>;
+  folder?: string;
+  /** Collections: Bruno's environment name → the environment it became here. */
+  environments?: Record<string, string>;
+}
+export interface BrunoChange {
+  key: string;
+  kind: 'added' | 'changed' | 'removed';
+  item: ItemKind;
+  name: string;
+  method: string;
+  /** changed: the parts that differ, and those that stay because the user edited them here. */
+  parts?: string[];
+  kept?: string[];
+}
+export interface BrunoReview {
+  collectionId: string;
+  folder: string;
+  changes: BrunoChange[];
+  unchanged: number;
+  /** New environments and variable names an update adds (values already here are never touched). */
+  environments: string[];
+  notes: string[];
+}
+/** Bruno collections found in a folder, to pick from. */
+export interface BrunoChoice {
+  token: string;
+  folder: string;
+  collections: { id: string; name: string; path: string; format: 'bru' | 'yml'; requests: number; environments: string[]; notes: string[] }[];
+}
+export interface BrunoSummary {
+  collections: { id: string; name: string; requests: number; notes: string[] }[];
+  environments: string[];
 }
 
 /** Where a collection's spec is read from (#92). */
@@ -1525,6 +1568,14 @@ export interface DialCatzApi {
   /** Shows the project in DoCatz (its compose file, ready to Up; nothing runs from the link). */
   docatzOpen(project: string): Promise<void>;
   /** Postman: pick its data export (zip), a folder or JSON files and read what is in it (null when cancelled). */
+  /** Bruno (#104): picks a folder and reads the collections in it (null: cancelled). Nothing is imported yet. */
+  brunoRead(): Promise<BrunoChoice | null>;
+  brunoImport(workspaceId: string, token: string, collections: string[]): Promise<{ workspace: Workspace; summary: BrunoSummary }>;
+  /** What changed in the Bruno folder since the import or last update. `pick`: choose the folder again. null: cancelled. */
+  brunoCheck(workspaceId: string, collectionId: string, pick?: boolean): Promise<BrunoReview | null>;
+  brunoApply(workspaceId: string, collectionId: string, pick: { add: string[]; update: string[]; remove: string[]; environments: boolean }): Promise<{ workspace: Workspace; added: number; updated: number; removed: number }>;
+  /** The collection no longer belongs to a Bruno folder; its requests stay. */
+  brunoUnlink(workspaceId: string, collectionId: string): Promise<Workspace>;
   postmanReadExport(how: 'files' | 'folder'): Promise<PostmanChoice | null>;
   /** Brings the picked collections, environments and globals of the export read last into the workspace. */
   migratePostman(workspaceId: string, token: string, pick: PostmanPick): Promise<{ workspace: Workspace; summary: PostmanSummary }>;
@@ -1692,7 +1743,7 @@ export const API_METHODS = [
   'workspaces', 'workspace', 'createWorkspace', 'renameWorkspace', 'deleteWorkspace', 'openFolderWorkspace', 'useFolder', 'stopUsingFolder', 'revealFolder', 'folderGitStatus', 'folderGitDiff', 'folderGitCommit', 'folderGitPull', 'folderGitPush', 'folderGitInit', 'folderGitAbortMerge',
   'gitState', 'gitInstall', 'gitUpdateCheck', 'gitUpdate', 'gitWatch', 'gitRepoAdd', 'gitRepoRemove', 'gitRepoLog', 'gitRevealRepo', 'gitOpenWorkspace', 'gitPickFolder', 'gitStatus', 'gitInit', 'gitDiff', 'gitStage', 'gitUnstage', 'gitDiscard', 'gitCommit', 'gitSync', 'gitCancel', 'gitLog', 'gitShow', 'gitBranches', 'gitBranch', 'gitStashes', 'gitStash', 'gitTags', 'gitTag', 'gitOperation', 'gitSquash', 'gitCherryPick', 'gitRevert', 'gitReset', 'gitRestoreFile', 'gitOpenFile', 'gitIgnoreSuggestions', 'gitIgnoreAdd', 'gitignoreRead', 'gitignoreSave', 'gitSetIdentity', 'gitAddRemote', 'gitWorktrees', 'gitWorktreeAdd', 'gitWorktreeRemove', 'gitWorktreePrune', 'gitPulls', 'gitCreatePull', 'gitCheckoutPull', 'gitAddAccount', 'gitRemoveAccount', 'gitRepos', 'gitSshKeys', 'gitSshGenerate', 'gitSshAddToAccount', 'gitClone', 'gitCancelClone', 'gitDismissClone', 'gitAccounts', 'gitCreateRemoteRepo', 'gitDevCatzAccounts', 'gitImportDevCatz', 'folderGitConnect', 'createFolderWorkspace', 'pickFolder', 'teamAdminUrl', 'appMenu', 'menuShortcuts', 'menuKey',
   'saveItems', 'deleteItems',
-  'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'specCheck', 'specApply', 'specFollow', 'specUnfollow', 'specStale', 'browsers', 'specScanFolder', 'specImportFile', 'mockList', 'mockEnvironmentRestore', 'mockStart', 'mockStop', 'mockEnvironment', 'mockSiteSpec', 'mockSiteImport', 'devcatzLinks', 'devcatzLinkSet', 'mockOpenIn', 'mockServiceSpec', 'docatzLinks', 'docatzLinkSet', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'importedBefore', 'docatzProjects', 'docatzImport', 'docatzOpen', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection', 'ciPlan', 'ciSave',
+  'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'specCheck', 'specApply', 'specFollow', 'specUnfollow', 'specStale', 'browsers', 'specScanFolder', 'specImportFile', 'mockList', 'mockEnvironmentRestore', 'mockStart', 'mockStop', 'mockEnvironment', 'mockSiteSpec', 'mockSiteImport', 'devcatzLinks', 'devcatzLinkSet', 'mockOpenIn', 'mockServiceSpec', 'docatzLinks', 'docatzLinkSet', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'importedBefore', 'docatzProjects', 'docatzImport', 'docatzOpen', 'brunoRead', 'brunoImport', 'brunoCheck', 'brunoApply', 'brunoUnlink', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection', 'ciPlan', 'ciSave',
   'aiModels', 'aiTest', 'aiAsk', 'aiExplain', 'aiTests', 'aiBody', 'aiCancel',
   'send', 'grpcDescribe', 'grpcPickProto', 'grpcCall', 'pickFile', 'pickDataFile', 'saveText', 'cancel', 'wsConnect', 'wsSend', 'wsPusherChannel', 'wsClose', 'oauthStatus', 'oauthToken', 'oauthClear', 'oauthCancel', 'oauthDiscover', 'clientCerts', 'clientCertSave', 'clientCertRemove', 'clientCertPick', 'saveResponse', 'history', 'addHistory', 'clearHistory',
   'servers', 'probeServer', 'connectWithToken', 'connectWithCode', 'refreshServer', 'disconnectServer', 'subscribeWorkspace', 'setPresence', 'presence', 'syncWorkspace', 'resolveConflict',

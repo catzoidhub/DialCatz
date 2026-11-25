@@ -2,6 +2,7 @@ import { computed, reactive, ref, toRaw, watch } from 'vue';
 import { newRequest, uid, type ConnectRequest, type McatzpAsk, type McatzpInstallProgress, type McatzpRun, type McatzpTab, type McatzpTabResponse, type DialCatzSettings, type Environment, type EnvVariable, type PresenceEntry, type WsEvent, type SseEvent, type HistoryEntry, type RequestAuth, type RequestSpec, type SendResult, type ServerConnection, type TreeItem, type Workspace, type WorkspaceSummary, type MockState } from '@shared/types';
 import { AUTO_HEADERS, buildVars, effectiveAuth, interpolate, nameFromUrl, resolveOAuth, toWire, type Vars } from '@shared/request';
 import { store } from './store';
+import { applyPatch, type RequestPatch } from '@shared/scriptpatch';
 import { requestContext, responseContext, runScript, type ScriptResult, type WsRunMessage } from './scripts';
 import { checkResponse } from '@shared/speccheck';
 
@@ -581,12 +582,13 @@ function scriptChain(itemId: string | null, kind: 'preRequest' | 'tests'): { fro
 }
 
 /** Runs scripts one after the other (each sees the variables the previous set) and merges their results. */
-async function runChain(chain: { from: string | null; code: string }[], ctx: () => Parameters<typeof runScript>[1], itemId: string | null): Promise<ScriptResult | undefined> {
+async function runChain(chain: { from: string | null; code: string }[], ctx: () => Parameters<typeof runScript>[1], itemId: string | null, after?: (r: ScriptResult) => void): Promise<ScriptResult | undefined> {
   if (!chain.length) return undefined;
   const merged: ScriptResult = { tests: [], logs: [], changes: {}, error: null };
   for (const s of chain) {
     const r = await runScript(s.code, ctx());
     await applyVarChanges(r.changes, itemId);
+    after?.(r);
     const tag = s.from ? `${s.from} · ` : '';
     merged.tests.push(...r.tests.map((t) => ({ ...t, name: tag + t.name })));
     merged.logs.push(...r.logs.map((l) => tag + l));
@@ -603,16 +605,24 @@ async function runChain(chain: { from: string | null; code: string }[], ctx: () 
  */
 export async function execute(spec: RequestSpec, itemId: string | null, token: string, data?: Record<string, string>, opts: { checkSpec?: boolean; stream?: boolean; interactive?: boolean } = {}): Promise<{ result: SendResult; scripts: { pre?: ScriptResult; tests?: ScriptResult } }> {
   const scripts: { pre?: ScriptResult; tests?: ScriptResult } = {};
-  const vars = () => new Map([...varsFor(itemId), ...Object.entries(data ?? {})]);
-  const wireNow = () => toWire(spec, vars(), effectiveAuth(spec.auth, inheritedAuth(itemId)), { version: appVersion.value });
+  // For this send only: values scripts set with dc.local, and what pre-request scripts changed of the request.
+  const locals = new Map<string, string>();
+  const patches: RequestPatch[] = [];
+  const keep = (r: ScriptResult) => Object.entries(r.locals ?? {}).forEach(([k, v]) => locals.set(k, v));
+  const vars = () => new Map([...varsFor(itemId), ...locals, ...Object.entries(data ?? {})]);
+  const wireNow = () => applyPatch(toWire(spec, vars(), effectiveAuth(spec.auth, inheritedAuth(itemId)), { version: appVersion.value }), patches, vars());
+  const names = { requestName: workspace.value?.items.find((i) => i.id === itemId)?.name ?? '', collectionName: collectionOf(itemId)?.name ?? '', envName: envFor(itemId)?.name ?? '' };
   const pre = [...scriptChain(itemId, 'preRequest'), ...(spec.preRequest?.trim() ? [{ from: null, code: spec.preRequest }] : [])];
-  scripts.pre = await runChain(pre, () => ({ request: requestContext(wireNow()), vars: Object.fromEntries(vars()), data }), itemId);
+  scripts.pre = await runChain(pre, () => ({ request: requestContext(wireNow()), vars: Object.fromEntries(vars()), data, ...names }), itemId, (r) => {
+    keep(r);
+    if (r.patch) patches.push(r.patch);
+  });
   let wire = wireNow();
   let result: SendResult;
   let messages: WsRunMessage[] | undefined;
   try {
     // OAuth 2.0: the token is got after the pre-request scripts (they may set what it is asked with).
-    if (effectiveAuth(spec.auth, inheritedAuth(itemId)).mode === 'oauth2') wire = toWire(spec, vars(), await authForSend(spec, itemId, vars(), opts.interactive === true), { version: appVersion.value });
+    if (effectiveAuth(spec.auth, inheritedAuth(itemId)).mode === 'oauth2') wire = applyPatch(toWire(spec, vars(), await authForSend(spec, itemId, vars(), opts.interactive === true), { version: appVersion.value }), patches, vars());
     if (/^wss?:\/\//i.test(wire.url)) {
       // A WebSocket request in a run (a tab connects itself instead, through toggleWs).
       const r = await wsRun(spec, wire, itemId, vars());
@@ -621,13 +631,13 @@ export async function execute(spec: RequestSpec, itemId: string | null, token: s
     } else if (isGrpcUrl(wire.url)) {
       // #98: a gRPC call. Headers are its metadata (the HTTP ones DialCatz adds by itself stay out); the body is the message.
       const auto = /^(user-agent|accept|accept-encoding|connection|cache-control|content-type|content-length|host)$/i;
-      result = await api.grpcCall(plain({ url: wire.url.split('?')[0], service: spec.grpc?.service ?? '', method: spec.grpc?.method ?? '', message: interpolate(spec.body.raw, vars()), metadata: wire.headers.filter(([k]) => !auto.test(k)), protoFiles: spec.grpc?.protoFiles, ...(insecureFor(itemId) ? { insecure: true } : {}) }), token);
+      result = await api.grpcCall(plain({ url: wire.url.split('?')[0], service: spec.grpc?.service ?? '', method: spec.grpc?.method ?? '', message: patches.some((p) => p.body !== undefined) ? (wire.body ?? '') : interpolate(spec.body.raw, vars()), metadata: wire.headers.filter(([k]) => !auto.test(k)), protoFiles: spec.grpc?.protoFiles, ...(insecureFor(itemId) ? { insecure: true } : {}) }), token);
     } else result = await api.send(plain(wire), token, { ...(insecureFor(itemId) ? { insecure: true } : {}), ...(opts.stream ? { stream: true } : {}) });
   } catch (e) {
     result = { error: String((e as Error).message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), sent: { method: wire.method, url: wire.url, headers: wire.headers, body: wire.body } };
   }
   const tests = [...scriptChain(itemId, 'tests'), ...(spec.tests?.trim() ? [{ from: null, code: spec.tests }] : [])];
-  if (result.response) scripts.tests = await runChain(tests, () => ({ request: requestContext(wire), response: responseContext(result.response!), vars: Object.fromEntries(vars()), data, ...(messages ? { messages } : {}) }), itemId);
+  if (result.response) scripts.tests = await runChain(tests, () => ({ request: requestContext(wire), response: responseContext(result.response!), vars: Object.fromEntries(vars()), data, ...names, ...(messages ? { messages } : {}) }), itemId, keep);
   // #93: the runner's "Check responses against the spec" counts as one more test.
   const specResponses = opts.checkSpec && !messages ? workspace.value?.items.find((i) => i.id === itemId)?.specResponses : undefined;
   if (result.response && specResponses?.length) {

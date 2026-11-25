@@ -1,3 +1,4 @@
+import { readPatch, textRecord, type RequestPatch } from '@shared/scriptpatch';
 import { Worker } from 'node:worker_threads';
 import sandbox from '../src/renderer/public/sandbox.html?raw';
 
@@ -13,9 +14,14 @@ export interface ScriptResult {
   logs: string[];
   changes: Record<string, string | null>;
   error: string | null;
+  locals?: Record<string, string>;
+  patch?: RequestPatch;
 }
 export interface ScriptContext {
-  request: { method: string; url: string; headers: Record<string, string> };
+  request: { method: string; url: string; headers: Record<string, string>; body?: string };
+  requestName?: string;
+  collectionName?: string;
+  envName?: string;
   response?: { status: number; statusText: string; headers: Record<string, string>; body: string; time: number; size: number };
   vars: Record<string, string>;
   data?: Record<string, string>;
@@ -48,7 +54,7 @@ export function runScript(code: string, ctx: ScriptContext): Promise<ScriptResul
       resolve(r);
     };
     const timer = setTimeout(() => finish(none(`The script ran longer than ${TIMEOUT / 1000} s and was stopped`)), TIMEOUT);
-    w.on('message', (d: Partial<ScriptResult>) => finish({ tests: Array.isArray(d.tests) ? d.tests : [], logs: Array.isArray(d.logs) ? d.logs.map(String) : [], changes: d.changes && typeof d.changes === 'object' ? d.changes : {}, error: d.error ? String(d.error) : null }));
+    w.on('message', (d: Partial<ScriptResult>) => finish({ tests: Array.isArray(d.tests) ? d.tests : [], logs: Array.isArray(d.logs) ? d.logs.map(String) : [], changes: d.changes && typeof d.changes === 'object' ? d.changes : {}, error: d.error ? String(d.error) : null, locals: textRecord(d.locals), patch: readPatch(d.patch) }));
     w.on('error', (e) => finish(none(e.message || 'The script failed')));
     w.on('exit', () => finish(none('The script stopped without an answer')));
     w.postMessage({ id: '1', code, ctx });

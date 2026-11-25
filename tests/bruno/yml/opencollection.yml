@@ -1,0 +1,18 @@
+opencollection: 1.0.0
+info:
+  name: Shop yml
+request:
+  auth:
+    type: bearer
+    token: "{{token}}"
+  headers:
+    - name: X-Team
+      value: cats
+  variables:
+    - name: region
+      value: eu
+  scripts:
+    - type: tests
+      code: |-
+        test("collection test ran", () => expect(res.status).to.be.a('number'));
+docs: Shop docs

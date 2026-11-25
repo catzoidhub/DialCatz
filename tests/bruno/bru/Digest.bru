@@ -1,0 +1,21 @@
+meta {
+  name: Digest
+  type: http
+  seq: 10
+}
+
+put {
+  url: {{baseUrl}}/echo
+  body: formUrlEncoded
+  auth: digest
+}
+
+auth:digest {
+  username: a
+  password: b
+}
+
+body:form-urlencoded {
+  a: 1
+  ~b: 2
+}
