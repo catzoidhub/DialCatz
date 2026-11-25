@@ -1,0 +1,14 @@
+type: http_request
+model: "http_request"
+id: "rq_2"
+workspaceId: "wk_1"
+folderId: null
+name: "Create"
+method: "POST"
+url: "${[ base_url ]}/echo"
+bodyType: "application/json"
+body: {"text": "{\"id\":\"${[ uuid.v4() ]}\",\"x\":\"${[ response.body.path(request='rq_1', path='$.id') ]}\"}"}
+headers: []
+authenticationType: "basic"
+authentication: {"username": "u", "password": "${[ secure(value='YENC_y') ]}"}
+sortPriority: 2

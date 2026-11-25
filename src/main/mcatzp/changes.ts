@@ -445,12 +445,12 @@ export function changeActions(api: DialCatzApi, scopes: Scopes, command: WindowC
       await api.devcatzLinkSet(w.id, collectionOf(w, a.collection).id, a.site ? String(a.site) : null, String(a.app ?? ''));
       return done({});
     }),
-    asked('import_text', 'Import text', 'Text as a new collection: a Postman collection, an OpenAPI / Swagger document (JSON or YAML), a DialCatz export or a cURL command.', { workspace: WORKSPACE, text: S('The text.', 5_000_000) }, ['workspace', 'text'], async (a) => {
+    asked('import_text', 'Import text', 'Text as a new collection: a Postman, Insomnia, Hoppscotch or Yaak collection, an OpenAPI / Swagger document (JSON or YAML), a DialCatz export or a cURL command.', { workspace: WORKSPACE, text: S('The text.', 5_000_000) }, ['workspace', 'text'], async (a) => {
       const w = await writeOf(a.workspace);
       return q(`Import this into ${w.name}?`, [{ label: 'Text', value: short(maskText(String(a.text), await secrets()), 300) }], { workspaceId: w.id, section: 'requests' });
     }, async (a) => {
       const r = await api.importText((await writeOf(a.workspace)).id, String(a.text));
-      return done({ collection: r.collectionId, requests: r.count });
+      return done({ collection: r.collectionId, requests: r.count, notes: r.notes });
     }),
   ];
 
@@ -799,7 +799,12 @@ export function changeActions(api: DialCatzApi, scopes: Scopes, command: WindowC
       await windowUp();
       const r = await api.importFile((await writeOf(a.workspace)).id);
       if (!r) return done({ cancelled: true });
-      return done(r.kind === 'collection' ? { collection: r.collectionId, requests: r.count } : choiceOut(r.choice));
+      return done(r.kind === 'collection' ? { collection: r.collectionId, requests: r.count, notes: r.notes } : choiceOut(r.choice));
+    }),
+    asked('read_app_export', "Read another app's export", 'The user picks what Hoppscotch, Insomnia or Yaak exported (or, for Yaak and Insomnia, the folder it keeps its files in) in a dialog. Answers with what is in it: import_choice brings what you pick, and says what did not come along whole.', { app: { type: 'string', enum: ['hoppscotch', 'insomnia', 'yaak'] }, how: { type: 'string', enum: ['files', 'folder'] } }, ['app'], async (a) => q(`Pick a ${String(a.app)} export to read?`, [{ label: 'Picks', value: a.how === 'folder' ? 'A folder, next' : 'Files, next' }], null), async (a) => {
+      await windowUp();
+      const r = await api.appExportRead(a.app as 'hoppscotch' | 'insomnia' | 'yaak', a.how === 'folder' ? 'folder' : 'files');
+      return done(r ? choiceOut(r) : { cancelled: true });
     }),
     asked('read_bruno_folder', 'Read a Bruno folder', 'The user picks a Bruno collection (or a folder that holds some) in a dialog. Answers with the collections in it and what will need a look after the import: import_from_bruno brings the ones picked. Bruno\'s files are only read.', {}, [], async () => q('Pick a Bruno folder to read?', [{ label: 'Folder', value: 'You pick it next' }], null), async () => {
       await windowUp();
@@ -843,7 +848,7 @@ export function changeActions(api: DialCatzApi, scopes: Scopes, command: WindowC
       return q(`Import into ${w.name}?`, [...fact('Collections', ((a.collections ?? []) as string[]).length || null), ...fact('Environments', ((a.environments ?? []) as string[]).length || null), ...fact('Globals', a.globals ? 'Yes' : null)], { workspaceId: w.id, section: 'requests' });
     }, async (a) => {
       const r = await api.migratePostman((await writeOf(a.workspace)).id, String(a.token), { collections: (a.collections ?? []) as string[], environments: (a.environments ?? []) as string[], globals: a.globals === true });
-      return done({ summary: { collections: r.summary.collections.length, environments: r.summary.environments.length, skipped: r.summary.skipped.length } });
+      return done({ summary: { collections: r.summary.collections.length, environments: r.summary.environments.length, skipped: r.summary.skipped.length }, notes: r.summary.collections.filter((c) => c.notes.length).map((c) => ({ collection: c.name, notes: c.notes })) });
     }),
     asked('import_environment_files', 'Import environment files', 'The user picks Postman or DialCatz environment files, or a Postman export zip, in a dialog.', { workspace: WORKSPACE }, ['workspace'], async (a) => {
       const w = await writeOf(a.workspace);

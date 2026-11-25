@@ -1,0 +1,12 @@
+type: grpc_request
+model: "grpc_request"
+id: "gr_1"
+workspaceId: "wk_1"
+folderId: null
+name: "Call"
+url: "https://g.test"
+service: "pkg.Svc"
+method: "Hello"
+message: "{}"
+metadata: []
+sortPriority: 5

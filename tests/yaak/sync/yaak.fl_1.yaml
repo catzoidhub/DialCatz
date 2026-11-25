@@ -1,0 +1,10 @@
+type: folder
+model: "folder"
+id: "fl_1"
+workspaceId: "wk_1"
+folderId: null
+name: "Users"
+sortPriority: 1
+headers: [{"name": "X-Echo", "value": "${[ who ]}"}]
+authenticationType: null
+authentication: {}

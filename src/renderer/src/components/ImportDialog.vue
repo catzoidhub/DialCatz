@@ -7,7 +7,7 @@ import Icon from './Icon.vue';
 import devcatzLogo from '../assets/logos/devcatz.svg';
 import docatzLogo from '../assets/logos/docatz.png';
 import { openDownload } from '../download';
-import { BRUNO_MARK } from '../marks';
+import { BRUNO_MARK, HOPPSCOTCH_MARK, INSOMNIA_MARK, YAAK_MARK } from '../marks';
 
 /**
  * Bringing requests in: a file or pasted text (Postman collection, OpenAPI / Swagger in JSON or YAML, DialCatz
@@ -16,7 +16,7 @@ import { BRUNO_MARK } from '../marks';
  * and Postman last) and shows the form once one is picked; a link from DevCatz / DoCatz or the Postman shortcut opens
  * its form straight away.
  */
-type Mode = 'choose' | 'file' | 'project' | 'postman' | 'bruno' | 'devcatz' | 'docatz';
+type Mode = 'choose' | 'file' | 'project' | 'postman' | 'bruno' | 'hoppscotch' | 'insomnia' | 'yaak' | 'notes' | 'devcatz' | 'docatz';
 const props = withDefaults(defineProps<{ tab?: Mode; siteId?: string; project?: string; service?: string }>(), { tab: 'choose', siteId: '', project: '', service: '' });
 const emit = defineEmits<{ done: [collectionId: string | null]; cancel: [] }>();
 const api = window.dialcatz;
@@ -51,9 +51,16 @@ async function guard<T>(fn: () => Promise<T>): Promise<T | undefined> {
 
 // ---------------------------------------------------------------- file / paste
 
-async function finish(r: { workspace: Workspace; collectionId: string; count: number } | null | undefined) {
+/** One collection came in with things to look at: they stay on screen. */
+const oneDone = ref<{ collectionId: string; count: number; notes: string[] } | null>(null);
+async function finish(r: { workspace: Workspace; collectionId: string; count: number; notes: string[] } | null | undefined) {
   if (!r) return;
   use(r.workspace);
+  if (r.notes.length) {
+    oneDone.value = { collectionId: r.collectionId, count: r.count, notes: r.notes };
+    mode.value = 'notes';
+    return;
+  }
   notify('success', `Imported ${r.count} request${r.count === 1 ? '' : 's'}`);
   emit('done', r.collectionId);
 }
@@ -108,7 +115,7 @@ async function migrate(how: 'files' | 'folder') {
   const r = await guard(() => api.postmanReadExport(how));
   if (r) choose(r);
 }
-const TITLES = { choose: 'Import', file: 'Import a file or text', project: 'OpenAPI in a project', postman: 'Move from Postman', bruno: 'Move from Bruno', devcatz: 'Import from DevCatz', docatz: 'Import from DoCatz' } as const;
+const TITLES = { choose: 'Import', file: 'Import a file or text', project: 'OpenAPI in a project', postman: 'Move from Postman', bruno: 'Move from Bruno', hoppscotch: 'Move from Hoppscotch', insomnia: 'Move from Insomnia', yaak: 'Move from Yaak', notes: 'Imported', devcatz: 'Import from DevCatz', docatz: 'Import from DoCatz' } as const;
 /** Files picked under "File or paste" that hold more than one collection: the same pick-what-comes-in list. */
 const bundle = ref(false);
 const title = computed(() => (bundle.value && mode.value === 'postman' ? 'Import — choose what comes in' : TITLES[mode.value]));
@@ -227,6 +234,17 @@ async function pmImport() {
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 const totalRequests = computed(() => summary.value?.collections.reduce((n, c) => n + c.requests, 0) ?? 0);
 
+// ---------------------------------------------------------------- Hoppscotch, Insomnia, Yaak (#105, #106)
+
+/** Their files open the same pick-what-comes-in list as a Postman export. */
+async function appPick(how: 'files' | 'folder') {
+  const r = await guard(() => api.appExportRead(mode.value as 'hoppscotch' | 'insomnia' | 'yaak', how));
+  if (!r) return;
+  bundle.value = true;
+  mode.value = 'postman';
+  choose(r);
+}
+
 // ---------------------------------------------------------------- Bruno (#104)
 
 const brChoice = ref<BrunoChoice | null>(null);
@@ -245,8 +263,10 @@ async function brImport() {
   use(r.workspace);
   brSummary.value = r.summary;
 }
-async function brCopy() {
-  await navigator.clipboard.writeText(brSummary.value!.collections.flatMap((c) => [`${c.name}:`, ...c.notes.map((n) => `- ${n}`)]).join('\n'));
+/** The list of what to look at, whichever import made it. */
+async function copyNotes() {
+  const all = oneDone.value ? [{ name: '', notes: oneDone.value.notes }] : (brSummary.value ?? summary.value)!.collections;
+  await navigator.clipboard.writeText(all.filter((c) => c.notes.length).flatMap((c) => [...(c.name ? [`${c.name}:`] : []), ...c.notes.map((n) => `- ${n}`)]).join('\n'));
   notify('success', 'List copied');
 }
 
@@ -362,69 +382,103 @@ async function importProject() {
 
 <template>
   <dialog open class="modal modal-open" @keydown.esc="!busy && emit('cancel')">
-    <div class="modal-box max-w-[95vw] space-y-4" :class="mode === 'choose' ? 'w-[34rem]' : 'w-[46rem]'">
+    <div class="modal-box w-[46rem] max-w-[95vw] space-y-4">
       <div class="flex items-center gap-2">
-        <button v-if="mode !== 'choose' && !summary && !brSummary" class="btn btn-ghost btn-sm btn-square -ml-2" title="Other ways to import" aria-label="Other ways to import" :disabled="busy" @click="pickMode('choose')"><Icon name="chevron" class="size-4 rotate-180" /></button>
+        <button v-if="mode !== 'choose' && !summary && !brSummary && !oneDone" class="btn btn-ghost btn-sm btn-square -ml-2" title="Other ways to import" aria-label="Other ways to import" :disabled="busy" @click="pickMode('choose')"><Icon name="chevron" class="size-4 rotate-180" /></button>
         <h3 class="flex-1 text-lg font-semibold tracking-tight">{{ title }}<span class="font-normal opacity-50"> · {{ workspace?.name }}</span></h3>
       </div>
 
-      <!-- The choice -->
+      <!-- The choice: what it comes from, in three groups -->
       <template v-if="mode === 'choose'">
-        <div class="space-y-2">
-          <button class="opt-card" @click="pickMode('file')">
-            <span class="opt-card-icon"><Icon name="file" class="size-5" /></span>
-            <span class="min-w-0 flex-1">
-              <span class="opt-card-title">File or paste</span>
-              <span class="opt-card-text">A collection, environment or export zip (DialCatz or Postman), OpenAPI / Swagger, or a cURL command</span>
-            </span>
-            <Icon name="chevron" class="size-4 shrink-0 opacity-40" />
-          </button>
-          <button class="opt-card" @click="pickMode('project')">
-            <span class="opt-card-icon"><Icon name="folder" class="size-5" /></span>
-            <span class="min-w-0 flex-1">
-              <span class="opt-card-title">OpenAPI in a project</span>
-              <span class="opt-card-text">Pick a project folder: DialCatz finds its OpenAPI / Swagger files, and each collection keeps following its file</span>
-            </span>
-            <Icon name="chevron" class="size-4 shrink-0 opacity-40" />
-          </button>
-          <button class="opt-card" @click="pickMode('devcatz')">
-            <span class="opt-card-icon"><img :src="devcatzLogo" alt="" draggable="false" /></span>
-            <span class="min-w-0 flex-1">
-              <span class="opt-card-title">From DevCatz<span v-if="notInstalled" class="badge badge-ghost badge-xs font-normal">not installed</span></span>
-              <span class="opt-card-text">A local site's environment and its routes, ready to send</span>
-            </span>
-            <Icon name="chevron" class="size-4 shrink-0 opacity-40" />
-          </button>
-          <button class="opt-card" @click="pickMode('docatz')">
-            <span class="opt-card-icon"><img :src="docatzLogo" alt="" draggable="false" /></span>
-            <span class="min-w-0 flex-1">
-              <span class="opt-card-title">From DoCatz<span v-if="dcNotInstalled" class="badge badge-ghost badge-xs font-normal">not installed</span></span>
-              <span class="opt-card-text">A compose project's services as an environment, and their routes, ready to send</span>
-            </span>
-            <Icon name="chevron" class="size-4 shrink-0 opacity-40" />
-          </button>
-          <button class="opt-card" @click="pickMode('bruno')">
-            <span class="opt-card-icon" style="--tile: #f4aa41"><svg viewBox="0 0 24 24" class="size-6" fill="currentColor" aria-hidden="true"><path :d="BRUNO_MARK" /></svg></span>
-            <span class="min-w-0 flex-1">
-              <span class="opt-card-title">Move from Bruno</span>
-              <span class="opt-card-text">A Bruno folder (.bru or OpenCollection YAML) with its environments, scripts and assertions</span>
-            </span>
-            <Icon name="chevron" class="size-4 shrink-0 opacity-40" />
-          </button>
-          <button class="opt-card" @click="pickMode('postman')">
-            <span class="opt-card-icon" style="--tile: #ff6c37"><svg viewBox="0 0 24 24" class="size-5" fill="currentColor" aria-hidden="true"><path :d="POSTMAN_MARK" /></svg></span>
-            <span class="min-w-0 flex-1">
-              <span class="opt-card-title">Move everything from Postman</span>
-              <span class="opt-card-text">Collections, environments and globals, picked one by one — from an export or with your Postman API key</span>
-            </span>
-            <Icon name="chevron" class="size-4 shrink-0 opacity-40" />
-          </button>
-        </div>
+        <section class="imp-group">
+          <h4 class="label-caps">From a file or project</h4>
+          <div class="imp-grid">
+            <button class="opt-card" @click="pickMode('file')">
+              <span class="opt-card-icon"><Icon name="file" class="size-5" /></span>
+              <span class="min-w-0 flex-1">
+                <span class="opt-card-title">File or paste</span>
+                <span class="opt-card-text">A collection, an export, OpenAPI or cURL</span>
+              </span>
+            </button>
+            <button class="opt-card" @click="pickMode('project')">
+              <span class="opt-card-icon"><Icon name="folder" class="size-5" /></span>
+              <span class="min-w-0 flex-1">
+                <span class="opt-card-title">OpenAPI in a project</span>
+                <span class="opt-card-text">Found in a folder, and followed from then on</span>
+              </span>
+            </button>
+          </div>
+        </section>
+        <section class="imp-group">
+          <h4 class="label-caps">From your Catzoid apps</h4>
+          <div class="imp-grid">
+            <button class="opt-card" @click="pickMode('devcatz')">
+              <span class="opt-card-icon"><img :src="devcatzLogo" alt="" draggable="false" /></span>
+              <span class="min-w-0 flex-1">
+                <span class="opt-card-title">DevCatz<span v-if="notInstalled" class="badge badge-ghost badge-xs font-normal">not installed</span></span>
+                <span class="opt-card-text">A site's environment and its routes</span>
+              </span>
+            </button>
+            <button class="opt-card" @click="pickMode('docatz')">
+              <span class="opt-card-icon"><img :src="docatzLogo" alt="" draggable="false" /></span>
+              <span class="min-w-0 flex-1">
+                <span class="opt-card-title">DoCatz<span v-if="dcNotInstalled" class="badge badge-ghost badge-xs font-normal">not installed</span></span>
+                <span class="opt-card-text">A compose project's services and routes</span>
+              </span>
+            </button>
+          </div>
+        </section>
+        <section class="imp-group">
+          <h4 class="label-caps">Move from another app</h4>
+          <div class="imp-grid is-apps">
+            <button class="opt-card" @click="pickMode('postman')">
+              <span class="opt-card-icon" style="--tile: #ff6c37"><svg viewBox="0 0 24 24" class="size-5" fill="currentColor" aria-hidden="true"><path :d="POSTMAN_MARK" /></svg></span>
+              <span class="min-w-0">
+                <span class="opt-card-title">Postman</span>
+                <span class="opt-card-text">An export, or your API key</span>
+              </span>
+            </button>
+            <button class="opt-card" @click="pickMode('insomnia')">
+              <span class="opt-card-icon" style="--tile: #8b5cf6"><svg viewBox="0 0 24 24" class="size-5" fill="currentColor" aria-hidden="true"><path :d="INSOMNIA_MARK" /></svg></span>
+              <span class="min-w-0">
+                <span class="opt-card-title">Insomnia</span>
+                <span class="opt-card-text">Exported YAML or JSON</span>
+              </span>
+            </button>
+            <button class="opt-card" @click="pickMode('bruno')">
+              <span class="opt-card-icon" style="--tile: #f4aa41"><svg viewBox="0 0 24 24" class="size-6" fill="currentColor" aria-hidden="true"><path :d="BRUNO_MARK" /></svg></span>
+              <span class="min-w-0">
+                <span class="opt-card-title">Bruno</span>
+                <span class="opt-card-text">A folder, .bru or YAML</span>
+              </span>
+            </button>
+            <button class="opt-card" @click="pickMode('hoppscotch')">
+              <span class="opt-card-icon" style="--tile: #10b981"><svg viewBox="0 0 24 24" class="size-5" fill="currentColor" aria-hidden="true"><path :d="HOPPSCOTCH_MARK" /></svg></span>
+              <span class="min-w-0">
+                <span class="opt-card-title">Hoppscotch</span>
+                <span class="opt-card-text">Exported JSON files</span>
+              </span>
+            </button>
+            <button class="opt-card" @click="pickMode('yaak')">
+              <span class="opt-card-icon" style="--tile: #a27bf0"><svg viewBox="0 0 24 24" class="size-5" fill="currentColor" aria-hidden="true"><path :d="YAAK_MARK" /></svg></span>
+              <span class="min-w-0">
+                <span class="opt-card-title">Yaak</span>
+                <span class="opt-card-text">An export, or a folder</span>
+              </span>
+            </button>
+          </div>
+        </section>
+      </template>
+
+      <!-- After an import: what did not come along whole -->
+      <template v-else-if="mode === 'notes'">
+        <div class="flex items-center gap-3"><CatMood mood="info" class="size-10" /><p class="text-sm">Imported {{ plural(oneDone!.count, 'request') }}. A few things are worth a look.</p></div>
+        <div class="imp-notes"><ul class="selectable"><li v-for="n in oneDone!.notes" :key="n">{{ n }}</li></ul></div>
       </template>
 
       <!-- File or paste -->
       <template v-else-if="mode === 'file'">
-        <p class="text-sm opacity-70">Postman collections (v2 / v2.1), OpenAPI 3 or Swagger 2 (JSON or YAML), DialCatz exports, or a single cURL command. One collection goes straight in; an export zip (DialCatz or Postman), several files or environment files let you choose what comes in.</p>
+        <p class="text-sm opacity-70">Postman, Insomnia, Hoppscotch and Yaak exports, OpenAPI 3 or Swagger 2 (JSON or YAML), DialCatz exports, or a single cURL command. One collection goes straight in; an export zip (DialCatz or Postman), several files or environment files let you choose what comes in.</p>
         <button class="btn btn-sm gap-2" :disabled="busy" @click="fromFile"><Icon name="file" class="size-4" />Choose a file…</button>
         <div class="divider my-0 text-xs opacity-50">or paste</div>
         <textarea v-model="text" class="textarea selectable h-44 w-full font-mono text-xs" placeholder="{ &quot;info&quot;: …, &quot;item&quot;: [ … ] }   openapi: 3.0.0 …   curl https://api.example.com/users" spellcheck="false" />
@@ -451,6 +505,30 @@ async function importProject() {
       </template>
 
       <!-- Postman -->
+      <template v-else-if="mode === 'hoppscotch'">
+        <p class="text-sm opacity-70">In Hoppscotch, open <b>Collections → Import / Export → Export as JSON</b>, and the same under <b>Environments</b>. Choose all those files here at once, then pick what comes in.</p>
+        <button class="btn btn-sm gap-2" :disabled="busy" @click="appPick('files')"><span v-if="busy" class="loading loading-spinner loading-xs" /><Icon v-else name="file" class="size-4" />Choose Hoppscotch files…</button>
+        <p class="text-xs opacity-60">Requests, GraphQL, folders, auth, headers, variables and scripts (<code>pw</code>, <code>hopp</code>, <code>pm</code>) come in. Values of secret variables are not in the export: you fill them in once.</p>
+      </template>
+
+      <template v-else-if="mode === 'insomnia'">
+        <p class="text-sm opacity-70">In Insomnia, open a collection's menu and choose <b>Export</b> (Insomnia v5 YAML), or use an older JSON export. Choose the files here, or the folder of a project kept in Git.</p>
+        <div class="flex gap-2">
+          <button class="btn btn-sm gap-2" :disabled="busy" @click="appPick('files')"><span v-if="busy" class="loading loading-spinner loading-xs" /><Icon v-else name="file" class="size-4" />Choose Insomnia files…</button>
+          <button class="btn btn-ghost btn-sm gap-2" :disabled="busy" @click="appPick('folder')"><Icon name="folder" class="size-4" />Choose a folder…</button>
+        </div>
+        <p class="text-xs opacity-60">Requests, GraphQL, gRPC, WebSocket and Socket.IO, folders, auth, environments and scripts (<code>insomnia</code>, <code>pm</code>) come in. Encrypted values are not in the export, and template tags are listed for you to replace.</p>
+      </template>
+
+      <template v-else-if="mode === 'yaak'">
+        <p class="text-sm opacity-70">In Yaak, use <b>Export Data</b> for a JSON file, or choose the folder a workspace syncs to.</p>
+        <div class="flex gap-2">
+          <button class="btn btn-sm gap-2" :disabled="busy" @click="appPick('files')"><span v-if="busy" class="loading loading-spinner loading-xs" /><Icon v-else name="file" class="size-4" />Choose Yaak files…</button>
+          <button class="btn btn-ghost btn-sm gap-2" :disabled="busy" @click="appPick('folder')"><Icon name="folder" class="size-4" />Choose a sync folder…</button>
+        </div>
+        <p class="text-xs opacity-60">Requests, GraphQL, gRPC and WebSocket, folders, auth and environments come in. A sync folder holds shared environments only. Encrypted values stay in Yaak, and template functions are listed for you to replace.</p>
+      </template>
+
       <template v-else-if="mode === 'bruno'">
         <template v-if="brSummary">
           <div class="flex items-center gap-3"><CatMood :mood="brSummary.collections.some((c) => c.notes.length) ? 'info' : 'success'" class="size-10" /><p class="text-sm">Imported {{ plural(brSummary.collections.reduce((n, c) => n + c.requests, 0), 'request') }} in {{ plural(brSummary.collections.length, 'collection') }}<template v-if="brSummary.environments.length"> and {{ plural(brSummary.environments.length, 'environment') }}</template>. Your Bruno files are as they were.</p></div>
@@ -588,6 +666,10 @@ async function importProject() {
             <p v-for="c in summary.collections" :key="c.name"><Icon name="collection" class="inline size-4 opacity-60" /> {{ c.name }} <span class="opacity-50">· {{ plural(c.requests, 'request') }}</span></p>
             <p v-for="e in summary.environments" :key="e"><Icon name="environments" class="inline size-4 opacity-60" /> {{ e }}</p>
           </div>
+          <div v-for="c in summary.collections.filter((x) => x.notes.length)" :key="`n-${c.name}`" class="imp-notes">
+            <p class="text-sm font-semibold">{{ c.name }} <span class="font-normal opacity-50">· {{ plural(c.notes.length, 'thing') }} to look at</span></p>
+            <ul class="selectable"><li v-for="n in c.notes" :key="n">{{ n }}</li></ul>
+          </div>
           <details v-if="summary.skipped.length" class="text-xs opacity-70"><summary>{{ summary.skipped.length }} {{ pmHow === 'key' ? 'item(s)' : 'file(s)' }} skipped</summary><p v-for="f in summary.skipped" :key="f" class="font-mono">{{ f }}</p></details>
         </template>
       </template>
@@ -701,12 +783,13 @@ async function importProject() {
       <div v-if="error" class="alert alert-error alert-soft text-sm"><CatMood mood="error" class="size-7 shrink-0 -my-0.5" /><span>{{ error }}</span></div>
       <div class="modal-action">
         <button v-if="mode === 'postman' && pmChoice && !summary" class="btn btn-ghost btn-sm mr-auto" :disabled="busy" @click="pmBack">Back</button>
-        <button class="btn btn-ghost btn-sm" :disabled="busy" @click="brSummary ? emit('done', brSummary.collections[0]?.id ?? null) : emit('cancel')">{{ summary || brSummary ? 'Close' : 'Cancel' }}</button>
+        <button class="btn btn-ghost btn-sm" :disabled="busy" @click="oneDone ? emit('done', oneDone.collectionId) : brSummary ? emit('done', brSummary.collections[0]?.id ?? null) : emit('cancel')">{{ summary || brSummary || oneDone ? 'Close' : 'Cancel' }}</button>
         <button v-if="mode === 'file'" class="btn btn-primary btn-sm" :disabled="busy || !text.trim()" @click="fromText"><span v-if="busy" class="loading loading-spinner loading-xs" />Import</button>
         <button v-if="mode === 'project' && scan?.found.length" class="btn btn-primary btn-sm" :disabled="busy || !picked.size" @click="importPicked"><span v-if="busy" class="loading loading-spinner loading-xs" />Import {{ picked.size || '' }}</button>
-        <button v-else-if="mode === 'bruno' && brSummary" class="btn btn-sm" :disabled="!brSummary.collections.some((c) => c.notes.length)" @click="brCopy"><Icon name="copy" class="size-4" />Copy the list</button>
+        <button v-else-if="mode === 'bruno' && brSummary" class="btn btn-sm" :disabled="!brSummary.collections.some((c) => c.notes.length)" @click="copyNotes"><Icon name="copy" class="size-4" />Copy the list</button>
         <button v-else-if="mode === 'bruno' && brChoice" class="btn btn-primary btn-sm" :disabled="busy || !brPicked.length" @click="brImport"><span v-if="busy" class="loading loading-spinner loading-xs" />Import {{ plural(brPicked.length, 'collection') }}</button>
-        <button v-else-if="mode === 'postman' && summary" class="btn btn-primary btn-sm" @click="emit('done', null)">Done</button>
+        <button v-if="(mode === 'postman' && summary?.collections.some((c) => c.notes.length)) || mode === 'notes'" class="btn btn-sm gap-1.5" @click="copyNotes"><Icon name="copy" class="size-4" />Copy the list</button>
+        <button v-if="mode === 'postman' && summary" class="btn btn-primary btn-sm" @click="emit('done', null)">Done</button>
         <button v-else-if="mode === 'postman' && pmChoice" class="btn btn-primary btn-sm" :disabled="busy || pmNothing" @click="pmImport">
           <span v-if="busy" class="loading loading-spinner loading-xs" />{{ pmChoice.token ? 'Import' : 'Move' }} {{ plural(pmPick.collections.length, 'collection') }}<template v-if="pmPick.environments.length"> and {{ plural(pmPick.environments.length, 'environment') }}</template>
         </button>
@@ -717,3 +800,57 @@ async function importProject() {
     <div class="modal-backdrop" @click="!busy && emit('cancel')" />
   </dialog>
 </template>
+
+<style scoped>
+.imp-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.imp-group + .imp-group {
+  margin-top: 1.25rem;
+}
+.imp-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.625rem;
+}
+.imp-grid > .opt-card {
+  height: 100%;
+}
+/* Apps side by side: the mark above the name. */
+.imp-grid.is-apps {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.imp-grid.is-apps > .opt-card {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.625rem;
+  padding: 0.75rem;
+}
+@media (max-width: 44rem) {
+  .imp-grid,
+  .imp-grid.is-apps {
+    grid-template-columns: 1fr;
+  }
+  .imp-grid.is-apps > .opt-card {
+    flex-direction: row;
+    align-items: center;
+  }
+}
+.imp-notes {
+  padding: 0.75rem 0.875rem;
+  border-radius: 0.875rem;
+  border: 1px solid oklch(from var(--color-base-content) l c h / 0.1);
+}
+.imp-notes ul {
+  max-height: 14rem;
+  margin-top: 0.25rem;
+  padding-left: 1.25rem;
+  overflow-y: auto;
+  list-style: disc;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  opacity: 0.8;
+}
+</style>

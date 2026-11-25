@@ -1259,7 +1259,7 @@ export interface DbCatzTarget {
 
 /** What a Postman migration found (and imported). */
 export interface PostmanSummary {
-  collections: { name: string; requests: number }[];
+  collections: { name: string; requests: number; notes: string[] }[];
   environments: string[];
   globals: number;
   skipped: string[];
@@ -1485,7 +1485,7 @@ export interface DialCatzApi {
   /** Groups, favourites and sort order of the sidebar (this computer only). */
   saveLayout(workspaceId: string, layout: SidebarLayout): Promise<Workspace>;
   /** Imports a Postman v2 collection, an OpenAPI 3 document or a DialCatz export (JSON / YAML text) as a collection. */
-  importText(workspaceId: string, text: string): Promise<{ workspace: Workspace; collectionId: string; count: number }>;
+  importText(workspaceId: string, text: string): Promise<{ workspace: Workspace; collectionId: string; count: number; notes: string[] }>;
   /** #92: how a collection differs from its spec now (reads the file, URL, or the DevCatz / DoCatz routes). */
   specCheck(workspaceId: string, collectionId: string): Promise<SpecReview>;
   /** #92: takes the picked changes (route keys) from the spec the last specCheck read; the rest are marked as seen. */
@@ -1541,7 +1541,7 @@ export interface DialCatzApi {
    * Picks files: one collection file goes straight in (`collection`); an export zip, several files or an environment
    * file come back as a list to pick from (`choice`, then migratePostman with its token). Null when cancelled.
    */
-  importFile(workspaceId: string): Promise<{ kind: 'collection'; workspace: Workspace; collectionId: string; count: number } | { kind: 'choice'; choice: PostmanChoice } | null>;
+  importFile(workspaceId: string): Promise<{ kind: 'collection'; workspace: Workspace; collectionId: string; count: number; notes: string[] } | { kind: 'choice'; choice: PostmanChoice } | null>;
   /** Copies a collection into another workspace: a new copy (named), or replacing / merging into one of the same name. */
   copyCollection(fromWorkspaceId: string, collectionId: string, toWorkspaceId: string, mode: 'new' | 'replace' | 'merge', name: string): Promise<{ workspace: Workspace; collectionId: string }>;
   /** DevCatz: its local sites; an environment and / or a collection of routes for one of them. */
@@ -1568,6 +1568,8 @@ export interface DialCatzApi {
   /** Shows the project in DoCatz (its compose file, ready to Up; nothing runs from the link). */
   docatzOpen(project: string): Promise<void>;
   /** Postman: pick its data export (zip), a folder or JSON files and read what is in it (null when cancelled). */
+  /** Hoppscotch, Insomnia, Yaak (#105, #106): picks exported files (or Yaak's folder) and reads what is in them, to pick from; migratePostman brings it. */
+  appExportRead(app: 'hoppscotch' | 'insomnia' | 'yaak', how: 'files' | 'folder'): Promise<PostmanChoice | null>;
   /** Bruno (#104): picks a folder and reads the collections in it (null: cancelled). Nothing is imported yet. */
   brunoRead(): Promise<BrunoChoice | null>;
   brunoImport(workspaceId: string, token: string, collections: string[]): Promise<{ workspace: Workspace; summary: BrunoSummary }>;
@@ -1743,7 +1745,7 @@ export const API_METHODS = [
   'workspaces', 'workspace', 'createWorkspace', 'renameWorkspace', 'deleteWorkspace', 'openFolderWorkspace', 'useFolder', 'stopUsingFolder', 'revealFolder', 'folderGitStatus', 'folderGitDiff', 'folderGitCommit', 'folderGitPull', 'folderGitPush', 'folderGitInit', 'folderGitAbortMerge',
   'gitState', 'gitInstall', 'gitUpdateCheck', 'gitUpdate', 'gitWatch', 'gitRepoAdd', 'gitRepoRemove', 'gitRepoLog', 'gitRevealRepo', 'gitOpenWorkspace', 'gitPickFolder', 'gitStatus', 'gitInit', 'gitDiff', 'gitStage', 'gitUnstage', 'gitDiscard', 'gitCommit', 'gitSync', 'gitCancel', 'gitLog', 'gitShow', 'gitBranches', 'gitBranch', 'gitStashes', 'gitStash', 'gitTags', 'gitTag', 'gitOperation', 'gitSquash', 'gitCherryPick', 'gitRevert', 'gitReset', 'gitRestoreFile', 'gitOpenFile', 'gitIgnoreSuggestions', 'gitIgnoreAdd', 'gitignoreRead', 'gitignoreSave', 'gitSetIdentity', 'gitAddRemote', 'gitWorktrees', 'gitWorktreeAdd', 'gitWorktreeRemove', 'gitWorktreePrune', 'gitPulls', 'gitCreatePull', 'gitCheckoutPull', 'gitAddAccount', 'gitRemoveAccount', 'gitRepos', 'gitSshKeys', 'gitSshGenerate', 'gitSshAddToAccount', 'gitClone', 'gitCancelClone', 'gitDismissClone', 'gitAccounts', 'gitCreateRemoteRepo', 'gitDevCatzAccounts', 'gitImportDevCatz', 'folderGitConnect', 'createFolderWorkspace', 'pickFolder', 'teamAdminUrl', 'appMenu', 'menuShortcuts', 'menuKey',
   'saveItems', 'deleteItems',
-  'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'specCheck', 'specApply', 'specFollow', 'specUnfollow', 'specStale', 'browsers', 'specScanFolder', 'specImportFile', 'mockList', 'mockEnvironmentRestore', 'mockStart', 'mockStop', 'mockEnvironment', 'mockSiteSpec', 'mockSiteImport', 'devcatzLinks', 'devcatzLinkSet', 'mockOpenIn', 'mockServiceSpec', 'docatzLinks', 'docatzLinkSet', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'importedBefore', 'docatzProjects', 'docatzImport', 'docatzOpen', 'brunoRead', 'brunoImport', 'brunoCheck', 'brunoApply', 'brunoUnlink', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection', 'ciPlan', 'ciSave',
+  'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'specCheck', 'specApply', 'specFollow', 'specUnfollow', 'specStale', 'browsers', 'specScanFolder', 'specImportFile', 'mockList', 'mockEnvironmentRestore', 'mockStart', 'mockStop', 'mockEnvironment', 'mockSiteSpec', 'mockSiteImport', 'devcatzLinks', 'devcatzLinkSet', 'mockOpenIn', 'mockServiceSpec', 'docatzLinks', 'docatzLinkSet', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'importedBefore', 'docatzProjects', 'docatzImport', 'docatzOpen', 'appExportRead', 'brunoRead', 'brunoImport', 'brunoCheck', 'brunoApply', 'brunoUnlink', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection', 'ciPlan', 'ciSave',
   'aiModels', 'aiTest', 'aiAsk', 'aiExplain', 'aiTests', 'aiBody', 'aiCancel',
   'send', 'grpcDescribe', 'grpcPickProto', 'grpcCall', 'pickFile', 'pickDataFile', 'saveText', 'cancel', 'wsConnect', 'wsSend', 'wsPusherChannel', 'wsClose', 'oauthStatus', 'oauthToken', 'oauthClear', 'oauthCancel', 'oauthDiscover', 'clientCerts', 'clientCertSave', 'clientCertRemove', 'clientCertPick', 'saveResponse', 'history', 'addHistory', 'clearHistory',
   'servers', 'probeServer', 'connectWithToken', 'connectWithCode', 'refreshServer', 'disconnectServer', 'subscribeWorkspace', 'setPresence', 'presence', 'syncWorkspace', 'resolveConflict',

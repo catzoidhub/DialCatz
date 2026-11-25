@@ -1,0 +1,8 @@
+type: environment
+model: "environment"
+id: "ev_b"
+workspaceId: "wk_1"
+name: "Global Variables"
+parentModel: "workspace"
+variables: [{"name": "base_url", "value": "http://127.0.0.1:47412/api", "enabled": true}, {"name": "token", "value": "tk", "enabled": true}, {"name": "sealed", "value": "${[ secure(value='YENC_x') ]}", "enabled": true}]
+public: true

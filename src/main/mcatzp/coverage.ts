@@ -132,6 +132,7 @@ export const MCATZP_COVERAGE: Record<keyof DialCatzApi, string> = {
   docatzProjects: 'tool: list_docatz_projects',
   docatzImport: "tool: import_from_docatz",
   docatzOpen: "tool: open_in_docatz",
+  appExportRead: 'tool: read_app_export',
   brunoRead: 'tool: read_bruno_folder',
   brunoImport: 'tool: import_from_bruno',
   brunoCheck: 'tool: check_bruno_changes',

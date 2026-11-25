@@ -48,6 +48,7 @@
           const check = (ok, msg) => {
             if (negate ? ok : !ok) throw new Error((negate ? 'Expected not: ' : 'Expected: ') + msg);
           };
+          const level = (n) => check(Math.floor(Number(actual) / 100) === n, `${show(actual)} to be a ${n}xx status`);
           const m = {
             toBe: (x) => check(Object.is(actual, x), `${show(actual)} to be ${show(x)}`),
             toEqual: (x) => check(deepEqual(actual, x), `${show(actual)} to equal ${show(x)}`),
@@ -60,6 +61,10 @@
             toBeGreaterThan: (x) => check(actual > x, `${show(actual)} > ${show(x)}`),
             toBeLessThan: (x) => check(actual < x, `${show(actual)} < ${show(x)}`),
             toHaveProperty: (p, ...value) => check(hasPath(actual, p) && (!value.length || deepEqual(getPath(actual, p), value[0])), `${show(actual)} to have property ${p}${value.length ? ` = ${show(value[0])}` : ''}`),
+            // Hoppscotch's own (pw.expect).
+            toInclude: (x) => check(actual != null && actual.includes && actual.includes(x), `${show(actual)} to include ${show(x)}`),
+            toBeType: (t) => check(t === 'object' && actual instanceof Date ? true : typeof actual === t, `${show(actual)} to be a ${t}`),
+            toBeLevel2xx: () => level(2), toBeLevel3xx: () => level(3), toBeLevel4xx: () => level(4), toBeLevel5xx: () => level(5),
             toHaveLength: (n) => check(actual != null && actual.length === n, `${show(actual)} to have length ${n}`),
           };
           return m;
@@ -268,16 +273,62 @@
         return cur;
       }
 
+      // What is missing says so however it is used: called, or one of its own names called (bru.cookies.jar()).
+      const no = (what) => {
+        const stop = () => {
+          throw new Error(`${what} is not available in DialCatz scripts`);
+        };
+        return new Proxy(stop, { get: (_, k) => (typeof k === 'symbol' || k === 'then' || k === 'toJSON' ? undefined : no(`${what}.${String(k)}`)), construct: stop });
+      };
+      const open = (name, known) => new Proxy(known, { get: (t, k) => (k in t ? t[k] : typeof k === 'symbol' || k === 'then' || k === 'toJSON' ? undefined : no(`${name}.${String(k)}`)) });
+
+      /** Hoppscotch's script objects: pw (its older ones) and hopp. <<name>> is a variable in their texts. */
+      function hoppscotch({ dc, vars, now, edit, res, expect, test }) {
+        const fill = (t) => (typeof t === 'string' ? t.replace(/<<\s*([\w.$-]+)\s*>>|\{\{\s*([\w.$-]+)\s*\}\}/g, (w, a, b) => ((a ?? b) in vars ? vars[a ?? b] : w)) : t);
+        const own = (k) => (Object.prototype.hasOwnProperty.call(vars, k) ? vars[k] : undefined);
+        const json = () => JSON.parse(res.body);
+        const headers = res ? Object.entries(res.headers).map(([key, value]) => ({ key, value })) : [];
+        const maybe = (t) => {
+          try {
+            return JSON.parse(t);
+          } catch {
+            return t;
+          }
+        };
+        const param = (change) => {
+          const at = now.url.indexOf('?');
+          const list = new URLSearchParams(at < 0 ? '' : now.url.slice(at + 1));
+          change(list);
+          const q = list.toString();
+          edit.setUrl((at < 0 ? now.url : now.url.slice(0, at)) + (q ? `?${q}` : ''));
+        };
+        const env = () => ({ get: (k) => (own(k) === undefined ? null : fill(own(k))), getRaw: (k) => own(k) ?? null, set: (k, v) => dc.env.set(k, v), delete: (k) => dc.env.unset(k) });
+        const pw = open('pw', {
+          env: { get: own, getResolve: (k) => fill(own(k)), set: (k, v) => dc.env.set(k, v), unset: (k) => dc.env.unset(k), resolve: fill },
+          expect, test,
+          response: res && { status: res.status, statusText: res.statusText, headers, body: maybe(res.body), responseTime: res.time, json, text: () => res.body, asJSON: json, asText: () => res.body },
+        });
+        const hopp = open('hopp', {
+          env: open('hopp.env', { ...env(), active: open('hopp.env.active', env()), global: open('hopp.env.global', env()) }),
+          expect: Object.assign((v) => expect(v), { fail: (m) => { throw new Error(m ?? 'Failed'); } }), test,
+          request: open('hopp.request', {
+            get url() { return now.url; }, get method() { return now.method; }, get headers() { return Object.entries(now.headers).map(([key, value]) => ({ key, value, active: true, description: '' })); },
+            get params() { return [...new URLSearchParams(now.url.split('?')[1] ?? '')].map(([key, value]) => ({ key, value, active: true, description: '' })); },
+            get body() { return { contentType: now.headers['content-type'] ?? null, body: now.body ?? null }; },
+            setUrl: edit.setUrl, setMethod: edit.setMethod, setHeader: edit.setHeader, removeHeader: edit.removeHeader,
+            setHeaders: (l) => { for (const h of l ?? []) if (h.active !== false) edit.setHeader(h.key, h.value); },
+            setParam: (k, v) => param((p) => p.set(k, v)), removeParam: (k) => param((p) => p.delete(k)),
+            setParams: (l) => param((p) => { [...p.keys()].forEach((k) => p.delete(k)); for (const x of l ?? []) if (x.active !== false) p.append(x.key, x.value); }),
+            setBody: (b) => { if (b && typeof b === 'object' && 'contentType' in b) { if (b.contentType) edit.setHeader('Content-Type', b.contentType); edit.setBody(b.body); } else edit.setBody(b); },
+            variables: { get: (k) => own(k) ?? null, set: (k, v) => dc.local.set(k, fill(String(v))) },
+          }),
+          response: res && { statusCode: res.status, statusText: res.statusText, headers, responseTime: res.time, body: { asJSON: json, asText: () => res.body, bytes: () => new TextEncoder().encode(res.body) }, text: () => res.body, json },
+        });
+        return { pw, hopp };
+      }
+
       /** Bruno's script objects over DialCatz's own, so its scripts run as they are. What a script here cannot do says so. */
       function bruno({ dc, vars, locals, data, now, edit, res, ctx, test }) {
-        // What is missing says so however it is used: called, or one of its own names called (bru.cookies.jar()).
-        const no = (what) => {
-          const stop = () => {
-            throw new Error(`${what} is not available in DialCatz scripts`);
-          };
-          return new Proxy(stop, { get: (_, k) => (typeof k === 'symbol' || k === 'then' || k === 'toJSON' ? undefined : no(`${what}.${String(k)}`)), construct: stop });
-        };
-        const open = (name, known) => new Proxy(known, { get: (t, k) => (k in t ? t[k] : typeof k === 'symbol' || k === 'then' || k === 'toJSON' ? undefined : no(`${name}.${String(k)}`)) });
         const text = (v) => (typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v));
         const back = (v) => {
           if (typeof v !== 'string' || !/^\s*[[{]/.test(v)) return v;
@@ -438,34 +489,63 @@
           expect,
           log: (...a) => logs.push(a.map((x) => (typeof x === 'string' ? x : show(x))).join(' ')),
         };
-        // A small Postman-compatible surface, so common pm scripts run unchanged.
-        const pm = {
-          test: dc.test,
-          expect,
-          environment: dc.env,
-          globals: dc.env,
+        // Postman's surface, so its scripts run unchanged; what is missing says so.
+        const has = (k) => Object.prototype.hasOwnProperty.call(vars, k);
+        const fill = (t) => (typeof t === 'string' ? t.replace(/\{\{\s*([\w.$-]+)\s*\}\}/g, (w, n) => (has(n) ? vars[n] : w)) : t);
+        const scope = { ...dc.env, has, toObject: () => ({ ...vars }), clear: () => Object.keys(vars).forEach((k) => dc.env.unset(k)), replaceIn: fill, name: ctx.envName ?? '' };
+        const pmBody = () => {
+          try {
+            return dc.response.json();
+          } catch {
+            return undefined;
+          }
+        };
+        const pmTo = (neg) => {
+          const ex = (v) => chain(v, neg ? { not: true } : {});
+          const code = (c) => () => ex(res.status).equal(c);
+          const range = (a, b) => () => (neg ? ex(res.status >= a && res.status < b).equal(true) : chain(res.status, {}).within(a, b - 1));
+          const be = {};
+          for (const [k, f] of Object.entries({ ok: range(200, 300), success: range(200, 300), redirection: range(300, 400), clientError: range(400, 500), serverError: range(500, 600), error: range(400, 600), accepted: code(202), badRequest: code(400), unauthorized: code(401), forbidden: code(403), notFound: code(404), rateLimited: code(429) })) Object.defineProperty(be, k, { get: f });
+          Object.defineProperty(be, 'json', { get: () => ex(pmBody() !== undefined).equal(true) });
+          Object.defineProperty(be, 'withBody', { get: () => ex(!!res.body).equal(true) });
+          return {
+            be,
+            have: {
+              status: (c) => (typeof c === 'string' ? ex(res.statusText).equal(c) : ex(res.status).equal(c)),
+              header: (k, v) => (v === undefined ? ex(dc.response.header(k) !== undefined).equal(true) : ex(dc.response.header(k)).equal(v)),
+              body: (t) => (t === undefined ? ex(!!res.body).equal(true) : t instanceof RegExp ? ex(res.body).match(t) : ex(res.body).equal(t)),
+              jsonBody: (...a) => ex(pmBody()).jsonBody(...a),
+              jsonSchema: (x) => ex(pmBody()).jsonSchema(x),
+            },
+          };
+        };
+        const pmWords = {
+          test: Object.assign(dc.test, { skip: () => undefined }),
+          expect: Object.assign((v, m) => expect(v, m), { fail: (m) => { throw new Error(m ?? 'Failed'); } }),
+          environment: scope, globals: scope,
           // DialCatz has no collection scope: Postman's collection variables are the same variables (found trying an
           // imported collection whose test script called pm.collectionVariables.set, 2026-11-10).
-          collectionVariables: dc.env,
-          variables: dc.env,
-          request: { ...ctx.request, ...edit },
+          collectionVariables: scope, variables: scope,
+          info: { requestName: ctx.requestName ?? '', eventName: res ? 'test' : 'prerequest', iteration: 0, iterationCount: 1 },
+          request: { ...ctx.request, ...edit, headers: Object.assign({ ...ctx.request?.headers }, { add: (h) => edit.setHeader(h.key, h.value), upsert: (h) => edit.setHeader(h.key, h.value), remove: (k) => edit.removeHeader(k), get: (k) => now.headers[String(k).toLowerCase()], has: (k) => String(k).toLowerCase() in now.headers }), addHeader: (h) => (typeof h === 'string' ? edit.setHeader(h.slice(0, h.indexOf(':')).trim(), h.slice(h.indexOf(':') + 1).trim()) : edit.setHeader(h.key, h.value)) },
           iterationData: { get: (k) => data[k], has: (k) => Object.prototype.hasOwnProperty.call(data, k), toObject: () => ({ ...data }) },
           response: res && {
-            code: res.status,
-            status: res.statusText,
-            responseTime: res.time,
-            json: dc.response.json,
-            text: dc.response.text,
-            headers: { get: dc.response.header },
-            to: { have: { status: (c) => expect(res.status).toBe(c) } },
+            code: res.status, status: res.statusText, responseTime: res.time, responseSize: res.size,
+            json: dc.response.json, text: dc.response.text,
+            headers: { get: dc.response.header, has: (k) => dc.response.header(k) !== undefined, toObject: () => ({ ...res.headers }) },
+            to: { ...pmTo(false), not: pmTo(true) },
           },
         };
+        const pm = open('pm', pmWords);
+        // Insomnia's scripts use the same words.
+        const insomnia = open('insomnia', { ...pmWords, baseEnvironment: scope, baseGlobals: scope, iterationData: pmWords.iterationData });
         const console = { log: dc.log, info: dc.log, warn: dc.log, error: dc.log };
+        const h = hoppscotch({ dc, vars, now, edit, res, expect, test: dc.test });
         const b = bruno({ dc, vars, locals, data, now, edit, res, ctx, test: dc.test, expect });
         let error = null;
         try {
           // An inner function: a script may declare its own `res`, `test` … without clashing with these.
-          await new AsyncFunction('dc', 'pm', 'console', 'bru', 'req', 'res', 'test', 'expect', 'require', 'return (async () => {"use strict";\n' + code + '\n})()')(dc, pm, console, b.bru, b.req, b.res, dc.test, expect, b.require);
+          await new AsyncFunction('dc', 'pm', 'console', 'bru', 'req', 'res', 'test', 'expect', 'require', 'pw', 'hopp', 'insomnia', 'return (async () => {"use strict";\n' + code + '\n})()')(dc, pm, console, b.bru, b.req, b.res, dc.test, expect, b.require, h.pw, h.hopp, insomnia);
         } catch (e) {
           error = String(e && e.message ? e.message : e);
         }

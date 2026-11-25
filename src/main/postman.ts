@@ -3,7 +3,11 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { uid, type Environment, type EnvVariable, type TreeItem } from '@shared/types';
-import { importText } from './importers';
+import { fromHoppEnvironment, isHoppEnvironment, isHoppscotch } from './hoppscotch';
+import { parse as parseYaml } from 'yaml';
+import { importAll, importText } from './importers';
+import { insomniaEnvironments, isInsomniaV5Environment } from './insomnia';
+import { fromYaak, readYaakFolder } from './yaak';
 
 /**
  * Moving from Postman: its full data export (Settings → Account → Export data: a zip with collection/,
@@ -14,7 +18,7 @@ import { importText } from './importers';
 
 export interface PostmanFound {
   /** `variables`: the collection's own (Postman `variable`), saved as an environment named after it. */
-  collections: { root: TreeItem; items: TreeItem[]; variables?: EnvVariable[] }[];
+  collections: { root: TreeItem; items: TreeItem[]; variables?: EnvVariable[]; notes?: string[]; ownEnvironment?: boolean; environments?: Environment[] }[];
   environments: Environment[];
   globals: EnvVariable[];
   skipped: string[];
@@ -43,12 +47,13 @@ function unzip(zip: string): Promise<string> {
 function jsonFiles(path: string, out: string[] = []): string[] {
   const st = statSync(path);
   if (st.isFile()) {
-    if (/\.json$/i.test(path)) out.push(path);
+    if (/\.(json|ya?ml)$/i.test(path)) out.push(path);
     return out;
   }
   for (const name of readdirSync(path)) {
     if (out.length >= MAX_FILES) break;
     if (name.startsWith('.') || name === '__MACOSX') continue;
+    if (name === 'node_modules') continue;
     jsonFiles(join(path, name), out);
   }
   return out;
@@ -59,8 +64,22 @@ const vars = (list: PmVar[]): EnvVariable[] => list.filter((v) => v?.key).map((v
 
 function classify(file: string, found: PostmanFound): void {
   let doc: Record<string, unknown>;
+  const size = statSync(file).size;
+  if (size > 100_000_000) return void found.skipped.push(`${file} (too large)`);
   // A byte-order mark (Notepad, Windows PowerShell 5) is not JSON.
   const text = readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
+  if (/insomnia\.rest\/5|"__export_format"|"yaakSchema"/.test(text)) {
+    try {
+      const y = /\.ya?ml$/i.test(file) ? (parseYaml(text, { maxAliasCount: 200 }) as unknown) : null;
+      if (isInsomniaV5Environment(y)) found.environments.push(...insomniaEnvironments(y));
+      else found.collections.push(...importAll(text));
+    } catch (e) {
+      found.skipped.push(`${file} (${(e as Error).message.split('\n')[0]})`);
+    }
+    return;
+  }
+  // Other YAML beside an export (an OpenAPI document, a workflow) is not for this.
+  if (/\.ya?ml$/i.test(file)) return;
   try {
     doc = JSON.parse(text);
   } catch {
@@ -69,6 +88,19 @@ function classify(file: string, found: PostmanFound): void {
   }
   // Postman's dump has an archive.json index: nothing to import from it.
   if (/archive\.json$/i.test(file)) return;
+  // Hoppscotch: collections and environments, one or a list of them; its globals.
+  const list = Array.isArray(doc) ? (doc as unknown[]) : [doc];
+  if (list.length && list.every((x) => isHoppscotch(x) || isHoppEnvironment(x))) {
+    for (const x of list) {
+      if (isHoppscotch(x)) found.collections.push(...importAll(JSON.stringify([x])));
+      else if (isHoppEnvironment(x)) {
+        const e = fromHoppEnvironment(x);
+        if (/^globals?$/i.test(e.name)) found.globals.push(...e.variables);
+        else found.environments.push(e);
+      }
+    }
+    return;
+  }
   // DialCatz's own collection file (Export → DialCatz format) and globals (in an Export all zip)
   if (doc.dialcatz === 1 && doc.collection && Array.isArray(doc.items)) {
     try {
@@ -120,7 +152,10 @@ export async function read(paths: string[]): Promise<PostmanFound> {
     for (const p of paths) {
       const root = /\.zip$/i.test(p) ? await unzip(p) : p;
       if (root !== p) temps.push(root);
-      for (const f of jsonFiles(root)) classify(f, found);
+      // A folder Yaak syncs to is one export in many files.
+      const yaak = statSync(root).isDirectory() ? readYaakFolder(root) : null;
+      if (yaak) found.collections.push(...fromYaak(yaak));
+      else for (const f of jsonFiles(root)) classify(f, found);
     }
   } finally {
     for (const t of temps) rmSync(t, { recursive: true, force: true });

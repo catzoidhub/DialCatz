@@ -1,0 +1,13 @@
+type: http_request
+model: "http_request"
+id: "rq_1"
+workspaceId: "wk_1"
+folderId: "fl_1"
+name: ""
+method: "GET"
+url: "${[ base_url ]}/users/:id"
+urlParameters: [{"name": ":id", "value": "42"}, {"name": "full", "value": "1"}, {"name": "off", "value": "1", "enabled": false}]
+headers: []
+authenticationType: null
+authentication: {}
+sortPriority: 1

@@ -1,0 +1,14 @@
+type: http_request
+model: "http_request"
+id: "rq_4"
+workspaceId: "wk_1"
+folderId: null
+name: "Up"
+method: "POST"
+url: "${[ base_url ]}/echo"
+bodyType: "multipart/form-data"
+body: {"form": [{"name": "t", "value": "v", "enabled": true}, {"name": "f", "file": "/Users/x/cat.png", "enabled": true}]}
+headers: []
+authenticationType: "awsv4"
+authentication: {}
+sortPriority: 4

@@ -1,0 +1,14 @@
+type: http_request
+model: "http_request"
+id: "rq_3"
+workspaceId: "wk_1"
+folderId: null
+name: "GQL"
+method: "POST"
+url: "${[ base_url ]}/gql"
+bodyType: "graphql"
+body: {"query": "query { me }", "variables": "{}"}
+headers: []
+authenticationType: "none"
+authentication: {}
+sortPriority: 3

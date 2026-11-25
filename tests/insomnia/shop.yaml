@@ -1,0 +1,53 @@
+type: collection.insomnia.rest/5.0
+schema_version: "5.1"
+name: Ins shop
+meta:
+  id: wrk_1
+  description: Docs
+headers:
+  - name: X-Team
+    value: cats
+scripts:
+  preRequest: |-
+    insomnia.request.headers.add({ key: 'X-Script', value: insomnia.environment.get('base_url') });
+  afterResponse: "insomnia.test('collection test', () => { insomnia.expect(insomnia.response.code).to.equal(200); });"
+authentication:
+  type: bearer
+  token: "{{ _.token }}"
+collection:
+  - name: Second
+    url: "{{ base_url }}/echo"
+    method: POST
+    meta: { id: req_2, sortKey: 20 }
+    body:
+      mimeType: application/json
+      text: '{"a":"{{ _.nested.deep }}","b":"{% uuid ''v4'' %}","c":"{{ _.list[1] }}"}'
+    authentication: { type: basic, username: u, password: "{{ _['pass-word'] }}" }
+    scripts:
+      afterResponse: "insomnia.test('body', () => { const j = insomnia.response.json(); insomnia.expect(j.a).to.eql('d'); insomnia.expect(j.c).to.eql('two'); insomnia.expect(j.b).to.have.length(36); insomnia.response.to.have.status(200); insomnia.expect(() => insomnia.sendRequest('x')).to.throw('insomnia.sendRequest is not available'); });"
+  - name: Users
+    meta: { id: fld_1, sortKey: 10 }
+    environment: { who: ann }
+    headers: [{ name: X-Echo, value: "{{ _.who }}" }]
+    children:
+      - name: Get user
+        url: "{{ _.base_url }}/users/:id"
+        method: GET
+        meta: { id: req_1, description: Get one }
+        parameters: [{ name: full, value: "1" }, { name: off, value: x, disabled: true }]
+        pathParameters: [{ name: id, value: "42" }]
+        authentication: {}
+        scripts: { preRequest: "", afterResponse: "pm.test('name', () => { pm.response.to.have.jsonBody('name', 'Ann'); });" }
+  - { name: GQL, url: "{{ _.base_url }}/gql", method: POST, meta: { id: req_3, sortKey: 30 }, body: { mimeType: application/graphql, text: '{"query":"query { me }","variables":{"a":1}}' }, authentication: { type: none } }
+  - { name: Form, url: "{{ _.base_url }}/echo", method: POST, meta: { id: req_4, sortKey: 40 }, body: { mimeType: multipart/form-data, params: [{ name: t, value: v }, { name: f, type: file, fileName: /Users/x/cat.png }] }, authentication: { type: digest } }
+  - { name: Tag, url: "{{ _.base_url }}/{% response 'body', 'req_1', 'b64' %}", method: GET, meta: { id: req_5, sortKey: 50 }, authentication: { type: apikey, key: K, value: v, addTo: queryParams } }
+  - { name: Sock, url: "wss://ws.test/x", meta: { id: ws-req_1, sortKey: 60 }, body: { meta: { id: ws-payload_1 }, value: hi } }
+  - { name: SIO, url: "https://s.test", meta: { id: socketio-req_1, sortKey: 70 }, body: { eventName: ping, args: [{ id: a, value: '{"x":1}' }] } }
+  - { name: Call, url: "grpc.test:50051", meta: { id: greq_1, sortKey: 80 }, protoMethodName: /pkg.Svc/Hello, protoFileId: pf_1, body: { text: '{"n":1}' }, metadata: [] }
+environments:
+  name: Base Environment
+  data: { base_url: "http://127.0.0.1:47412/api", nested: { deep: d }, list: [one, two], token: tk, pass-word: p, hidden: s3cr3t }
+  confidentialKeys: [hidden]
+  subEnvironments:
+    - { name: Staging, data: { base_url: "{{ _.host }}/v1", host: "http://staging" } }
+    - { name: Local, data: {} }

@@ -12,9 +12,9 @@ Node 20 or later. It exits 0 when everything passed, 1 when a request or a test 
 
 ## What it runs
 
-`dialcatz run <path>` takes a DialCatz workspace folder (the one with `dialcatz.yml`, kept in your repository), a collection exported from DialCatz or Postman, a Bruno collection folder (`.bru` or OpenCollection YAML), or an OpenAPI / Swagger file.
+`dialcatz run <path>` takes a DialCatz workspace folder (the one with `dialcatz.yml`, kept in your repository), a collection exported from DialCatz, Postman, Insomnia, Hoppscotch or Yaak, a Yaak sync folder, a Bruno collection folder (`.bru` or OpenCollection YAML), or an OpenAPI / Swagger file.
 
-- **Requests** run in the order DialCatz's runner takes them, with their pre-request and test scripts (`dc.*`, the Postman-compatible `pm.*` and Bruno's `bru`, `req`, `res`, `test`) and the auth they inherit.
+- **Requests** run in the order DialCatz's runner takes them, with their pre-request and test scripts (`dc.*`, the Postman-compatible `pm.*` Bruno's `bru`, `req`, `res`, `test` Hoppscotch's `pw`, `hopp` and Insomnia's `insomnia`) and the auth they inherit.
 - **HTTP** in every body (JSON, form, multipart, binary, GraphQL, JSON-RPC), Server-Sent Events and **gRPC** (server reflection or `--proto` files).
 - **WebSocket, Socket.IO and Pusher** requests connect, send the first message kept with the request, listen for `--ws-wait` seconds and hand what arrived to the tests as `dc.messages`.
 - **OAuth 2.0**: client credentials and password grants get their token by themselves; a device code sign-in is asked for when a person is at the terminal.
@@ -26,7 +26,7 @@ Node 20 or later. It exits 0 when everything passed, 1 when a request or a test 
 | `-c, --collection <name>` | only this collection (a workspace folder may hold several) |
 | `-f, --folder <name>` | only the requests under this folder, or one request of this name |
 | `-v, --var <name=value>` | a variable's value; repeat for more |
-| `--env <name>` | a Bruno collection's environment |
+| `--env <name>` | an environment the collection brings (Bruno, Insomnia, Yaak) |
 | `--env-file <file>` | variables from `NAME=value` lines (a `.env` file) |
 | `-d, --data <file>` | run once per row of a CSV (header row) or a JSON array of objects |
 | `--file <field=path>` | the file for a multipart field, or `body=<path>` for a binary body |

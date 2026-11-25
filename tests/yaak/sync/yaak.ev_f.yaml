@@ -1,0 +1,8 @@
+type: environment
+model: "environment"
+id: "ev_f"
+workspaceId: "wk_1"
+name: "Folder"
+parentModel: "folder"
+parentId: "fl_1"
+variables: [{"name": "who", "value": "ann", "enabled": true}]

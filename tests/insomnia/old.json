@@ -1,0 +1,9 @@
+{"_type":"export","__export_format":4,"resources":[
+{"_id":"wrk_a","_type":"workspace","parentId":null,"name":"Old ins"},
+{"_id":"env_a","_type":"environment","parentId":"wrk_a","name":"Base Environment","data":{"url":"http://127.0.0.1:47412"}},
+{"_id":"fld_a","_type":"request_group","parentId":"wrk_a","name":"F","metaSortKey":-2,"environment":{"x":"1"}},
+{"_id":"req_a","_type":"request","parentId":"fld_a","name":"A","method":"GET","url":"{{ _.url }}/api/echo","headers":[{"name":"H","value":"{{ x }}"}],"authentication":{},"body":{},"afterResponseScript":"insomnia.test('t',()=>insomnia.expect(1).to.eql(1));"},
+{"_id":"ws_a","_type":"websocket_request","parentId":"wrk_a","name":"W","metaSortKey":-1,"url":"ws://w"},
+{"_id":"wp_a","_type":"websocket_payload","parentId":"ws_a","value":"hello"},
+{"_id":"uts","_type":"unit_test_suite","parentId":"wrk_a","name":"T"},
+{"_id":"wrk_b","_type":"workspace","parentId":null,"name":"Empty"}]}

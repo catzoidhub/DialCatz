@@ -1,6 +1,10 @@
-import { emptyBody, HTTP_METHODS, newRequest, uid, type HttpMethod, type KeyValue, type RequestAuth, type RequestSpec, type SpecResponse, type TreeItem, type EnvVariable } from '@shared/types';
+import { emptyBody, HTTP_METHODS, newRequest, uid, type HttpMethod, type KeyValue, type RequestAuth, type RequestSpec, type SpecResponse, type TreeItem, type EnvVariable, type Environment } from '@shared/types';
 import { parse as parseYaml } from 'yaml';
 import { joinUrl, parseCurl, splitUrl, stripLocalFiles } from '@shared/request';
+import { fromHoppscotch, isHoppscotch } from './hoppscotch';
+import { fromInsomniaV4, fromInsomniaV5, isInsomniaV4, isInsomniaV5 } from './insomnia';
+import { fromYaak, isYaak } from './yaak';
+import { gapsNote, Notes, scriptGaps } from './importnotes';
 
 /**
  * Collection imports: a DialCatz export, a Postman v2 / v2.1 collection, an OpenAPI 3 (or Swagger 2) document in
@@ -49,7 +53,11 @@ const kv = (list: unknown): KeyValue[] =>
 // ------------------------------------------------------------------ Postman
 
 type PmAuth = { type?: string; [k: string]: unknown };
-function pmAuth(a: PmAuth | undefined): RequestAuth {
+/**
+ * An auth DialCatz does not have is left empty and said: as Inherit, the request would go out with its collection's
+ * token instead of the auth it had.
+ */
+function pmAuth(a: PmAuth | undefined, where: string, notes: Notes): RequestAuth {
   if (!a?.type) return { mode: 'inherit' };
   const get = (kind: string, key: string) => {
     const arr = a[kind];
@@ -69,6 +77,11 @@ function pmAuth(a: PmAuth | undefined): RequestAuth {
     case 'oauth2': {
       // Postman's settings (its own token, if one was saved in the export, is left behind).
       const g = get('oauth2', 'grant_type');
+      if (g === 'implicit') {
+        notes.add(where, 'OAuth 2.0 implicit is not supported; the auth was left empty');
+        return { mode: 'none' };
+      }
+      if (get('oauth2', 'addTokenTo') === 'queryParams') notes.add(where, 'the OAuth token goes into the Authorization header here, not the URL');
       const grant = g === 'client_credentials' ? 'client_credentials' : g === 'password_credentials' ? 'password' : 'authorization_code';
       const prefix = get('oauth2', 'headerPrefix').trim();
       return {
@@ -88,7 +101,8 @@ function pmAuth(a: PmAuth | undefined): RequestAuth {
       };
     }
     default:
-      return { mode: 'inherit' };
+      notes.add(where, `${a.type} auth is not supported; the auth was left empty`);
+      return { mode: 'none' };
   }
 }
 
@@ -98,13 +112,38 @@ function fileHint(src: unknown): string {
   return /^([a-z]:)?[\\/]|^~/i.test(src) ? (src.split(/[\\/]/).pop() ?? '') : src;
 }
 
-function pmRequest(r: Record<string, unknown> | string): RequestSpec {
+type PmUrl = { raw?: string; query?: unknown; variable?: unknown; protocol?: string; host?: unknown; port?: string; path?: unknown };
+/** Path variables (/cats/:id) have no table here: the value, or {{id}} when there is none, goes into the path. */
+function pmPath(url: string, u: PmUrl): string {
+  let out = url;
+  for (const v of (Array.isArray(u.variable) ? u.variable : []) as { key?: unknown; id?: unknown; value?: unknown }[]) {
+    const key = String(v?.key ?? v?.id ?? '');
+    if (!key) continue;
+    const value = v.value === undefined || v.value === null || v.value === '' ? `{{${key}}}` : String(v.value);
+    const [path, ...rest] = out.split('?');
+    out = [path.split('/').map((s) => (s === `:${key}` ? value : s)).join('/'), ...rest].join('?');
+  }
+  return out;
+}
+/** The URL of a request saved in parts only. */
+const pmParts = (u: PmUrl): string => {
+  const list = (x: unknown, sep: string) => (Array.isArray(x) ? x.map((p) => (typeof p === 'string' ? p : String((p as { value?: unknown })?.value ?? ''))).join(sep) : String(x ?? ''));
+  const host = list(u.host, '.');
+  if (!host) return '';
+  const path = list(u.path, '/');
+  return `${u.protocol ? `${u.protocol.replace(/:?\/*$/, '')}://` : ''}${host}${u.port ? `:${u.port}` : ''}${path ? `/${path.replace(/^\//, '')}` : ''}`;
+};
+
+function pmRequest(r: Record<string, unknown> | string, where: string, notes: Notes): RequestSpec {
   if (typeof r === 'string') return { ...newRequest(), url: r, params: splitUrl(r).params };
-  const urlObj = r.url as string | { raw?: string; query?: unknown } | undefined;
-  const url = typeof urlObj === 'string' ? urlObj : urlObj?.raw ?? '';
+  const urlObj = r.url as string | PmUrl | undefined;
+  const url = typeof urlObj === 'string' ? urlObj : urlObj ? pmPath(urlObj.raw || pmParts(urlObj), urlObj) : '';
+  const verb = String(r.method ?? 'GET').toUpperCase();
+  if (!(HTTP_METHODS as readonly string[]).includes(verb)) notes.add(where, `the method ${verb} is not supported; it became GET`);
+  notes.dynamic(where, [r.url, r.header, r.body]);
   // Postman's own query list keeps each parameter's description and the ones switched off; the raw URL does not.
   const query = typeof urlObj === 'object' && Array.isArray(urlObj?.query) && urlObj.query.length ? kv(urlObj.query) : splitUrl(url).params;
-  const spec: RequestSpec = { ...newRequest(), method: method(r.method), url, params: query, headers: kv(r.header), auth: pmAuth(r.auth as PmAuth) };
+  const spec: RequestSpec = { ...newRequest(), method: method(r.method), url, params: query, headers: kv(r.header), auth: pmAuth(r.auth as PmAuth, where, notes) };
   const b = r.body as { mode?: string; raw?: string; urlencoded?: unknown; formdata?: unknown; options?: { raw?: { language?: string } } } | undefined;
   if (b?.mode === 'raw') {
     const lang = b.options?.raw?.language;
@@ -115,8 +154,11 @@ function pmRequest(r: Record<string, unknown> | string): RequestSpec {
     // File fields come without their file (a path on someone else's computer): the user picks it again. The file's
     // name stays as the field's text, and a relative path whole: the CLI finds it beside the collection.
     const src = Array.isArray(b.formdata) ? (b.formdata as { type?: string; src?: unknown }[]).map((f) => (f?.type === 'file' ? fileHint(Array.isArray(f.src) ? f.src[0] : f.src) : null)) : [];
+    const files = src.filter((x): x is string => x !== null);
+    if (files.length) notes.add(where, `choose its file${files.length > 1 ? 's' : ''} again${files.some(Boolean) ? ` (${files.filter(Boolean).join(', ')})` : ''}`);
     spec.body = { mode: 'multipart', raw: '', fields: kv(b.formdata).map((f, n) => (src[n] !== null && src[n] !== undefined ? { ...f, type: 'file' as const, value: src[n]! } : f)) };
   } else if (b?.mode === 'file') {
+    notes.add(where, 'choose its file again');
     spec.body = { mode: 'binary', raw: '', fields: [] };
   } else if (b?.mode === 'graphql') {
     const g = (b as { graphql?: { query?: string; variables?: string } }).graphql;
@@ -126,7 +168,7 @@ function pmRequest(r: Record<string, unknown> | string): RequestSpec {
 }
 
 /** Postman's `event` list: the pre-request and test scripts (`exec` is text or a list of lines). */
-function pmScripts(ev: unknown): { preRequest?: string; tests?: string } {
+function pmScripts(ev: unknown, where: string, notes: Notes): { preRequest?: string; tests?: string } {
   const out: { preRequest?: string; tests?: string } = {};
   if (!Array.isArray(ev)) return out;
   for (const e of ev as { listen?: string; script?: { exec?: unknown } }[]) {
@@ -136,6 +178,8 @@ function pmScripts(ev: unknown): { preRequest?: string; tests?: string } {
     if (e.listen === 'prerequest') out.preRequest = text;
     else if (e.listen === 'test') out.tests = text;
   }
+  const gaps = scriptGaps(`${out.preRequest ?? ''}\n${out.tests ?? ''}`);
+  if (gaps.length) notes.add(where, gapsNote(gaps));
   return out;
 }
 
@@ -150,26 +194,31 @@ function pmVariables(list: unknown): EnvVariable[] {
     .map((v) => ({ key: String(v.key), value: v.value === undefined || v.value === null ? '' : typeof v.value === 'string' ? v.value : JSON.stringify(v.value), enabled: v.disabled !== true, secret: v.type === 'secret' }));
 }
 
-function fromPostman(doc: Record<string, unknown>): { root: TreeItem; items: TreeItem[]; variables: EnvVariable[] } {
+function fromPostman(doc: Record<string, unknown>): { root: TreeItem; items: TreeItem[]; variables: EnvVariable[]; notes: string[] } {
+  const notes = new Notes();
+  let examples = 0;
   const info = doc.info as { name?: string; description?: string } | undefined;
-  const root: TreeItem = { id: uid('c_'), kind: 'collection', parentId: null, name: info?.name || 'Imported collection', sort: 0, auth: pmAuth(doc.auth as PmAuth), description: describe(info?.description), ...pmScripts(doc.event) };
+  const root: TreeItem = { id: uid('c_'), kind: 'collection', parentId: null, name: info?.name || 'Imported collection', sort: 0, auth: pmAuth(doc.auth as PmAuth, 'Collection', notes), description: describe(info?.description), ...pmScripts(doc.event, 'Collection', notes) };
   if (root.auth?.mode === 'inherit') root.auth = { mode: 'none' };
   const items: TreeItem[] = [];
   const walk = (list: unknown, parentId: string) => {
     if (!Array.isArray(list)) return;
     list.forEach((it: Record<string, unknown>, n) => {
       if (Array.isArray(it.item)) {
-        const f: TreeItem = { id: uid('f_'), kind: 'folder', parentId, name: String(it.name ?? 'Folder'), sort: n, auth: pmAuth(it.auth as PmAuth), description: describe(it.description), ...pmScripts(it.event) };
+        const f: TreeItem = { id: uid('f_'), kind: 'folder', parentId, name: String(it.name ?? 'Folder'), sort: n, auth: pmAuth(it.auth as PmAuth, `Folder ${String(it.name ?? '')}`, notes), description: describe(it.description), ...pmScripts(it.event, `Folder ${String(it.name ?? '')}`, notes) };
         items.push(f);
         walk(it.item, f.id);
       } else if (it.request) {
         const req = it.request as Record<string, unknown>;
-        items.push({ id: uid('r_'), kind: 'request', parentId, name: String(it.name ?? 'Request'), sort: n, request: { ...pmRequest(req), ...pmScripts(it.event) }, description: describe(typeof req === 'object' ? req.description : undefined) });
+        const name = String(it.name ?? 'Request');
+        if (Array.isArray(it.response)) examples += it.response.length;
+        items.push({ id: uid('r_'), kind: 'request', parentId, name, sort: n, request: { ...pmRequest(req, name, notes), ...pmScripts(it.event, name, notes) }, description: describe(typeof req === 'object' ? req.description : undefined) });
       }
     });
   };
   walk(doc.item, root.id);
-  return { root, items, variables: pmVariables(doc.variable) };
+  if (examples) notes.plain(`${examples} saved ${examples === 1 ? 'example was' : 'examples were'} left out`);
+  return { root, items, variables: pmVariables(doc.variable), notes: notes.all() };
 }
 
 // ------------------------------------------------------------------ OpenAPI
@@ -453,7 +502,51 @@ function fromDialCatz(doc: DialCatzExport): { root: TreeItem; items: TreeItem[] 
   return { root, items };
 }
 
-export function importText(text: string): { root: TreeItem; items: TreeItem[]; baseUrl?: string; variables?: EnvVariable[]; openapi?: boolean } {
+export interface Imported {
+  root: TreeItem;
+  items: TreeItem[];
+  baseUrl?: string;
+  variables?: EnvVariable[];
+  openapi?: boolean;
+  /** Its variables are the collection's own (Hoppscotch): the collection uses the environment made of them. */
+  ownEnvironment?: boolean;
+  /** Environments that come with it (Insomnia, Yaak); the collection uses the first. */
+  environments?: Environment[];
+  /** What did not come along whole, to look at. */
+  notes?: string[];
+}
+
+/** Every collection in a text: a Hoppscotch, Insomnia or Yaak export may hold several. */
+export function importAll(text: string): Imported[] {
+  if (/^\s*\[/.test(text)) {
+    let list: unknown;
+    try {
+      list = JSON.parse(text.replace(/^\uFEFF/, ''));
+    } catch {
+      list = null;
+    }
+    if (Array.isArray(list) && list.length && list.every(isHoppscotch)) return list.map((c) => fromHoppscotch(c));
+  }
+  const doc = insomniaOrYaak(text);
+  if (doc) {
+    const list = isInsomniaV5(doc) ? [fromInsomniaV5(doc)] : isInsomniaV4(doc) ? fromInsomniaV4(doc) : fromYaak(doc);
+    if (!list.length) throw new Error('There is no collection in that export');
+    return list;
+  }
+  return [importText(text)];
+}
+function insomniaOrYaak(text: string): Record<string, unknown> | null {
+  // Looked for in the text first: parsing every document twice would be slow.
+  if (!/insomnia\.rest\/5|__export_format|yaakSchema/.test(text)) return null;
+  try {
+    const doc = (/^\s*\{/.test(text) ? JSON.parse(text.replace(/^\uFEFF/, '')) : parseYaml(text, { maxAliasCount: 200 })) as unknown;
+    return isInsomniaV5(doc) || isInsomniaV4(doc) || isYaak(doc) ? (doc as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function importText(text: string): Imported {
   const trimmed = text.trim();
   if (trimmed.startsWith('curl')) {
     const spec = parseCurl(trimmed);
@@ -471,12 +564,13 @@ export function importText(text: string): { root: TreeItem; items: TreeItem[]; b
     } catch (e) {
       throw new Error(`Neither JSON nor YAML: ${(e as Error).message.split('\n')[0]}`);
     }
-    if (!doc || typeof doc !== 'object') throw new Error('Not a format DialCatz knows (Postman v2 collection, OpenAPI 3 / Swagger 2 in JSON or YAML, DialCatz export, cURL)');
+    if (!doc || typeof doc !== 'object') throw new Error('Not a format DialCatz knows (Postman, Insomnia, Hoppscotch or Yaak, OpenAPI 3 / Swagger 2 in JSON or YAML, DialCatz export, cURL)');
   }
   if (doc.dialcatz === 1) return fromDialCatz(doc as unknown as DialCatzExport);
   if (typeof doc.openapi === 'string' || typeof doc.swagger === 'string') return { ...fromOpenApi(doc), openapi: true };
   if (doc.info && Array.isArray(doc.item)) return fromPostman(doc);
-  throw new Error('Not a format DialCatz knows (Postman v2 collection, OpenAPI 3 / Swagger 2, DialCatz export)');
+  if (isHoppscotch(doc)) return fromHoppscotch(doc);
+  throw new Error('Not a format DialCatz knows (Postman, Insomnia, Hoppscotch or Yaak, OpenAPI 3 / Swagger 2, DialCatz export)');
 }
 
 // ------------------------------------------------------------------ copy a collection to another workspace

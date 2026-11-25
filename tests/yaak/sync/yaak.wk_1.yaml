@@ -1,0 +1,8 @@
+type: workspace
+model: "workspace"
+id: "wk_1"
+name: "Yaak shop"
+description: "Docs"
+headers: [{"name": "X-Team", "value": "cats", "enabled": true}]
+authenticationType: "bearer"
+authentication: {"token": "${[ token ]}"}

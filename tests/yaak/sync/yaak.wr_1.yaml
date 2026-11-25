@@ -1,0 +1,11 @@
+type: websocket_request
+model: "websocket_request"
+id: "wr_1"
+workspaceId: "wk_1"
+folderId: null
+name: "Sock"
+url: "wss://w.test"
+message: "hi"
+headers: []
+urlParameters: []
+sortPriority: 6

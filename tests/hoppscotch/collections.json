@@ -1,0 +1,272 @@
+[
+ {
+  "v": 12,
+  "name": "Hopp shop",
+  "description": "Docs",
+  "headers": [
+   {
+    "key": "X-Team",
+    "value": "cats",
+    "active": true,
+    "description": ""
+   }
+  ],
+  "auth": {
+   "authType": "bearer",
+   "authActive": true,
+   "token": "<<token>>"
+  },
+  "variables": [
+   {
+    "key": "baseURL",
+    "initialValue": "http://127.0.0.1:47412/api",
+    "currentValue": "",
+    "secret": false
+   },
+   {
+    "key": "token",
+    "initialValue": "",
+    "currentValue": "",
+    "secret": true
+   }
+  ],
+  "preRequestScript": "hopp.request.setHeader('X-Script', hopp.env.get('baseURL'));",
+  "testScript": "hopp.test('collection test', () => { hopp.expect(hopp.response.statusCode).to.equal(200); });",
+  "folders": [
+   {
+    "v": 12,
+    "name": "Users",
+    "headers": [],
+    "auth": {
+     "authType": "inherit",
+     "authActive": true
+    },
+    "variables": [
+     {
+      "key": "who",
+      "initialValue": "ann",
+      "currentValue": "",
+      "secret": false
+     }
+    ],
+    "preRequestScript": "",
+    "testScript": "",
+    "description": null,
+    "folders": [],
+    "requests": [
+     {
+      "v": "17",
+      "name": "Get user",
+      "method": "GET",
+      "endpoint": "<<baseURL>>/users/<<id>>?full=1",
+      "params": [
+       {
+        "key": "a",
+        "value": "<<who>>",
+        "active": true,
+        "description": "d"
+       },
+       {
+        "key": "off",
+        "value": "1",
+        "active": false,
+        "description": ""
+       }
+      ],
+      "headers": [
+       {
+        "key": "X-Echo",
+        "value": "<<who>>",
+        "active": true,
+        "description": ""
+       }
+      ],
+      "preRequestScript": "pw.env.set('made', 'x');",
+      "testScript": "pw.test('old', () => { pw.expect(pw.response.status).toBeLevel2xx(); pw.expect(pw.response.body.name).toBe('Ann'); pw.expect(pw.response.body.name).toBeType('string'); pw.expect(pw.env.resolve('<<made>>')).toBe('x'); });\nhopp.test('new', () => { hopp.expect(hopp.response.body.asJSON()).to.have.property('name', 'Ann'); hopp.expect(() => hopp.fetch('x')).to.throw('hopp.fetch is not available'); });\npm.test('pm', () => { pm.response.to.have.status(200); pm.response.to.be.ok; pm.response.to.have.jsonBody('name'); pm.expect(pm.response.json().tags).to.include('a'); pm.response.to.not.be.notFound; });",
+      "auth": {
+       "authType": "inherit",
+       "authActive": true
+      },
+      "body": {
+       "contentType": null,
+       "body": null
+      },
+      "requestVariables": [
+       {
+        "key": "id",
+        "value": "42",
+        "active": true
+       }
+      ],
+      "responses": {
+       "ex": {}
+      },
+      "description": null
+     }
+    ]
+   }
+  ],
+  "requests": [
+   {
+    "v": "17",
+    "name": "Create",
+    "method": "POST",
+    "endpoint": "<<baseURL>>/echo",
+    "params": [],
+    "headers": [],
+    "preRequestScript": "export {};\n",
+    "testScript": "pm.test('body', () => { pm.expect(pm.response.json().a).to.eql('http://x'); });",
+    "auth": {
+     "authType": "basic",
+     "authActive": true,
+     "username": "u",
+     "password": "<<pw>>"
+    },
+    "body": {
+     "contentType": "application/json",
+     "body": "{\n  // note\n  \"a\": \"http://x\", /* b */ \"n\": 1\n}"
+    },
+    "requestVariables": [
+     {
+      "key": "pw",
+      "value": "p",
+      "active": true
+     }
+    ],
+    "responses": {},
+    "description": null
+   },
+   {
+    "v": "17",
+    "name": "Form",
+    "method": "POST",
+    "endpoint": "<<baseURL>>/echo",
+    "params": [],
+    "headers": [],
+    "preRequestScript": "export {};\n",
+    "testScript": "",
+    "auth": {
+     "authType": "none",
+     "authActive": true
+    },
+    "body": {
+     "contentType": "application/x-www-form-urlencoded",
+     "body": "a: 1\n#b: 2\n\"c:d\": \"x y\""
+    },
+    "requestVariables": [],
+    "responses": {},
+    "description": null
+   },
+   {
+    "v": "17",
+    "name": "Digest",
+    "method": "GET",
+    "endpoint": "<<baseURL>>/echo",
+    "params": [],
+    "headers": [],
+    "preRequestScript": "export {};\n",
+    "testScript": "",
+    "auth": {
+     "authType": "digest",
+     "authActive": true,
+     "username": "a",
+     "password": "b"
+    },
+    "body": {
+     "contentType": null,
+     "body": null
+    },
+    "requestVariables": [],
+    "responses": {},
+    "description": null
+   },
+   {
+    "v": "17",
+    "name": "Off",
+    "method": "GET",
+    "endpoint": "<<baseURL>>/echo",
+    "params": [],
+    "headers": [],
+    "preRequestScript": "export {};\n",
+    "testScript": "",
+    "auth": {
+     "authType": "bearer",
+     "authActive": false,
+     "token": "t"
+    },
+    "body": {
+     "contentType": null,
+     "body": null
+    },
+    "requestVariables": [],
+    "responses": {},
+    "description": null
+   },
+   {
+    "v": "17",
+    "name": "OAuth",
+    "method": "GET",
+    "endpoint": "<<baseURL>>/echo",
+    "params": [],
+    "headers": [],
+    "preRequestScript": "export {};\n",
+    "testScript": "",
+    "auth": {
+     "authType": "oauth-2",
+     "authActive": true,
+     "addTo": "HEADERS",
+     "grantTypeInfo": {
+      "grantType": "CLIENT_CREDENTIALS",
+      "authEndpoint": "https://id.test/token",
+      "clientID": "c",
+      "clientSecret": "<<cs>>",
+      "scopes": "read",
+      "token": "SAVED-TOKEN",
+      "clientAuthentication": "IN_BODY"
+     }
+    },
+    "body": {
+     "contentType": null,
+     "body": null
+    },
+    "requestVariables": [],
+    "responses": {},
+    "description": null
+   },
+   {
+    "v": 10,
+    "name": "GQL",
+    "url": "<<baseURL>>/gql",
+    "query": "query { me }",
+    "variables": "{\"a\":1}",
+    "headers": [],
+    "auth": {
+     "authType": "inherit",
+     "authActive": true
+    }
+   }
+  ]
+ },
+ {
+  "v": 1,
+  "name": "Old one",
+  "folders": [],
+  "requests": [
+   {
+    "url": "http://127.0.0.1:47412",
+    "path": "/api/echo",
+    "method": "GET",
+    "name": "v0",
+    "auth": "None",
+    "headers": [],
+    "params": [],
+    "bodyParams": [],
+    "rawParams": "",
+    "rawInput": false,
+    "contentType": "",
+    "preRequestScript": "",
+    "testScript": ""
+   }
+  ]
+ }
+]

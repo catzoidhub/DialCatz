@@ -15,7 +15,7 @@ import * as sockets from './ws';
 import * as ws from './workspaces';
 import * as srv from './servers';
 import * as live from './live';
-import { copyPlan, exportCollection, importSpec, importText } from './importers';
+import { copyPlan, exportCollection, importAll, importSpec } from './importers';
 import * as devcatz from './devcatz';
 import * as docatz from './docatz';
 import * as dbcatz from './dbcatz';
@@ -942,6 +942,15 @@ function api(): DialCatzApi {
       if (!found.collections.length && !found.environments.length && !found.globals.length) throw new Error(`No Postman collections or environments in there${found.skipped.length ? ` (${found.skipped.length} file(s) skipped)` : ''}`);
       return keepExport(found);
     },
+    appExportRead: async (which, how) => {
+      const name = which === 'insomnia' ? 'Insomnia' : which === 'yaak' ? 'Yaak' : 'Hoppscotch';
+      const folder = how === 'folder';
+      const r = await openDialog(win, { title: folder ? `Choose the folder ${name} keeps its files in` : `Choose files exported from ${name}`, properties: folder ? ['openDirectory'] : ['openFile', 'multiSelections'], filters: folder ? undefined : [{ name: `${name} export`, extensions: which === 'insomnia' ? ['yaml', 'yml', 'json'] : ['json'] }] });
+      if (r.canceled || !r.filePaths.length) return null;
+      const found = await postman.read(r.filePaths);
+      if (!found.collections.length && !found.environments.length && !found.globals.length) throw new Error(`Nothing from ${name} in there`);
+      return keepExport(found);
+    },
     brunoRead: async () => {
       const r = await openDialog(win, { title: 'Choose a Bruno collection, or a folder that holds some', properties: ['openDirectory'] });
       if (r.canceled || !r.filePaths[0]) return null;
@@ -957,16 +966,9 @@ function api(): DialCatzApi {
       if (!cols.length) throw new Error('Choose at least one collection');
       let w = ws.load(id);
       const environments: string[] = [];
-      const taken = new Set(w.environments.map((e) => e.name.toLowerCase()));
       for (const c of cols) {
-        // A name that is in use belongs to something else: the collection's name goes in front.
-        const mine = c.environments.map((e) => {
-          let name = taken.has(e.name.toLowerCase()) ? `${c.root.name} · ${e.name}` : e.name;
-          for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${c.root.name} · ${e.name} ${n}`;
-          taken.add(name.toLowerCase());
-          return { ...e, name };
-        });
-        for (const e of mine) w = ws.saveEnvironment(id, e);
+        const mine = bringEnvironments(id, c.root.name, c.environments);
+        w = ws.load(id);
         environments.push(...mine.map((e) => e.name));
         const sort = w.items.filter((i) => i.kind === 'collection').length;
         const root = { ...c.root, sort, ...(mine.length ? { environmentId: mine[0].id } : {}), bruno: { ...c.root.bruno!, environments: Object.fromEntries(c.environments.map((e, n) => [e.name, mine[n].id])) } };
@@ -1744,6 +1746,29 @@ function collectionEnvironment(workspaceId: string, w: Workspace, name: string, 
   return w;
 }
 
+/** Environments that came with a collection (Bruno, Insomnia, Yaak): a name in use gets the collection's in front; it uses the first. */
+function bringEnvironments(workspaceId: string, name: string, list: import('@shared/types').Environment[]): import('@shared/types').Environment[] {
+  const taken = new Set(ws.load(workspaceId).environments.map((e) => e.name.toLowerCase()));
+  const out = list.map((e) => {
+    let free = taken.has(e.name.toLowerCase()) ? `${name} · ${e.name}` : e.name;
+    for (let n = 2; taken.has(free.toLowerCase()); n++) free = `${name} · ${e.name} ${n}`;
+    taken.add(free.toLowerCase());
+    return { ...e, name: free };
+  });
+  for (const e of out) ws.saveEnvironment(workspaceId, e);
+  return out;
+}
+
+/** An environment of a collection's own variables, which the collection uses (another is a click away in its settings). */
+function ownEnvironment(workspaceId: string, collectionId: string, name: string, variables: EnvVariable[]): Workspace {
+  let w = ws.load(workspaceId);
+  let free = name;
+  for (let n = 2; w.environments.some((e) => e.name.toLowerCase() === free.toLowerCase()); n++) free = `${name} ${n}`;
+  const env = { id: uid('e_'), name: free, variables };
+  w = ws.saveEnvironment(workspaceId, env);
+  return ws.saveItems(workspaceId, [{ ...w.items.find((i) => i.id === collectionId)!, environmentId: env.id }]);
+}
+
 /** Saves what was found in Postman (export or API) into the workspace: collections, environments, globals. */
 function applyPostman(id: string, found: postman.PostmanFound) {
   let w = ws.load(id);
@@ -1751,14 +1776,20 @@ function applyPostman(id: string, found: postman.PostmanFound) {
   const all: TreeItem[] = [];
   for (const c of found.collections) all.push({ ...c.root, sort: sort++ }, ...c.items);
   if (all.length) w = ws.saveItems(id, all);
-  for (const e of found.environments) w = ws.saveEnvironment(id, e);
-  for (const c of found.collections) if (c.variables?.length) w = collectionEnvironment(id, w, c.root.name, c.variables);
+  // Hoppscotch: the collection's variables are there in every environment that comes with it.
+  const shared = found.collections.filter((c) => c.ownEnvironment).flatMap((c) => c.variables ?? []);
+  for (const e of found.environments) w = ws.saveEnvironment(id, { ...e, variables: [...e.variables, ...shared.filter((v, n) => !e.variables.some((x) => x.key === v.key) && shared.findIndex((x) => x.key === v.key) === n)] });
+  for (const c of found.collections.filter((x) => x.environments?.length)) {
+    const mine = bringEnvironments(id, c.root.name, c.environments!);
+    w = ws.saveItems(id, [{ ...ws.load(id).items.find((i) => i.id === c.root.id)!, environmentId: mine[0].id }]);
+  }
+  for (const c of found.collections) if (c.variables?.length) w = c.ownEnvironment ? ownEnvironment(id, c.root.id, c.root.name, c.variables) : collectionEnvironment(id, w, c.root.name, c.variables);
   if (found.globals.length) w = ws.saveGlobals(id, [...w.globals.filter((g) => !found.globals.some((x) => x.key === g.key)), ...found.globals]);
   if (!w.activeEnvironmentId && w.environments.length) w = ws.setActiveEnvironment(id, w.environments[0].id);
   if (w.serverId) void srv.sync(id).then(() => send('app:workspaces', null));
   return {
     workspace: w,
-    summary: { collections: found.collections.map((c) => ({ name: c.root.name, requests: c.items.filter((i) => i.kind === 'request').length })), environments: found.environments.map((e) => e.name), globals: found.globals.length, skipped: found.skipped.map(shortSkip) },
+    summary: { collections: found.collections.map((c) => ({ name: c.root.name, requests: c.items.filter((i) => i.kind === 'request').length, notes: c.notes ?? [] })), environments: [...found.environments.map((e) => e.name), ...found.collections.flatMap((c) => (c.environments ?? []).map((e) => e.name))], globals: found.globals.length, skipped: found.skipped.map(shortSkip) },
   };
 }
 
@@ -1773,7 +1804,15 @@ function deviceName(): Promise<string> {
 }
 
 function doImport(workspaceId: string, text: string, link?: Omit<SpecLink, 'hash'>) {
-  const got = importText(text);
+  const list = importAll(text);
+  // A Hoppscotch export may hold several collections: each comes in, the first one is shown.
+  if (list.length > 1) {
+    const done = list.map((g) => bringIn(workspaceId, g, text, link));
+    return { ...done[done.length - 1], collectionId: done[0].collectionId, count: done.reduce((n, d) => n + d.count, 0), notes: list.flatMap((g) => (g.notes ?? []).map((n) => `${g.root.name} · ${n}`)) };
+  }
+  return bringIn(workspaceId, list[0], text, link);
+}
+function bringIn(workspaceId: string, got: ReturnType<typeof importAll>[number], text: string, link?: Omit<SpecLink, 'hash'>) {
   const { root, baseUrl, variables } = got;
   // An OpenAPI document: each request remembers what the spec made, and a file or URL import keeps following it (#92).
   const items = got.openapi ? withBase(got.items) : got.items;
@@ -1786,9 +1825,13 @@ function doImport(workspaceId: string, text: string, link?: Omit<SpecLink, 'hash
     w = ws.saveEnvironment(workspaceId, { id: uid('e_'), name: root.name, variables: [{ key: 'baseUrl', value: baseUrl, enabled: true, secret: false }] });
     if (!w.activeEnvironmentId) w = ws.setActiveEnvironment(workspaceId, w.environments[w.environments.length - 1].id);
   }
+  if (got.environments?.length) {
+    const mine = bringEnvironments(workspaceId, root.name, got.environments);
+    w = ws.saveItems(workspaceId, [{ ...ws.load(workspaceId).items.find((i) => i.id === root.id)!, environmentId: mine[0].id }]);
+  }
   // A Postman collection's own variables: an environment named after it (DialCatz has no collection scope).
-  if (variables?.length) w = collectionEnvironment(workspaceId, w, root.name, variables);
-  return { workspace: w, collectionId: root.id, count: items.filter((i) => i.kind === 'request').length };
+  if (variables?.length) w = got.ownEnvironment ? ownEnvironment(workspaceId, root.id, root.name, variables) : collectionEnvironment(workspaceId, w, root.name, variables);
+  return { workspace: w, collectionId: root.id, count: items.filter((i) => i.kind === 'request').length, notes: got.notes ?? [] };
 }
 
 function applyMenu(): void {

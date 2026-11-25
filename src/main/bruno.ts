@@ -5,6 +5,7 @@ import { Script } from 'node:vm';
 import { parse as parseYaml } from 'yaml';
 import { joinUrl, splitUrl } from '@shared/request';
 import { emptyBody, HTTP_METHODS, newRequest, uid, type Environment, type EnvVariable, type HttpMethod, type KeyValue, type RequestAuth, type RequestBody, type RequestSpec, type TreeItem } from '@shared/types';
+import { DYNAMIC } from './importnotes';
 import { parseBru, type BruFile, type BruPair } from './brulang';
 
 /**
@@ -320,7 +321,6 @@ function scripts(r: Raw, where: string, notes: Set<string>, folderLevel: boolean
   return { preRequest: join2([locals.join('\n'), r.pre]), tests: join2([lines.join('\n'), r.post, asserts.join('\n'), r.tests]) };
 }
 
-const DYNAMIC = new Set(['$timestamp', '$isoTimestamp', '$randomUUID', '$guid', '$randomInt']);
 
 function request(r: RawRequest, where: string, above: Raw[], notes: Set<string>): RequestSpec {
   const spec: RequestSpec = newRequest();

@@ -1,0 +1,40 @@
+[
+ {
+  "v": 2,
+  "id": "e1",
+  "name": "Staging",
+  "variables": [
+   {
+    "key": "host",
+    "initialValue": "http://h",
+    "currentValue": "",
+    "secret": false
+   },
+   {
+    "key": "api",
+    "initialValue": "<<host>>/v1",
+    "currentValue": "",
+    "secret": false
+   },
+   {
+    "key": "key",
+    "initialValue": "",
+    "currentValue": "",
+    "secret": true
+   }
+  ]
+ },
+ {
+  "v": 2,
+  "id": "g",
+  "name": "Global",
+  "variables": [
+   {
+    "key": "g1",
+    "initialValue": "1",
+    "currentValue": "2",
+    "secret": false
+   }
+  ]
+ }
+]

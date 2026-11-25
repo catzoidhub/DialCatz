@@ -1,8 +1,9 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import type { SpecResponse, TreeItem } from '@shared/types';
-import { importSpec, importText } from '../src/main/importers';
+import { importAll, importSpec } from '../src/main/importers';
 import { findCollections, readCollection } from '../src/main/bruno';
+import { fromYaak, readYaakFolder } from '../src/main/yaak';
 import { isWorkspaceFolder, readFolder } from '../src/main/folders';
 import { json, junit, paint, plainMarks, requestLines, summaryLine, totals } from './report';
 import { annotations, inert, summary } from './report-github';
@@ -30,14 +31,14 @@ const HELP = `DialCatz CLI ${VERSION}: run a collection's requests and tests wit
 Usage
   dialcatz run <path> [options]
 
-  <path>   a workspace folder (the one with dialcatz.yml), a collection exported from DialCatz or
-           Postman, a Bruno collection folder, or an OpenAPI / Swagger file
+  <path>   a workspace folder (the one with dialcatz.yml), a collection exported from DialCatz,
+           Postman, Insomnia, Hoppscotch or Yaak, a Bruno or Yaak folder, or an OpenAPI / Swagger file
 
 Options
   -c, --collection <name>   only this collection (a workspace folder may hold several)
   -f, --folder <name>       only the requests under this folder (or one request of this name)
   -v, --var <name=value>    a variable's value; repeat for more
-      --env <name>          a Bruno collection's environment
+      --env <name>          an environment the collection brings (Bruno, Insomnia, Yaak)
       --env-file <file>     variables from a file of NAME=value lines (a .env file)
   -d, --data <file>         run once per row of a CSV (with a header row) or a JSON array of objects;
                             a row's values win over the other variables
@@ -183,20 +184,34 @@ function load(path: string, env: string): Loaded {
       const chosen = env ? all.filter((e) => e.name.toLowerCase() === env.toLowerCase()) : bruno.flatMap((b) => (b.environments.length === 1 && b.environments[0].name === b.root.name ? b.environments : []));
       return { dir: abs, name: bruno[0].root.name, items: bruno.flatMap((b) => [b.root, ...b.items]), collections: bruno.map((b) => b.root), defaults: chosen.flatMap((e) => e.variables.filter((v) => v.enabled && !(v.secret && !v.value)).map((v) => [v.key, v.value] as [string, string])), notes: [...new Set(bruno.flatMap((b) => b.notes))], envName: env };
     }
-    if (env) throw new Usage('--env goes with a Bruno collection folder; workspace folders hold no values (use --env-file or --var)');
-    if (!isWorkspaceFolder(abs)) throw new Usage(`${path} is not a DialCatz workspace folder (no dialcatz.yml) or a Bruno collection. In the app: workspace menu → Keep in a folder.`);
+    const yaak = isWorkspaceFolder(abs) ? null : readYaakFolder(abs);
+    if (yaak) return fromExport(abs, fromYaak(yaak), env);
+    if (env) throw new Usage('--env goes with a collection that brings its environments (Bruno, Insomnia, Yaak); workspace folders hold no values (use --env-file or --var)');
+    if (!isWorkspaceFolder(abs)) throw new Usage(`${path} is not a DialCatz workspace folder (no dialcatz.yml), a Bruno collection or a Yaak folder. In the app: workspace menu → Keep in a folder.`);
     const d = readFolder(abs);
     if (d.errors.length) throw new Usage(`Some files could not be read:\n  ${d.errors.join('\n  ')}`);
     return { dir: abs, name: d.name || basename(abs), items: d.items, collections: d.items.filter((i) => i.kind === 'collection'), defaults: [] };
   }
-  let r: ReturnType<typeof importText>;
+  let list: ReturnType<typeof importAll>;
   try {
-    r = importText(readFileSync(abs, 'utf8'));
+    list = importAll(readFileSync(abs, 'utf8'));
   } catch (e) {
     throw new Usage(`${path}: ${(e as Error).message}`);
   }
-  const defaults: [string, string][] = [...(r.variables ?? []).filter((v) => v.enabled !== false && v.key).map((v) => [v.key, v.value] as [string, string]), ...(r.baseUrl ? [['baseUrl', r.baseUrl] as [string, string]] : [])];
-  return { dir: dirname(abs), name: r.root.name, items: [r.root, ...r.items], collections: [r.root], defaults };
+  return fromExport(dirname(abs), list, env);
+}
+
+/** Collections read from another app's export, with the environments that came along. */
+function fromExport(dir: string, list: ReturnType<typeof importAll>, env: string): Loaded {
+  const all = list.flatMap((r) => r.environments ?? []);
+  const names = [...new Set(all.map((e) => e.name))];
+  if (env && !names.some((n) => n.toLowerCase() === env.toLowerCase())) throw new Usage(`No environment called ${env}. There is: ${names.join(', ') || 'none'}`);
+  // Without --env: the one environment a collection brings, when it is its own.
+  const chosen = env ? all.filter((e) => e.name.toLowerCase() === env.toLowerCase()) : list.flatMap((r) => (r.environments?.length === 1 && r.environments[0].name === r.root.name ? r.environments : []));
+  const values = (vs: { key: string; value: string; enabled?: boolean; secret?: boolean }[] | undefined) => (vs ?? []).filter((v) => v.enabled !== false && v.key && !(v.secret && !v.value)).map((v) => [v.key, v.value] as [string, string]);
+  // In a list of collections the first that sets a name wins.
+  const defaults: [string, string][] = [...[...list].reverse().flatMap((r) => [...values(r.variables), ...(r.baseUrl ? [['baseUrl', r.baseUrl] as [string, string]] : [])]), ...chosen.flatMap((e) => values(e.variables))];
+  return { dir, name: list[0].root.name, items: list.flatMap((r) => [r.root, ...r.items]), collections: list.map((r) => r.root), defaults, notes: [...new Set(list.flatMap((r) => r.notes ?? []))], envName: env };
 }
 
 function loadSpec(path: string): Map<string, SpecResponse[]> {
