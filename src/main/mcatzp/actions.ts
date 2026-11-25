@@ -280,6 +280,12 @@ export function readActions(api: DialCatzApi, scopes: Scopes, win: WindowReads):
       return reply({ systemDefault: b.systemDefault?.name ?? null, browsers: b.list.map((x) => ({ name: x.name, path: x.path })) });
     }),
     read('grpc_describe', 'Describe a gRPC server', "The services and methods a gRPC server offers through server reflection (grpc://host:port, grpcs:// for TLS): each method's request and response types, whether it streams, and an example request message. A request whose URL is grpc:// sends its JSON body to request.grpc.service / method.", OBJECT({ url: NAME('grpc://host:port or grpcs://host:port.') }, ['url']), async (a) => reply(await api.grpcDescribe(String(a.url), {}))),
+    read('ci_plan', 'Plan a CI run', 'What a GitHub Actions workflow or GitLab CI job for a collection needs: the variables it uses (secret or plain, never a value), how many requests have tests, credentials written out instead of in {{variables}}, and where it would be saved. save_ci_workflow writes it.', OBJECT({ workspace: WORKSPACE, collection: NAME('A collection: its id or name.') }, ['workspace', 'collection']), async (a) => {
+      const w = await workspaceOf(a.workspace);
+      const c = pick(w.items.filter((i) => i.kind === 'collection'), String(a.collection), 'collection', 'list_collections');
+      const p = await api.ciPlan(w.id, c.id);
+      return reply({ collection: c.name, in_repository: p.inRepo && !!p.root, folder_workspace: p.inRepo, variables: p.variables.map((v) => ({ name: v.name, kind: v.kind, has_value: !!v.value })), requests: p.requests, with_tests: p.tested, credentials_written_out: p.literals });
+    }),
     read('list_mocks', 'Mock servers', 'The mock servers DialCatz runs now (start_mock): collection, address, how many requests they answer, and their latest calls.', OBJECT(), async () => reply({ mocks: (await api.mockList()).map((m) => ({ workspace: m.workspaceId, collection: m.collectionId, name: m.name, url: m.url, ...(m.devcatz ? { domain: m.devcatz.url } : m.docatz ? { domain: m.docatz.url } : {}), routes: m.routes, latest: m.hits.slice(0, 10) })) })),
     read('list_dbcatz_connections', 'DBCatz connections', 'The connections Check in DBCatz can use: names and engines from DBCatz, never a password.', OBJECT(), async () => {
       const r = await api.dbcatzInfo();

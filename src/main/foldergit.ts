@@ -72,6 +72,12 @@ function label(folder: string, rel: string): string {
   return `${kind}: ${name || base.replace(/\.(request|env)?\.?yml$/, '')}`;
 }
 
+/** The repository a folder is in, or null. */
+export async function rootOf(folder: string): Promise<string | null> {
+  const r = await git(folder, ['rev-parse', '--show-toplevel'], true).catch(() => null);
+  return r && r.code === 0 ? r.out.trim() : null;
+}
+
 export async function status(folder: string, fetch = false): Promise<FolderGitStatus> {
   let top: string;
   try {

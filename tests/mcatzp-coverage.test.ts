@@ -32,7 +32,7 @@ test('sending a request and writing a script always ask', () => {
 });
 
 test('a client never names a path to read or write, and never exports a secret', () => {
-  for (const name of ['import_file', 'read_postman_export', 'import_environment_files', 'export_collection', 'export_environment', 'export_workspace', 'open_folder_workspace', 'move_workspace_to_folder', 'git_add_repo']) {
+  for (const name of ['import_file', 'read_postman_export', 'import_environment_files', 'export_collection', 'save_ci_workflow', 'export_environment', 'export_workspace', 'open_folder_workspace', 'move_workspace_to_folder', 'git_add_repo']) {
     const props = Object.keys((allActions().find((a) => a.name === name)?.input as { properties: object }).properties);
     expect(`${name}: ${props.filter((p) => /path|file|folder|dir|secrets/.test(p))}`).toBe(`${name}: `);
   }

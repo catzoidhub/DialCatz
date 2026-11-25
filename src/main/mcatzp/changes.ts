@@ -2,6 +2,7 @@ import type { ActionDef, CallResult } from '@catzoid/mcatzp-host';
 import { buildVars, effectiveAuth, interpolate } from '@shared/request';
 import { emptyLayout, newRequest, uid, type DialCatzApi, type DialCatzSettingsPatch, type EnvVariable, type GitPull, type GitRepoEntry, type GitSyncAction, type KeyValue, type McatzpAsk, type PostmanChoice, type RequestAuth, type RequestSpec, type TreeItem, type Workspace, type WorkspaceSummary } from '@shared/types';
 import { isSecretVar, isVariable, pick, placeOf, reply, responseOut, type Scopes, underCollection } from './actions';
+import { ciProblem, ciSecretName, type CiSetup } from '@shared/ci';
 import { MASK, maskText, maskUrl, SECRET_NAME, secretValues } from './mask';
 
 /**
@@ -215,6 +216,22 @@ export function changeActions(api: DialCatzApi, scopes: Scopes, command: WindowC
   /** Only stops work: no dialog. */
   const stopper = (name: string, title: string, description: string, props: Record<string, unknown>, required: string[], run: ChangeAction['run']): ChangeAction => ({ name, title, description, tier: 'change', input: OBJECT(props, required), noDialog: true, preview: async () => ({ title, facts: [], page: null }), run });
   const q = (title: string, facts: Fact[], page: McatzpPage | null): Q => ({ title, facts, page });
+
+  /** Plain values come from the client or not at all; what looks like a secret is never one. */
+  const ciSetupOf = async (workspaceId: string, collectionId: string, a: Record<string, unknown>): Promise<CiSetup> => {
+    const p = await api.ciPlan(workspaceId, collectionId);
+    const given = new Map(((a.values ?? []) as { name: string; value: string }[]).map((v) => [v.name, v.value]));
+    for (const [n, v] of given) {
+      const known = p.variables.find((x) => x.name === n);
+      if (!known) throw new Error(`The collection uses no variable called ${n}`);
+      if (known.kind === 'secret') throw new Error(`${n} is a secret: it comes from the CI's own store, so it takes no value here`);
+      noMask(v, n);
+    }
+    const s: CiSetup = { provider: a.provider === 'gitlab' ? 'gitlab' : 'github', push: a.push !== false, pull: a.pull_requests !== false, schedule: String(a.schedule ?? '').trim(), branch: String(a.branch ?? '').trim() || 'main', variables: p.variables.map((v) => (v.kind === 'secret' ? { ...v, value: '' } : { ...v, value: given.get(v.name) ?? '' })).map((v) => (v.kind === 'plain' && !v.value ? { ...v, kind: 'secret' as const } : v)), retries: Number(a.retries ?? 0), report: a.report !== false, action: a.use_action === true, prepare: String(a.start_commands ?? '') };
+    const problem = ciProblem(s);
+    if (problem) throw new Error(problem);
+    return s;
+  };
 
   const requests: ChangeAction[] = [
     asked('create_workspace', 'Create a workspace', 'A new personal workspace on this computer.', { name: S('Its name.', 200) }, ['name'], async (a) => q(`Create workspace ${String(a.name)}?`, [], null), async (a) => {
@@ -811,6 +828,24 @@ export function changeActions(api: DialCatzApi, scopes: Scopes, command: WindowC
       await windowUp();
       const w = await workspaceOf(a.workspace);
       return done({ saved: await api.exportCollection(w.id, collectionOf(w, a.collection).id, a.format as 'dialcatz' | 'postman' | 'openapi' | undefined) });
+    }),
+    asked('save_ci_workflow', 'Run a collection in CI', "Writes a GitHub Actions workflow or a GitLab CI job that runs a collection with the DialCatz CLI when the code changes (ci_plan says what it needs). Secrets become references to the CI's own store, never values. A folder workspace's repository is used; otherwise the user picks one and the collection is written next to the workflow. A file DialCatz made earlier is replaced only with replace: true. Nothing is committed or pushed.", {
+      workspace: WORKSPACE, collection: COLLECTION, provider: { type: 'string', enum: ['github', 'gitlab'] }, branch: S('The branch pushes run on (main).', 200), push: { type: 'boolean', description: 'On pushes to the branch (yes).' }, pull_requests: { type: 'boolean', description: 'On pull / merge requests (yes).' }, schedule: S('Cron, UTC, five fields.', 100), retries: { type: 'integer', minimum: 0, maximum: 10 }, report: { type: 'boolean', description: 'Keep the HTML report with the run (yes).' }, use_action: { type: 'boolean', description: 'GitHub: the catzoidhub/DialCatz-Action step instead of npx.' }, start_commands: S('Shell lines that start the API before the tests.', 4000),
+      values: { type: 'array', maxItems: 200, items: OBJECT({ name: S('A plain variable.', 200), value: S('Its value, written into the workflow. Never a secret.', 2000) }, ['name', 'value']) }, replace: { type: 'boolean' },
+    }, ['workspace', 'collection', 'provider'], async (a) => {
+      const w = await workspaceOf(a.workspace);
+      const c = collectionOf(w, a.collection);
+      const s = await ciSetupOf(w.id, c.id, a);
+      return q(`Write a ${s.provider === 'github' ? 'GitHub Actions workflow' : 'GitLab CI job'} for ${c.name}?`, [{ label: 'Where', value: w.folder ? "The workspace folder's repository" : 'A repository you pick next, with the collection as a file' }, { label: 'Runs on', value: [s.push && `pushes to ${s.branch}`, s.pull && (s.provider === 'github' ? 'pull requests' : 'merge requests'), s.schedule && `schedule ${s.schedule}`].filter(Boolean).join(', ') || 'request only' }, ...fact('From secrets', s.variables.filter((v) => v.kind === 'secret').map((v) => v.name).join(', ')), ...fact('Values written', s.variables.filter((v) => v.kind === 'plain').map((v) => `${v.name}=${v.value}`).join(', ')), ...fact('Commands first', s.prepare), ...fact('Replaces', a.replace ? 'Files DialCatz made there earlier' : '')], { workspaceId: w.id, section: 'requests' });
+    }, async (a) => {
+      const w = await workspaceOf(a.workspace);
+      const c = collectionOf(w, a.collection);
+      const s = await ciSetupOf(w.id, c.id, a);
+      if (!w.folder) await windowUp();
+      const r = await api.ciSave(w.id, c.id, s, { overwrite: a.replace === true });
+      if (!r) return done({ cancelled: true });
+      if (r.exists.length) return done({ saved: false, exists: r.exists, note: 'These files are there already with other text. Call again with replace: true to replace them.' });
+      return done({ saved: true, files: r.files, notes: r.notes, add_secrets: s.variables.filter((v) => v.kind === 'secret').map((v) => ciSecretName(v.name)) });
     }),
     asked('export_environment', 'Export an environment', 'Saves an environment as a file; the user picks where in a dialog. Secret values never go through this: exporting those stays in the app.', { workspace: WORKSPACE, environment: ENVIRONMENT, values: { type: 'boolean', description: 'Non-secret values too; names only otherwise.' }, format: FORMAT }, ['workspace', 'environment'], async (a) => {
       const w = await workspaceOf(a.workspace);

@@ -37,6 +37,8 @@ import { mergeRoutes } from './routemerge';
 import { specApply, specDiff, withBase, type Fresh, type SpecPick } from './specsync';
 import { fetchSpecText, freshFor, hashText, readSpecFile } from './specsource';
 import * as mock from './mock';
+import * as ci from './ci';
+import { ciLiterals } from '@shared/ci';
 import * as grpcClient from './grpc';
 import { toOpenApi } from './openapi-export';
 import { stringify as toYaml } from 'yaml';
@@ -81,6 +83,8 @@ function oauthSettings(raw: unknown): OAuthSettings {
 app.commandLine.appendSwitch('disk-cache-size', String(64 * 1024 * 1024));
 
 let win: BrowserWindow | null = null;
+/** Run in CI: the repository picked last, for replacing files there after asking. */
+let ciPicked: { collection: string; root: string } | null = null;
 let pendingConnect: ConnectRequest | null = null;
 const HISTORY = 'history';
 const HISTORY_MAX = 300;
@@ -1045,6 +1049,33 @@ function api(): DialCatzApi {
       }
       if (w.serverId) void srv.sync(id).then(() => send('app:workspaces', null));
       return { workspace: w, names, skipped: found.skipped.map(shortSkip) };
+    },
+    ciPlan: async (id, collectionId) => {
+      const w = ws.load(id);
+      return ci.plan(w, String(collectionId), w.folder ? await git.rootOf(w.folder) : null);
+    },
+    ciSave: async (id, collectionId, setup, o) => {
+      const w = ws.load(id);
+      const c = ci.collectionOf(w, String(collectionId));
+      let root: string | null;
+      if (w.folder) {
+        root = await git.rootOf(w.folder);
+        if (!root) throw new Error('This workspace folder is not in a Git repository yet. Start Git for it in the Git section, or copy the text instead.');
+      } else {
+        const left = ciLiterals(w.items, c.id);
+        if (left.length && o?.literals !== true) throw new Error(`${left.slice(0, 3).join(', ')}${left.length > 3 ? ` and ${left.length - 3} more` : ''}: credentials are written out there. Put them in {{variables}} first, so they stay out of the repository.`);
+        // Replacing after the question: the same repository, without picking it again.
+        const again = o?.overwrite === true && ciPicked?.collection === c.id ? ciPicked.root : null;
+        if (again) root = again;
+        else {
+          const r = await openDialog(win, { title: 'Choose the project (a Git repository) the workflow goes into', properties: ['openDirectory'] });
+          if (r.canceled || !r.filePaths[0]) return null;
+          root = await git.rootOf(r.filePaths[0]);
+          if (!root) throw new Error('That folder is not in a Git repository');
+        }
+        ciPicked = { collection: c.id, root };
+      }
+      return ci.save(w, c.id, root, setup, o?.overwrite === true);
     },
     exportCollection: async (id, collectionId, format) => {
       const w = ws.load(id);

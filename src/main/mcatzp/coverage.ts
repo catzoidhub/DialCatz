@@ -138,6 +138,8 @@ export const MCATZP_COVERAGE: Record<keyof DialCatzApi, string> = {
   postmanContents: 'never: takes an API key',
   migratePostmanApi: 'never: takes an API key',
   exportCollection: 'tool: export_collection',
+  ciPlan: 'tool: ci_plan',
+  ciSave: 'tool: save_ci_workflow',
   send: "tool: send_request, send_new_request, run_collection",
   aiModels: "not a tool: the app's own AI",
   aiTest: "not a tool: the app's own AI",

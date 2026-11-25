@@ -5,6 +5,7 @@
  * this computer; team workspaces come from a DialCatz Den and sync through it (revision numbers, see sync.ts).
  */
 
+import type { CiSetup, CiTarget, CiVariable } from './ci';
 import { keyLabel } from './platform';
 
 export type Theme = 'system' | 'light' | 'dark';
@@ -1151,6 +1152,27 @@ export interface FolderGitChange {
   kind: 'added' | 'modified' | 'deleted' | 'renamed' | 'conflict';
   label: string;
 }
+/** Run in CI (#103). */
+export interface CiPlan {
+  /** The workspace is a folder workspace: its files are what CI runs. Else the collection is written next to the workflow. */
+  inRepo: boolean;
+  /** Its repository's root; null for a folder that is not in one, or no folder. */
+  root: string | null;
+  target: CiTarget;
+  variables: CiVariable[];
+  /** Items whose credentials are written out instead of in a {{variable}}. */
+  literals: string[];
+  requests: number;
+  tested: number;
+}
+export interface CiSaved {
+  root: string;
+  /** Written, from the root. Empty when something is in the way (exists). */
+  files: string[];
+  notes: string[];
+  exists: string[];
+}
+
 /** Git state of a folder workspace's folder. */
 export interface FolderGitStatus {
   repo: boolean;
@@ -1515,6 +1537,10 @@ export interface DialCatzApi {
   /** Saves a collection as a DialCatz file (`.dialcatz_collection.json`) or a Postman v2.1 collection (false: cancelled). */
   /** 'openapi' (#95): an OpenAPI 3 YAML document made from the collection's requests. */
   exportCollection(workspaceId: string, collectionId: string, format?: ExportFormat | 'openapi'): Promise<boolean>;
+  /** Run in CI (#103): what a workflow for the collection needs, worked out from it and its environment. */
+  ciPlan(workspaceId: string, collectionId: string): Promise<CiPlan>;
+  /** Writes the workflow into the collection's repository (one the user picks when the workspace is not in one). null: cancelled. */
+  ciSave(workspaceId: string, collectionId: string, setup: CiSetup, options?: { overwrite?: boolean; literals?: boolean }): Promise<CiSaved | null>;
 
   /** Sends a request in its wire form (variables, auth and body already resolved by the window: shared/request.ts). */
   send(wire: WireRequest, token: string, options?: SendOptions): Promise<SendResult>;
@@ -1666,7 +1692,7 @@ export const API_METHODS = [
   'workspaces', 'workspace', 'createWorkspace', 'renameWorkspace', 'deleteWorkspace', 'openFolderWorkspace', 'useFolder', 'stopUsingFolder', 'revealFolder', 'folderGitStatus', 'folderGitDiff', 'folderGitCommit', 'folderGitPull', 'folderGitPush', 'folderGitInit', 'folderGitAbortMerge',
   'gitState', 'gitInstall', 'gitUpdateCheck', 'gitUpdate', 'gitWatch', 'gitRepoAdd', 'gitRepoRemove', 'gitRepoLog', 'gitRevealRepo', 'gitOpenWorkspace', 'gitPickFolder', 'gitStatus', 'gitInit', 'gitDiff', 'gitStage', 'gitUnstage', 'gitDiscard', 'gitCommit', 'gitSync', 'gitCancel', 'gitLog', 'gitShow', 'gitBranches', 'gitBranch', 'gitStashes', 'gitStash', 'gitTags', 'gitTag', 'gitOperation', 'gitSquash', 'gitCherryPick', 'gitRevert', 'gitReset', 'gitRestoreFile', 'gitOpenFile', 'gitIgnoreSuggestions', 'gitIgnoreAdd', 'gitignoreRead', 'gitignoreSave', 'gitSetIdentity', 'gitAddRemote', 'gitWorktrees', 'gitWorktreeAdd', 'gitWorktreeRemove', 'gitWorktreePrune', 'gitPulls', 'gitCreatePull', 'gitCheckoutPull', 'gitAddAccount', 'gitRemoveAccount', 'gitRepos', 'gitSshKeys', 'gitSshGenerate', 'gitSshAddToAccount', 'gitClone', 'gitCancelClone', 'gitDismissClone', 'gitAccounts', 'gitCreateRemoteRepo', 'gitDevCatzAccounts', 'gitImportDevCatz', 'folderGitConnect', 'createFolderWorkspace', 'pickFolder', 'teamAdminUrl', 'appMenu', 'menuShortcuts', 'menuKey',
   'saveItems', 'deleteItems',
-  'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'specCheck', 'specApply', 'specFollow', 'specUnfollow', 'specStale', 'browsers', 'specScanFolder', 'specImportFile', 'mockList', 'mockEnvironmentRestore', 'mockStart', 'mockStop', 'mockEnvironment', 'mockSiteSpec', 'mockSiteImport', 'devcatzLinks', 'devcatzLinkSet', 'mockOpenIn', 'mockServiceSpec', 'docatzLinks', 'docatzLinkSet', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'importedBefore', 'docatzProjects', 'docatzImport', 'docatzOpen', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection',
+  'saveEnvironment', 'deleteEnvironment', 'setActiveEnvironment', 'saveGlobals', 'saveLayout', 'importText', 'importFile', 'specCheck', 'specApply', 'specFollow', 'specUnfollow', 'specStale', 'browsers', 'specScanFolder', 'specImportFile', 'mockList', 'mockEnvironmentRestore', 'mockStart', 'mockStop', 'mockEnvironment', 'mockSiteSpec', 'mockSiteImport', 'devcatzLinks', 'devcatzLinkSet', 'mockOpenIn', 'mockServiceSpec', 'docatzLinks', 'docatzLinkSet', 'copyCollection', 'devcatzSites', 'devcatzWorkspace', 'devcatzImport', 'importedBefore', 'docatzProjects', 'docatzImport', 'docatzOpen', 'postmanReadExport', 'migratePostman', 'postmanWorkspaces', 'postmanContents', 'migratePostmanApi', 'exportCollection', 'ciPlan', 'ciSave',
   'aiModels', 'aiTest', 'aiAsk', 'aiExplain', 'aiTests', 'aiBody', 'aiCancel',
   'send', 'grpcDescribe', 'grpcPickProto', 'grpcCall', 'pickFile', 'pickDataFile', 'saveText', 'cancel', 'wsConnect', 'wsSend', 'wsPusherChannel', 'wsClose', 'oauthStatus', 'oauthToken', 'oauthClear', 'oauthCancel', 'oauthDiscover', 'clientCerts', 'clientCertSave', 'clientCertRemove', 'clientCertPick', 'saveResponse', 'history', 'addHistory', 'clearHistory',
   'servers', 'probeServer', 'connectWithToken', 'connectWithCode', 'refreshServer', 'disconnectServer', 'subscribeWorkspace', 'setPresence', 'presence', 'syncWorkspace', 'resolveConflict',

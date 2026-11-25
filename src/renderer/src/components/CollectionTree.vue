@@ -12,6 +12,7 @@ import RunnerDialog from './RunnerDialog.vue';
 import CopyCollectionDialog from './CopyCollectionDialog.vue';
 import SpecReviewDialog from './SpecReviewDialog.vue';
 import MockDialog from './MockDialog.vue';
+import CiDialog from './CiDialog.vue';
 import DevcatzLinkDialog from './DevcatzLinkDialog.vue';
 import DocatzLinkDialog from './DocatzLinkDialog.vue';
 import Icon from './Icon.vue';
@@ -285,6 +286,7 @@ const specLabel = (i: TreeItem) => (i.spec ? (i.spec.kind === 'url' ? i.spec.pat
 const reviewing = ref<{ review: SpecReview; name: string } | null>(null);
 /** #94: the collection whose Mock server dialog is open. */
 const mocking = ref<TreeItem | null>(null);
+const inCi = ref<TreeItem | null>(null);
 /** The collection whose "Link to DevCatz" dialog is open. */
 const linking = ref<TreeItem | null>(null);
 const linkingDocatz = ref<TreeItem | null>(null);
@@ -660,6 +662,7 @@ const SORTS: { id: SidebarLayout['sortBy']; label: string }[] = [
             </ul>
           </details>
         </li>
+        <li><button @click="run((i) => (inCi = i))">Run in CI…</button></li>
         <li><button @click="run((i) => (copying = i))">Copy to workspace…</button></li>
         <li><button @click="run(exportIt)">Export…</button></li>
       </template>
@@ -743,6 +746,7 @@ const SORTS: { id: SidebarLayout['sortBy']; label: string }[] = [
     <CopyCollectionDialog v-if="copying" :collection="copying" @close="copying = null" />
     <DocatzLinkDialog v-if="linkingDocatz" :collection="linkingDocatz" @close="linkingDocatz = null" />
     <DevcatzLinkDialog v-if="linking" :collection="linking" @close="linking = null" />
+    <CiDialog v-if="inCi" :collection="inCi" @close="inCi = null" />
     <MockDialog v-if="mocking" :collection="mocking" @close="mocking = null" />
     <SpecReviewDialog v-if="reviewing" :review="reviewing.review" :name="reviewing.name" :workspace-id="workspace!.id" @close="reviewing = null" @done="specDone" />
     <RunnerDialog v-if="running" :root="running" @close="running = null" />
